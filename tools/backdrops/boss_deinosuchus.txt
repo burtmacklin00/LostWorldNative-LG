@@ -1,0 +1,2 @@
+# DEINOSUCHUS boss banner (front 2D layer; --pack2d 192 8 120 40 boss_deinosuchus)
+201 19 94 18 green BarlowCondensed-BoldItalic.ttf DEINOSUCHUS

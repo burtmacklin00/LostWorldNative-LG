@@ -1,0 +1,26 @@
+# STAGE SELECT screen (difficulty). One line per text:
+# x y w h colour font text   (coordinates in the 512x512 backdrop; colour: green|white|light)
+# image x y w h file: a new picture pasted into that box (without texts, which are written over it)
+# ref file: the following lines are only used where the backdrop matches that dump
+ref out/sky/b6da303e85e51aa0.png
+image 16 88 144 144 textures/art/stage_select_beginner.png
+image 168 88 144 144 textures/art/stage_select_expert.png
+image 336 88 144 144 textures/art/stage_select_shuffle.png
+64 16 78 26 green Exo2-Italic[wght].ttf:900 InGEN
+142 14 284 28 green Orbitron[wght].ttf:900 STAGESELECT
+188 46 110 22 green Orbitron[wght].ttf:900 system
+20 174 50 32 white BarlowCondensed-Bold.ttf 01~
+22 206 128 18 green Orbitron[wght].ttf:900 beginner
+174 174 50 32 white BarlowCondensed-Bold.ttf 03~
+186 206 108 18 green Orbitron[wght].ttf:900 expert
+346 174 40 32 white BarlowCondensed-Bold.ttf ?~
+354 206 106 18 green Orbitron[wght].ttf:900 shuffle
+# Panels switched off when another difficulty is chosen
+ref out/sky/1fa6eee789c61d0a.png
+172 180 137 17 white ShareTechMono-Regular.ttf > system shutdown.
+340 180 137 17 white ShareTechMono-Regular.ttf > system shutdown.
+186 206 108 18 green Orbitron[wght].ttf:900 expert
+354 206 106 18 green Orbitron[wght].ttf:900 shuffle
+ref out/sky/64977630aeae96e4.png
+20 180 137 17 white ShareTechMono-Regular.ttf > system shutdown.
+22 206 128 18 green Orbitron[wght].ttf:900 beginner

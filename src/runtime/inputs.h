@@ -1,0 +1,79 @@
+// Player controls. Written by the window (keyboard/mouse), the pads or by
+// --auto, and read by the emulated hardware at 0xF0040000. The cabinet has two
+// guns: p[0] is player 1 and p[1] player 2.
+#pragma once
+#include <atomic>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+struct PlayerInputs {
+    std::atomic<bool> coin{false}, start{false}, trigger{false}, offscreen{false};
+    std::atomic<int> gun_x{128}, gun_y{128};   // raw ADC values, 0..255
+    std::atomic<bool> playing{false};          // in the game (set by the game thread from its RAM)
+};
+
+struct Inputs {
+    PlayerInputs p[2];
+    std::atomic<bool> service{false}, test{false};
+
+    // F0040004, active low. Bank 0: bit0 coin 1, bit1 coin 2, bit2 test,
+    // bit3 service, bit4 start 1, bit5 start 2 (fn_001180A8 packs bit 4 with
+    // player 1's port and bit 5 with player 2's). Bank 1: bit5 = EEPROM (set by runtime)
+    uint8_t system_port(bool bank1) const {
+        uint8_t v = 0xFF;
+        if (!bank1) {
+            if (p[0].coin) v &= ~0x01;
+            if (p[1].coin) v &= ~0x02;
+            if (test) v &= ~0x04;
+            if (service) v &= ~0x08;
+            if (p[0].start) v &= ~0x10;
+            if (p[1].start) v &= ~0x20;
+        }
+        return v;
+    }
+    // F0040008 player 1, F004000C player 2: bit0 trigger, bit1 second trigger (used to reload)
+    uint8_t player_port(int player) const {
+        uint8_t v = 0xFF;
+        if (p[player].trigger) v &= ~0x01;
+        if (p[player].offscreen) v &= ~0x02;
+        return v;
+    }
+    // ADC channels: 0 = P1 X, 1 = P1 Y, 2 = P2 X, 3 = P2 Y (raw values; the window maps the mouse)
+    uint8_t adc(int channel) const {
+        if (channel >= 4) return 0;
+        const PlayerInputs& pl = p[channel >> 1];
+        return uint8_t(channel & 1 ? pl.gun_y : pl.gun_x);
+    }
+};
+
+extern Inputs g_inputs;
+
+// Aim of a player as a fraction of the 4:3 game screen (outside 0..1 = off
+// the screen): sets that gun's ADC values and keeps it for the crosshair.
+// The mouse, the second mouse and the pads all aim through here.
+void set_player_aim(int player, float x, float y);
+struct PlayerAim { float x, y; bool inside; };
+PlayerAim player_aim(int player);
+extern std::atomic<bool> g_select_aim;   // the stage select screen is up (its gun mapping differs)
+extern std::atomic<bool> g_fixed_aim;    // --aim: the ADC values stay fixed
+
+// Which player a pad controls (0 or 1), given the connected pads as a bit
+// mask: the first connected pad shares player 1 with the mouse, whenever it
+// was plugged in, and the others are player 2's
+int pad_player(int pad_index, uint32_t connected);
+
+// Joining a game in progress: a credit and then that player's start, as the
+// arcade asks for. Driven by the clock, so whoever polls the controls (the
+// window at the monitor's rate) calls join_update() each time.
+void player_join(int player);
+void join_update();
+
+// --auto "coin@1500,start@1600": scheduled presses (6 frames each); a "2"
+// suffix is player 2's (coin2, start2, trigger2, reload2) and so is aim2:X/Y
+struct AutoInput {
+    struct Event { std::string name; uint64_t frame; };
+    std::vector<Event> events;
+    void parse(const std::string& s);
+    void apply(uint64_t frame);
+};

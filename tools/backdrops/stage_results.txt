@@ -1,0 +1,4 @@
+# Red band of the results screen: STAGE N and Chapter N (front 2D layer,
+# make_backdrop.py --pack2d 0 24 496 48 stageN_results). Screen coordinates.
+196 30 100 25 light/000000 Anton-Regular.ttf STAGE 1
+196 54 100 18 light Exo2[wght].ttf:900 Chapter 1

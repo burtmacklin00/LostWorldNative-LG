@@ -1,0 +1,10 @@
+# Tutorial screen (2D layer below the 3D image). Screen coordinates; each text
+# line is a separate replacement (the credit count changes and is left alone):
+#   python tools/make_backdrop.py tools/backdrops/tutorial.txt out/2d/capture_<frame>_back --pack2d ...
+# phrase 1: --pack2d 128 192 248 32 tutorial_phrase1   (lines 1 and 2)
+# insert:   --pack2d 24 248 120 24 tutorial_insert
+# coins:    --pack2d 176 248 296 24 tutorial_coins
+134 194 228 13 light Arimo[wght].ttf:700 Shoot with the tranquilizer gun
+130 207 236 14 light Arimo[wght].ttf:700 the dinosaurs that come attack us!
+28 248 114 24 yellow/000000 BarlowCondensed-Bold.ttf INSERT MORE
+176 248 296 24 yellow/000000 BarlowCondensed-Bold.ttf COIN(S) TO PLAY WITH YOUR PARTNER.

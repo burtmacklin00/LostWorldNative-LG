@@ -1,0 +1,15 @@
+# Data extracted from the ROM: never committed or distributed
+data/
+build/
+out/
+__pycache__/
+*.pyc
+LostWorld.exe
+save/
+textures/
+*.dll
+*.spv
+third_party/ngx/
+# Jurassic Park font: free for personal use, not redistributed
+third_party/fonts/Jurassic_Park.ttf
+third_party/menu/

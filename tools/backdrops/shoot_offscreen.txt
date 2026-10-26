@@ -1,0 +1,5 @@
+# "SHOOT OUTSIDE of THE SCREEN!" texture (reload warning), 128x64:
+#   python tools/make_backdrop.py tools/backdrops/shoot_offscreen.txt out/textures/03d49d8e773d245e.png --texture
+0 0 128 23 red/ffd600/1.5 Anton-Regular.ttf SHOOT OUTSIDE
+0 36 128 28 red/ffd600/1.5 Anton-Regular.ttf THE SCREEN!
+48 23 32 13 red/ffd600/1.5 Anton-Regular.ttf of

@@ -1,0 +1,2 @@
+# CARNOTAURUS boss banner (front 2D layer; --pack2d 192 8 120 40 boss_carnotaurus)
+203 19 98 18 green BarlowCondensed-BoldItalic.ttf CARNOTAURUS
