@@ -70,5 +70,11 @@ F11 or Alt+Enter toggles fullscreen. Everything else is in **Options**.
 - [Full manual](docs/MANUAL.md): every option, the modes, texture packs, debugging.
 - [How it works](docs/ARCHITECTURE.md): the PowerPC to C++ recompiler and the hardware.
 
+## License
+
+The code in this repository is under the [MIT License](LICENSE). The libraries and fonts in
+`third_party/` keep their own licenses. The game itself (ROM, code and data) is not included
+and stays the property of its owners: you need your own copy of `lostwsga.zip`.
+
 <sub>A fan project for personal use, not affiliated with or endorsed by Sega.
 The Lost World and Jurassic Park are trademarks of their respective owners.</sub>
