@@ -345,22 +345,74 @@ static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
 // it does not, a clock that advances one refresh per image and follows the
 // earliest wake-ups (never earlier than a vblank). Either way it moves on by
 // whole refreshes, and starts again after a stall (a window drag, a slow frame).
+// DWM's vblanks are those of one monitor (the main one): they are not used
+// when the window's monitor runs at another refresh rate (two monitors at 60
+// and 144 Hz), nor when the images go out faster than its refreshes (vsync
+// turned off in the driver's settings), where they are not tied to vblanks
 struct DisplayClock {
     double at = 0, last = 0, period = 1.0 / 60;
-    double tick() {
+    double interval = 0;      // between wake-ups, averaged over ~20
+    double monitor_hz = 0;    // the refresh rate of the window's monitor (0: unknown)
+    double checked = -100;    // when monitor_hz was read
+    bool use_dwm = true;
+    bool told = false;        // the choice was printed once
+    double tick(HWND hwnd) {
         double now = qpc_seconds();
+        if (last > 0 && now - last < 0.1) {
+            double dt = std::clamp(now - last, 1.0 / 1000, 0.05);
+            interval = interval > 0 ? interval + 0.05 * (dt - interval) : dt;
+        }
+        if (now - checked > 1) {   // the window may have moved to another monitor
+            checked = now;
+            monitor_hz = 0;
+            MONITORINFOEXW mi{};
+            mi.cbSize = sizeof(mi);
+            DEVMODEW dm{};
+            dm.dmSize = sizeof(dm);
+            if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi) &&
+                EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+                monitor_hz = dm.dmDisplayFrequency;
+        }
         DWM_TIMING_INFO info{};
         info.cbSize = sizeof(info);
-        if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &info)) && info.qpcRefreshPeriod > 0) {
-            double f = double(g_qpf.QuadPart), vblank = double(info.qpcVBlank) / f;
-            period = double(info.qpcRefreshPeriod) / f;
+        bool dwm = SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &info)) && info.qpcRefreshPeriod > 0;
+        double f = double(g_qpf.QuadPart), dwm_period = dwm ? double(info.qpcRefreshPeriod) / f : 0;
+        if (dwm) {
+            // (59 for 59.94 Hz: whole numbers)
+            bool other_monitor = monitor_hz > 0 && std::abs(1 / dwm_period - monitor_hz) > 1.5;
+            bool faster = interval > 0 && interval < 0.85 * dwm_period;
+            bool slower = interval > 0 && interval > 0.95 * dwm_period;
+            bool was = use_dwm;
+            if (other_monitor || (use_dwm && faster)) use_dwm = false;
+            else if (!use_dwm && slower) use_dwm = true;
+            if (use_dwm != was || !told) {
+                told = true;
+                if (use_dwm) {
+                    printf("[video] display clock: vblanks reported by Windows (%.1f Hz)\n", 1 / dwm_period);
+                } else {
+                    printf("[video] display clock: timed from the presents (Windows reports %.1f Hz, the window's "
+                           "monitor %.0f Hz, presents every %.2f ms%s)\n",
+                           1 / dwm_period, monitor_hz, interval * 1000, faster ? ": vsync off?" : "");
+                    if (monitor_hz > 0) period = 1 / monitor_hz;
+                    at = 0;
+                }
+                fflush(stdout);
+            }
+        } else if (!told) {
+            told = true;
+            printf("[video] display clock: timed from the presents (Windows reports no vblanks)\n");
+            if (monitor_hz > 0) period = 1 / monitor_hz;
+        }
+        if (dwm && use_dwm) {
+            double vblank = double(info.qpcVBlank) / f;
+            period = dwm_period;
             double next = vblank + std::ceil((now - vblank) / period) * period;
             // One refresh per image unless one was really skipped
             at = at > 0 && next < at + 0.5 * period && next > at - 2 * period ? at + period : next;
             last = now;
             return at;
         }
-        if (last > 0 && now - last < 0.1) period += 0.002 * (std::clamp(now - last, 1.0 / 500, 0.05) - period);
+        if (last > 0 && now - last < 0.1) period += 0.002 * (std::clamp(now - last, 1.0 / 1000, 0.05) - period);
         last = now;
         if (at > 0 && std::abs(now - (at + period)) < 2 * period) {
             at += period;
@@ -808,7 +860,7 @@ int main(int argc, char** argv) {
     // here (the game's CPU time plus this loop's wait for it; follows the
     // latest frames, easing down slowly)
     std::shared_ptr<const R3DFrameState> seen;
-    double next_period = 1.0 / 57.524, lateness = 0.004;
+    double next_period = 1.0 / 57.524, lateness = 0.004, lateness_rose = 0;
     DisplayClock display_clock;
 
     struct Snapshot2D {
@@ -1626,7 +1678,7 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_newest.reset();
         }
-        double display = display_clock.tick();
+        double display = display_clock.tick(presenter.hwnd());
         std::shared_ptr<const R3DFrameState> latest;
         std::shared_ptr<Prepared> ready;
         if (interpolating) {
@@ -1644,11 +1696,17 @@ int main(int argc, char** argv) {
             // far ahead of now this image's moment is: from the preparation
             // thread, when it finished; from the game, when this loop saw it
             double late = ready ? ready->ready_at - latest->time + (display - display_clock.last) : display - latest->time;
-            // It rises at once with 1.5 ms to spare and eases down 1.7 ms per
-            // second, so that later frames by a little do not each step the
-            // motion back
+            // It rises at once with 1.5 ms to spare and, after 5 s without
+            // rising, eases down 1.7 ms per second, so that later frames by a
+            // little do not each step the motion back (on a slower PC, frames
+            // late now and then would otherwise step it back every few seconds)
             late = std::clamp(late, 0.0, 0.05);
-            lateness = late > lateness ? late + 0.0015 : std::max(lateness - 0.00003, late);
+            if (late > lateness) {
+                lateness = late + 0.0015;
+                lateness_rose = display;
+            } else if (display - lateness_rose > 5) {
+                lateness = std::max(lateness - 0.00003, late);
+            }
             seen = latest;
         }
         double shown_time = display - lateness - next_period - 0.0005;

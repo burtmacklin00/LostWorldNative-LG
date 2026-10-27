@@ -173,6 +173,16 @@ saved games and are not versioned.
   with the scenery instead of jumping 57.5 times per second. The distance
   haze, the sky's sun, its rays and the shadows also follow
   the camera between frames (except on camera cuts).
+  Windows reports the vblanks of one monitor (the main one): when the
+  window is on a monitor with another refresh rate, or the images go out
+  faster than the refreshes (vsync turned off in the driver), each image's
+  moment is timed from the presents instead (the log says which, `[video]
+  display clock`). If the motion stutters: keep vsync on (*Vertical sync:
+  Use the 3D application setting* in the NVIDIA Control Panel), check that
+  the window title shows the monitor's refresh rate (fewer Hz than the
+  monitor without G-Sync/FreeSync means the GPU misses refreshes: lower
+  the resolution, the edge smoothing or the ray tracing, or set the monitor
+  to 60 Hz), and send a log written with LW_FRAMELOG (below).
   `LW_PACING=1` measures it: every 5 s it prints the speed of on-screen motion
   relative to real time (1.000 = steady), its spread between
   presents and how many stood still or went backwards, compared with
