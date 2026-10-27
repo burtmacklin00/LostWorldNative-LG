@@ -44,6 +44,8 @@ std::vector<char> read_file(const std::string& path) {
     return data;
 }
 
+bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out);
+
 const wchar_t* const FACES[5] = {L"Saira ExtraCondensed ExCond", L"Barlow Condensed", L"Share Tech Mono",
                                  L"Jurassic Park", L"Arimo"};
 
@@ -146,6 +148,11 @@ bool Frontend::init(const std::string& font_dir) {
     for (const wchar_t* p : {L"third_party/menu/cover.png", L"third_party/menu/cover.jpg", L"third_party/menu/lw_poster.jpg"})
         if (load_poster(p)) {
             printf("[menu] poster %ls (%dx%d)\n", p, poster_w_, poster_h_);
+            break;
+        }
+    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
+        if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
+            printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
             break;
         }
     return ok;
@@ -1203,11 +1210,12 @@ int Frontend::text(Family f, int px, const std::wstring& s, int x, int y, int al
 // LOGO_SCREEN_H of the window high, starting LOGO_SCREEN_TOP from the top,
 // centred LOGO_CENTER_X layout units from the left (above the menu's column).
 constexpr float POSTER_LOGO_TOP = 0.16f, POSTER_LOGO_END = 0.53f, POSTER_STONE_END = 0.88f;
-constexpr float LOGO_SCREEN_TOP = 0.04f, LOGO_SCREEN_H = 0.38f, LOGO_CENTER_X = 450;
+constexpr float LOGO_SCREEN_TOP = 0.08f, LOGO_SCREEN_H = 0.36f, LOGO_CENTER_X = 450;
 
 void Frontend::poster_layout(float& scale, float& x0, float& y0) const {
     scale = LOGO_SCREEN_H * h_ / ((POSTER_LOGO_END - POSTER_LOGO_TOP) * poster_h_);   // window px per poster px
-    x0 = LOGO_CENTER_X * u_ - poster_w_ * scale * 0.5f;
+    float cx = has_backdrop() ? w_ - LOGO_CENTER_X * u_ : LOGO_CENTER_X * u_;   // above the menu's column
+    x0 = cx - poster_w_ * scale * 0.5f;
     y0 = LOGO_SCREEN_TOP * h_ - POSTER_LOGO_TOP * poster_h_ * scale;
 }
 
@@ -1298,10 +1306,64 @@ void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
     for (auto& t : pool) t.join();
 }
 
+// The background picture: covering the window, darker towards the right where
+// the menu goes, with the poster's logo above it; blurred for the options
+void Frontend::backdrop_background() {
+    uint32_t* keep = px_;
+    bg_.assign(size_t(w_) * h_, 0xFF000000u);
+    px_ = bg_.data();
+    picture(backdrop_, 0, 0, w_, h_);
+    Picture small;   // the blur: drawn small, then stretched back
+    small.w = std::max(16, w_ / 12);
+    small.h = std::max(9, h_ / 12);
+    small.px.resize(size_t(small.w) * small.h);
+    {
+        int ww = w_, hh = h_;
+        w_ = small.w, h_ = small.h, px_ = small.px.data();
+        picture(backdrop_, 0, 0, w_, h_);
+        w_ = ww, h_ = hh;
+    }
+    bg_stone_.assign(size_t(w_) * h_, 0xFF000000u);
+    px_ = bg_stone_.data();
+    picture(small, 0, 0, w_, h_);
+    fill(0, 0, w_, h_, 0x000000, 0.3f);
+    px_ = bg_.data();
+    hgrad(int(w_ * 0.40f), 0, int(w_ * 0.64f), h_, 0x040508, 0.0f, 0.6f);
+    fill(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.6f);
+    hgrad(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.0f, 0.6f);
+    vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
+    if (has_poster()) {   // the logo, its stone fading out around it
+        float s, x0, y0;
+        poster_layout(s, x0, y0);
+        float pw = poster_w_ * s;
+        float ly0 = y0 + POSTER_LOGO_TOP * poster_h_ * s, ly1 = y0 + POSTER_LOGO_END * poster_h_ * s;
+        float cx = x0 + pw * 0.5f, cy = (ly0 + ly1) * 0.5f, hw = pw * 0.55f, hh = (ly1 - ly0) * 0.62f;
+        for (int y = std::max(0, int(cy - hh)); y < std::min(h_, int(cy + hh) + 1); y++)
+            for (int x = std::max(0, int(cx - hw)); x < std::min(w_, int(cx + hw) + 1); x++) {
+                float nx = (x - cx) / hw, ny = (y - cy) / hh;
+                float a = std::clamp((1 - std::sqrt(nx * nx + ny * ny)) / 0.14f, 0.0f, 1.0f);
+                if (a <= 0) continue;
+                float rgb[3] = {0, 0, 0};   // 2x2 samples per window pixel
+                for (int k = 0; k < 4; k++) {
+                    int u = std::clamp(int((x + 0.25f + 0.5f * (k & 1) - x0) / s), 0, poster_w_ - 1);
+                    int v = std::clamp(int((y + 0.25f + 0.5f * (k >> 1) - y0) / s), 0, poster_h_ - 1);
+                    uint32_t c = poster_[size_t(v) * poster_w_ + u];
+                    for (int j = 0; j < 3; j++) rgb[j] += chan(c, 16 - 8 * j) * 0.25f;
+                }
+                blend(x, y, uint32_t(rgb[0] * 255) << 16 | uint32_t(rgb[1] * 255) << 8 | uint32_t(rgb[2] * 255), a);
+            }
+    }
+    px_ = keep;
+}
+
 // Main menu backdrop: dark jungle green, a warm glow behind the title and a
 // faint scanline pattern
 void Frontend::background() {
     bg_.resize(size_t(w_) * h_);
+    if (has_backdrop()) {
+        backdrop_background();
+        return;
+    }
     if (has_poster()) {   // both versions at once: switching screens must not stall
         poster_background(false, bg_);
         poster_background(true, bg_stone_);   // the long options list goes on plain stone
@@ -1357,7 +1419,7 @@ RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* k
             triangle(x + kw / 2 - U(14), y + h / 2, U(14), -1, 0xE8E0CC, 1);
             triangle(x + kw / 2 + U(14), y + h / 2, U(14), +1, 0xE8E0CC, 1);
         } else {
-            text(MONO, U(18), k, x + kw / 2, y + h / 2 - U(11), 1, {0xE8E0CC, 0xE8E0CC});
+            text(MONO, U(18), k, x + kw / 2, y + h / 2 - U(9), 1, {0xE8E0CC, 0xE8E0CC});
         }
         x += kw + U(10);
     }
@@ -1438,7 +1500,10 @@ void Frontend::draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int
 void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int w = w_, h = h_;
+    bool right = has_backdrop() && !over_game;   // the column at the right, clear of the picture's subject
     int left = U(110), col_w = U(720);
+    int tx = right ? w - left : left, talign = right ? 2 : 0;   // where the column's text lines up
+    int band0 = right ? w - left - col_w : 0, band1 = right ? w : left + col_w;
     bool boss = screen_ == Screen::Boss || screen_ == Screen::Survival;
     int y0;
     if (over_game) {
@@ -1448,26 +1513,26 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
              {GOLD_TOP, GOLD_BOTTOM, EDGE, U(5), 1, U(5)});
         y0 = U(300);
     } else {
-        hgrad(0, 0, U(1100), h, 0x030504, 0.5f, 0.0f);   // the column a little darker than the stone
+        if (!right) hgrad(0, 0, U(1100), h, 0x030504, 0.5f, 0.0f);   // the column a little darker than the stone
         if (has_poster()) {   // the poster is the title
             float ps, px0, py0;
             poster_layout(ps, px0, py0);
             y0 = int(py0 + POSTER_LOGO_END * poster_h_ * ps) + U(40);
         } else {
-            if (jurassic_) text(JURASSIC, U(54), L"JURASSIC PARK", left, U(84), 0, {0xD8C49A, 0xB09A70, EDGE, U(2)});
-            else text(MONO, U(30), L"J U R A S S I C    P A R K", left, U(104), 0, {0xD8C49A, 0xB09A70});
-            text(display(), jurassic_ ? U(150) : U(180), L"THE LOST WORLD", left, jurassic_ ? U(122) : U(112), 0,
+            if (jurassic_) text(JURASSIC, U(54), L"JURASSIC PARK", tx, U(84), talign, {0xD8C49A, 0xB09A70, EDGE, U(2)});
+            else text(MONO, U(30), L"J U R A S S I C    P A R K", tx, U(104), talign, {0xD8C49A, 0xB09A70});
+            text(display(), jurassic_ ? U(150) : U(180), L"THE LOST WORLD", tx, jurassic_ ? U(122) : U(112), talign,
                  {GOLD_TOP, GOLD_BOTTOM, EDGE, U(7), 1, U(8)});
             y0 = U(430);
         }
         const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA"
                              : boss ? L"SELECT BOSS" : nullptr;
         if (sub) {
-            text(MONO, U(24), sub, left, y0, 0, {0xF0C070, 0xE0A050});
+            text(MONO, U(24), sub, tx, y0, talign, {0xF0C070, 0xE0A050});
             y0 += U(50);
         }
     }
-    if (screen_ == Screen::Main && !over_game) {   // how far the player has got, at the top right
+    if (screen_ == Screen::Main && !over_game) {   // how far the player has got, in the top corner away from the logo
         int got = 0;
         for (int64_t t : records.unlocked) got += t != 0;
         int best = *std::max_element(std::begin(records.stats.best_score), std::end(records.stats.best_score));
@@ -1475,6 +1540,11 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             {L"ACHIEVEMENTS", std::to_wstring(got) + L"/" + std::to_wstring(achievement_table().size())}};
         if (best > 0) chips.push_back({L"BEST SCORE", grouped(best)});
         int x1 = w - U(70), cy0 = U(56), ch = U(56);
+        if (right) {   // from the left edge: the total width first
+            x1 = U(70) - U(16);
+            for (const auto& c : chips)
+                x1 += U(22) + extent(ITEM, U(21), c.first) + U(12) + extent(ITEM, U(26), c.second) + U(22) + U(16);
+        }
         for (int i = int(chips.size()) - 1; i >= 0; i--) {
             int lw = extent(ITEM, U(21), chips[i].first), vw = extent(ITEM, U(26), chips[i].second);
             int cw = U(22) + lw + U(12) + vw + U(22), x0 = x1 - cw;
@@ -1495,24 +1565,27 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         const Item& it = list[i];
         bool sel = i == selected_;
         if (sel) {
-            hgrad(0, y, left + col_w, y + spacing, AMBER, it.enabled ? 0.34f : 0.16f, 0.0f);
-            fill(0, y, std::max(3, U(8)), y + spacing, AMBER, it.enabled ? 1.0f : 0.5f);
+            float a = it.enabled ? 0.34f : 0.16f;
+            hgrad(band0, y, band1, y + spacing, AMBER, right ? 0.0f : a, right ? a : 0.0f);
+            int edge = std::max(3, U(8));
+            fill(right ? w - edge : 0, y, right ? w : edge, y + spacing, AMBER, it.enabled ? 1.0f : 0.5f);
         }
         const Style st = !it.enabled ? Style{DIM, DIM, INK, U(2), 0.9f, U(3)}
                          : sel       ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2), 1, U(3)}
                                      : Style{PALE_TOP, PALE_BOTTOM, INK, U(2), 0.95f, U(3)};
         int ty = y + spacing / 2 - item_px * 55 / 100;
-        text(TITLE, item_px, it.label, left, ty, 0, st);
+        text(TITLE, item_px, it.label, tx, ty, talign, st);
         if (!it.value.empty())   // e.g. the stage of a boss, "NOT READY" or a record
-            text(ITEM, U(24), it.value, left + col_w - U(60), y + spacing / 2 - U(14), 2, {0xF4D27A, 0xE0A848});
-        hit_.push_back({0, y, left + col_w, y + spacing});
+            text(ITEM, U(24), it.value, right ? band0 + U(60) : left + col_w - U(60), y + spacing / 2 - U(14),
+                 right ? 0 : 2, {0xF4D27A, 0xE0A848});
+        hit_.push_back({band0, y, band1, y + spacing});
         values_.push_back({-1, 0});
         y += spacing;
     }
     if (selected_ < n)
         for (const std::wstring& line : wrap(BODY, U(23), list[selected_].hint, col_w - U(20))) {
             y += U(32);
-            text(BODY, U(23), line, left, y - U(16), 0, {0xE8C890, 0xE8C890});
+            text(BODY, U(23), line, tx, y - U(16), talign, {0xE8C890, 0xE8C890});
         }
 
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
@@ -1646,7 +1719,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
             text(BODY, U(23), line, px0, y, 0, {0xD8D1BD, 0xD8D1BD});
             y += U(34);
         }
-    if (option && cur->enabled && cur->id != OPT_DISPLAY) {   // its default and when it takes effect
+    if (option && cur->enabled && cur->id != OPT_DISPLAY && cur->kind != BUTTON) {   // its default and when it takes effect
         y += U(18);
         std::wstring def;
         for (const Item& d : option_items(FrontendSettings{}))

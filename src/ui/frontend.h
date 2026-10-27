@@ -250,6 +250,12 @@ private:
     Picture crosshair_[2];
     bool crosshair_loaded_ = false;
     void crosshair_preview(int x0, int y0, int x1, int y1);
+    // Optional picture behind the menus (third_party/menu/background.png or .jpg):
+    // the menus go to the right, the poster's logo above them; blurred behind
+    // the options
+    Picture backdrop_;
+    bool has_backdrop() const { return backdrop_.w > 0; }
+    void backdrop_background();
     bool has_poster() const { return poster_w_ > 0; }
     void poster_background(bool stone_only, std::vector<uint32_t>& dst);
     void poster_layout(float& scale, float& x0, float& y0) const;   // the logo at the top left
