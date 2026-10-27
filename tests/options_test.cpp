@@ -58,11 +58,11 @@ int main() {
         Options r;
         CHECK(parse(r, {"--rom", "D:\\roms\\lostwsga.zip"}) && r.rom_zip == "D:\\roms\\lostwsga.zip");
         Options sp;
-        CHECK(sp.speakers == 0 && sp.cubic_samples && sp.rear_boost == 6);
+        CHECK(sp.speakers == 0 && sp.cubic_samples && sp.rear_boost == 0);
         CHECK(parse(sp, {"--speakers", "headphones", "--linear-samples"}));
         CHECK(sp.speakers == 2 && !sp.cubic_samples);
         CHECK(parse(sp, {"--speakers", "surround"}) && sp.speakers == 1);
-        CHECK(parse(sp, {"--rear-boost", "0"}) && sp.rear_boost == 0);
+        CHECK(parse(sp, {"--rear-boost", "6"}) && sp.rear_boost == 6);
         Options p;
         CHECK(parse(p, {"--aa", "none", "--aspect", "1.5", "--subtitles", "en", "--sky", "procedural"}));
         CHECK(!p.dlaa && p.msaa == 1 && near(p.max_aspect, 1.5f) && p.subtitles == 1 && p.sky_procedural);
