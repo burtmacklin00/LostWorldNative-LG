@@ -189,6 +189,15 @@ bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out,
 
 bool Frontend::load_poster(const std::wstring& path) { return load_image(path, poster_, poster_w_, poster_h_); }
 
+void Frontend::shutdown() {
+    for (auto& [key, f] : fonts_) DeleteObject(f);
+    fonts_.clear();
+    for (HANDLE h : font_handles_) RemoveFontMemResourceEx(h);
+    font_handles_.clear();
+    if (dc_) DeleteDC(dc_);
+    dc_ = nullptr;
+}
+
 // The picture of an option, if there is one
 const Frontend::Picture& Frontend::preview(Id id) {
     auto it = previews_.find(int(id));
@@ -1517,7 +1526,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
 void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int w = w_, h = h_;
-    bool records = screen_ == Screen::Records;
+    bool rec_page = screen_ == Screen::Records;
     fill(0, 0, w, h, 0x000000, over_game ? 0.72f : 0.35f);
     bool wide = w / u_ >= 1800;   // 16:9 and wider; 4:3 gets narrower columns
     int margin = U(wide ? 70.0f : 50.0f);
@@ -1525,7 +1534,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     int side1 = w - margin, side0 = side1 - U(wide ? 600.0f : 420.0f);
     int list0 = rail1 + U(30), list1 = side0 - U(30);
     int top = U(170), bottom = h - U(110);
-    text(display(), U(72), records ? L"RECORDS" : over_game ? L"SETTINGS" : L"OPTIONS", margin + U(10), U(36), 0,
+    text(display(), U(72), rec_page ? L"RECORDS" : over_game ? L"SETTINGS" : L"OPTIONS", margin + U(10), U(36), 0,
          {GOLD_TOP, GOLD_BOTTOM, EDGE, U(4), 1, U(4)});
 
     // Categories (the TABS entry); Left / Right on it, Q / E or L1 / R1 anywhere change them
@@ -1553,7 +1562,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     }
 
     int n_opts = int(list.size()) - 2;
-    if (records) {
+    if (rec_page) {
         int row_h = U(78);
         visible_records_ = std::max(3, (bottom - top - U(30)) / row_h);
         draw_records(list0 + U(22), list1 - U(22), top + U(30), row_h);
@@ -1632,7 +1641,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
         }
     }
     if (cur)
-        for (const std::wstring& line : wrap(BODY, U(23), records && cur->id == TABS ? list[0].hint : cur->hint,
+        for (const std::wstring& line : wrap(BODY, U(23), rec_page && cur->id == TABS ? list[0].hint : cur->hint,
                                              px1 - px0)) {
             text(BODY, U(23), line, px0, y, 0, {0xD8D1BD, 0xD8D1BD});
             y += U(34);
@@ -1654,7 +1663,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     // Key help
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
     int x = U(80), py = h - U(64);
-    if (records) {
+    if (rec_page) {
         prompt(x, py, L"LB", L"Q", L"");
         prompt(x, py, L"RB", L"E", L"TAB");
     } else {
