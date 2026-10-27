@@ -373,7 +373,7 @@ std::vector<Frontend::Item> Frontend::items() const {
         std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
                 {OPT_DISPLAY, L"DISPLAY", settings.fullscreen ? L"FULLSCREEN" : L"WINDOW",
                  L"Window or full screen (also F11 or Alt+Enter)"},
-                {OPT_SCALE, L"3D RESOLUTION", std::to_wstring(settings.scale) + L"%",
+                {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(settings.scale) + L"%",
                  L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
                 {OPT_HALF_RATE, L"FRAME RATE", settings.half_rate ? L"HALF" : L"FULL",
                  L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
