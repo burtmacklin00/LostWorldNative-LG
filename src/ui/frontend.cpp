@@ -1470,13 +1470,13 @@ void Frontend::draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int
         break;
     }
     case CHOICE: {
-        text(ITEM, vpx, it.value, vcx, text_y - U(5), 1, vs);
+        text(ITEM, vpx, it.value, vcx, text_y - U(8), 1, vs);
         float a = sel ? 1.0f : 0.7f;
         triangle(vx0 + U(14), cy - U(4), U(18), -1, GOLD_BOTTOM, a);
         triangle(vx1 - U(14), cy - U(4), U(18), +1, GOLD_BOTTOM, a);
         int n = it.levels ? it.count - 1 : it.count;   // levels: a dot per step above OFF
         int pw = U(22), gap = U(6), ph = std::max(2, U(4));
-        int px0 = vcx - (n * pw + (n - 1) * gap) / 2, py = cy + U(16);
+        int px0 = vcx - (n * pw + (n - 1) * gap) / 2, py = cy + U(20);
         for (int k = 0; k < n; k++) {
             bool lit = it.levels ? k < it.pos : k == it.pos;
             fill(px0 + k * (pw + gap), py, px0 + k * (pw + gap) + pw, py + ph, lit ? AMBER : 0x4A473D, 1);
