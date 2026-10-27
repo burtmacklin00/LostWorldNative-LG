@@ -47,6 +47,11 @@ int main() {
         CHECK(parse(q, {"--no-haze", "--haze", "--no-hdr", "--bloom", "0.5"}));
         CHECK(near(q.haze, 1) && !q.hdr && near(q.bloom, 0.5f));
     }
+    {   // players: free play and the idle crosshair
+        Options o;
+        CHECK(parse(o, {}) && !o.free_play && o.crosshair_hide == 0);
+        CHECK(parse(o, {"--free-play", "--crosshair-hide", "5"}) && o.free_play && o.crosshair_hide == 5);
+    }
     {   // custom values
         Options o;
         CHECK(parse(o, {"--aa", "dlaa", "--aspect", "21:9", "--subtitles", "jp", "--sky", "original", "--aim",
@@ -58,11 +63,11 @@ int main() {
         Options r;
         CHECK(parse(r, {"--rom", "D:\\roms\\lostwsga.zip"}) && r.rom_zip == "D:\\roms\\lostwsga.zip");
         Options sp;
-        CHECK(sp.speakers == 0 && sp.cubic_samples && sp.rear_boost == 6);
+        CHECK(sp.speakers == 0 && sp.cubic_samples && sp.rear_boost == 0);
         CHECK(parse(sp, {"--speakers", "headphones", "--linear-samples"}));
         CHECK(sp.speakers == 2 && !sp.cubic_samples);
         CHECK(parse(sp, {"--speakers", "surround"}) && sp.speakers == 1);
-        CHECK(parse(sp, {"--rear-boost", "0"}) && sp.rear_boost == 0);
+        CHECK(parse(sp, {"--rear-boost", "6"}) && sp.rear_boost == 6);
         Options p;
         CHECK(parse(p, {"--aa", "none", "--aspect", "1.5", "--subtitles", "en", "--sky", "procedural"}));
         CHECK(!p.dlaa && p.msaa == 1 && near(p.max_aspect, 1.5f) && p.subtitles == 1 && p.sky_procedural);

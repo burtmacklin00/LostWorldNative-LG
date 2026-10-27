@@ -38,6 +38,7 @@
 #include "survival.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
+#include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
 #include "../ui/survival_ui.h"
 #include "../video/pack2d.h"
@@ -105,7 +106,8 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 
 // Keyboard and mouse (only while the window is active):
 //   5 = coin, 1 = start, mouse = gun (left button fires, right reloads),
-//   6 / 2 = player 2's coin and start, F2 = test, F3 = service
+//   6 / 2 = player 2's coin and start, F2 = test, F3 = service.
+// With free play, 1 / 2 insert the credit themselves (player_join)
 static bool g_menu_open = false;     // a menu has the controls
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
@@ -140,9 +142,14 @@ static void poll_keyboard_mouse(HWND hwnd) {
     }
     PlayerInputs& p1 = g_inputs.p[0];
     p1.coin = down('5');
-    p1.start = down('1');
     g_inputs.p[1].coin = down('6');
-    g_inputs.p[1].start = down('2');
+    static bool start_was[2] = {};
+    for (int p = 0; p < 2; p++) {
+        bool start = down(p ? '2' : '1');
+        if (!g_opt.free_play) g_inputs.p[p].start = start;
+        else if (start && !start_was[p] && !g_inputs.p[p].playing) player_join(p);   // also continues
+        start_was[p] = start;
+    }
     g_inputs.test = down(VK_F2);
     g_inputs.service = down(VK_F3);
     POINT cursor;
@@ -178,6 +185,34 @@ static void poll_keyboard_mouse(HWND hwnd) {
     bool c_down = down('C');
     if (c_down && !c_was_down) g_opt.show_crosshair = !g_opt.show_crosshair;
     c_was_down = c_down;
+}
+
+// crosshair.png / crosshair_p2.png beside LostWorld.exe (ui/crosshair_file.h)
+// replace the drawn crosshairs unless Crosshair style is Default; again after
+// the menu picks a new one
+static void load_crosshairs(R3DRenderer& renderer) {
+    for (int p = 0; p < 2; p++) {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+        if (g_opt.custom_crosshair && crosshair_load(p, w, h, rgba)) printf("[video] player %d crosshair: %dx%d picture\n", p + 1, w, h);
+        renderer.set_crosshair_picture(p, w, h, rgba);
+    }
+}
+
+// Settings > Controls > Hide idle crosshair: a gun that has not moved (more
+// than a hand's tremble, 1% of the screen) nor fired for that many seconds
+// loses its crosshair until it does. A player who joined by mistake (a light
+// gun's start button) leaves no crosshair standing still on the screen
+static bool crosshair_idle(int p, const PlayerAim& aim) {
+    static float at_x[2] = {-9, -9}, at_y[2] = {-9, -9};
+    static ULONGLONG used_at[2] = {};
+    ULONGLONG now = GetTickCount64();
+    const PlayerInputs& pl = g_inputs.p[p];
+    if (pl.trigger || pl.offscreen || std::fabs(aim.x - at_x[p]) > 0.01f || std::fabs(aim.y - at_y[p]) > 0.01f) {
+        at_x[p] = aim.x, at_y[p] = aim.y;
+        used_at[p] = now;
+    }
+    return g_opt.crosshair_hide > 0 && now - used_at[p] > ULONGLONG(g_opt.crosshair_hide) * 1000;
 }
 
 // Gamepads (gamepad.h), after the keyboard and mouse: their buttons are added
@@ -662,6 +697,9 @@ int main(int argc, char** argv) {
         g_opt.classic_text = !ini.hd_text;
         g_opt.subtitles = ini.subtitles;
         g_opt.show_crosshair = ini.crosshair;
+        g_opt.custom_crosshair = ini.crosshair_style == 1;
+        g_opt.crosshair_hide = ini.crosshair_hide;
+        g_opt.free_play = ini.free_play;
         g_opt.interp = ini.smooth;
         g_opt.several_mice = ini.second_mouse;
         g_opt.saturation = ini.saturation / 100.0f;
@@ -892,6 +930,7 @@ int main(int argc, char** argv) {
     uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
     TextHD text;   // menus, captions and score drawn from vector fonts
     if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
+    load_crosshairs(renderer);
     std::atomic<bool> capture_2d{false};   // F12 / --shot: the next 2D composition is saved
     bool f12_was_down = false, f9_was_down = false;
     builder.set_vrom(g_vrom.data(), g_vrom.size());
@@ -1023,6 +1062,9 @@ int main(int argc, char** argv) {
         s.hd_text = !g_opt.classic_text;
         s.subtitles = g_subtitles;
         s.crosshair = g_opt.show_crosshair;
+        s.crosshair_style = g_opt.custom_crosshair ? 1 : 0;
+        s.crosshair_hide = g_opt.crosshair_hide;
+        s.free_play = g_opt.free_play;
         s.smooth = g_opt.interp;
         s.second_mouse = g_opt.several_mice;
         s.saturation = std::clamp(int(g_opt.saturation * 100 + 0.5f), 0, 200);
@@ -1531,6 +1573,7 @@ int main(int argc, char** argv) {
                     break;
                 case Frontend::Action::Quit: presenter.close(); break;
                 case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
+                case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
                 case Frontend::Action::SettingsChanged:
                     g_sound.set_volume(float(s.volume));
                     toast.set_volume(float(s.volume));
@@ -1568,6 +1611,12 @@ int main(int argc, char** argv) {
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
                     }
                     g_opt.show_crosshair = s.crosshair;
+                    g_opt.crosshair_hide = s.crosshair_hide;
+                    if (g_opt.custom_crosshair != (s.crosshair_style == 1)) {
+                        g_opt.custom_crosshair = s.crosshair_style == 1;
+                        load_crosshairs(renderer);
+                    }
+                    g_opt.free_play = s.free_play;
                     if (g_opt.interp != s.smooth) {
                         g_opt.interp = s.smooth;
                         renderer.set_interpolation(1.0f);   // the latest game frame as it is
@@ -1748,7 +1797,7 @@ int main(int argc, char** argv) {
         if (g_opt.shot_frame && shown != ~0ull && shown + 1 >= g_opt.shot_frame) capture_2d = true;
         for (int p = 0; p < 2; p++) {   // player 2's only while that gun is in use
             PlayerAim aim = player_aim(p);
-            bool used = p == 0 || g_inputs.p[1].playing;
+            bool used = (p == 0 || g_inputs.p[1].playing) && !crosshair_idle(p, aim);
             renderer.set_crosshair(p, g_opt.show_crosshair && used && aim.inside && !g_opt.fixed_aim, aim.x, aim.y);
         }
         // The 3D frame to draw. While interpolating, the picture shows the game

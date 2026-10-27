@@ -1,1 +1,4 @@
+# Windows batch files need CRLF: cmd misreads labels (goto) in LF files, and
+# the GitHub "Download ZIP" keeps the line endings stored here
+*.bat text eol=crlf
 third_party/musashi/m68k_in.c -text

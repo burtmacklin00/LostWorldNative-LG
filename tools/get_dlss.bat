@@ -14,7 +14,8 @@ for %%h in (nvsdk_ngx.h nvsdk_ngx_defs.h nvsdk_ngx_defs_vk.h nvsdk_ngx_helpers.h
     curl -fsSL -o %DST%\include\%%h %URL%/include/%%h || goto :fail
 )
 curl -fsSL -o %DST%\lib\nvsdk_ngx_d.lib %URL%/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib || goto :fail
-curl -fsSL -o %DST%\bin\nvngx_dlss.dll %URL%/lib/Windows_x86_64/rel/nvngx_dlss.dll || goto :fail
+echo nvngx_dlss.dll is about 60 MB:
+curl -fL --progress-bar -o %DST%\bin\nvngx_dlss.dll %URL%/lib/Windows_x86_64/rel/nvngx_dlss.dll || goto :fail
 curl -fsSL -o %DST%\LICENSE.txt %URL%/LICENSE.txt || goto :fail
 exit /b 0
 

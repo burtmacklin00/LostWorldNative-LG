@@ -51,14 +51,17 @@ struct Options {
     int ray_tracing = 2;             // --rt off|shadows|ao (--no-rt): traced sun shadows (1) and ambient occlusion (2)
     bool sun = true;                 // --no-sun: no sun in the procedural sky
     bool show_crosshair = true;      // menu option; the C key toggles it
+    bool custom_crosshair = true;    // menu option: crosshair.png pictures (ui/crosshair_file.h) instead of the rings
+    int crosshair_hide = 0;          // --crosshair-hide N: hide a crosshair after N seconds unused (0 = never)
     int subtitles = 0;               // --subtitles off|en|jp: 0, 1, 2
     // Sound
     float volume = 5.0f;             // --volume: output gain
     int speakers = 0;                // --speakers stereo|surround|headphones: 0, 1, 2 (AudioStream::Speakers)
-    int rear_boost = 6;              // --rear-boost: extra dB on the rear pair (0, 3, 6, 9, 12)
+    int rear_boost = 0;              // --rear-boost: extra dB on the rear pair (0, 3, 6, 9, 12)
     bool cubic_samples = true;       // --linear-samples: the SCSP's own linear interpolation instead of cubic
     std::string wav_path;            // --wav: record the sound output
     bool several_mice = true;        // a second mouse is player 2's gun (--one-mouse: all move player 1's)
+    bool free_play = false;          // --free-play: 1 / 2 insert the credit themselves (no coin key needed)
     // Debugging and tests
     uint64_t shot_frame = 0;         // --shot N: screenshot of frame N, then exit
     std::string replay;              // --replay: a debug snapshot (or a folder of them) instead of the game

@@ -26,7 +26,14 @@ time with 6 (coin) and 2 (start), and has their own crosshair (blue; player
 sees as a mouse), one click with it while player 1 is playing makes it
 player 2's gun and joins the game; from then on each mouse moves its own
 crosshair and the pointer stays inside the window. Disable it in Settings > Controls >
-Second mouse or with `--one-mouse`. In `--auto`, a 2 at the end of a button belongs to player
+Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (`--free-play`) makes 1 and 2
+insert the credit themselves, so a light gun's start button starts and continues without the
+coin key; Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
+crosshair after 3, 5 or 10 seconds without moving or firing, until the gun moves again (a
+player 2 who joined by mistake leaves no crosshair standing on the screen). A `crosshair.png`
+next to LostWorld.exe replaces the drawn crosshairs with that picture, centred on the gun and sized
+as pixels of a 1080-line screen; `crosshair_p2.png` gives player 2 their own (otherwise they use
+`crosshair.png` too). In `--auto`, a 2 at the end of a button belongs to player
 2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun.
 F11 or Alt+Enter toggles fullscreen.
 
@@ -221,14 +228,10 @@ saved games and are not versioned.
   speakers (4.0, 5.1 or 7.1; with 5.1 to the sides if there are no rears); on
   headphones they are mixed with crossfeed and the rears sound duller and
   wider, as if from behind.
-- --rear-boost N (AUDIO tab, REAR BOOST; default 6): extra dB on the
-  rear speakers (slave SCSP). In the arcade they are in the seat, next
-  to the head, and they carry the T-Rex roars and many effects; without
-  this they were drowned out by the music.
-- The T-Rex roars and the other big effects (the slots the game plays loud
-  and also sends to the reverb) are 12 dB louder than in the original mix,
-  which put them about level with the gunfire; that plays over them all
-  through a boss fight and covered them.
+- --rear-boost N (AUDIO tab, REAR BOOST; default OFF): extra dB (3 to
+  12) on the rear speakers (slave SCSP). In the arcade they are in the
+  seat, next to the head, and they carry the T-Rex roars and many effects.
+  The T-Rex roars and the rest of the mix play at their original level.
 - --linear-samples (AUDIO tab, SAMPLE QUALITY = ORIGINAL): linear
   sample interpolation like the original chip. Default is cubic
   (SMOOTH), with less harshness in low sounds and voices.

@@ -85,6 +85,9 @@ void FrontendSettings::load(const char* path) {
         else if (k == "flashlight") torch = v != "original";
         else if (k == "hd_text") hd_text = on;
         else if (k == "crosshair") crosshair = on;
+        else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
+        else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
+        else if (k == "free_play") free_play = on;
         else if (k == "motion") smooth = v != "original";
         else if (k == "second_mouse") second_mouse = on;
         else if (k == "subtitles") subtitles = v == "japanese" ? 2 : v == "english" ? 1 : 0;
@@ -111,11 +114,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "resolution_3d = %d\nhalf_rate = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nresolution_3d = %d\nhalf_rate = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            scale, half_rate);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, scale, half_rate);
     fclose(f);
 }
 
@@ -256,8 +259,9 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
     {OPT_VOLUME, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
-    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_MICE, CONTROLS_TAB},
-    {OPT_SUBS, GAME_TAB},
+    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
+    {OPT_MICE, CONTROLS_TAB},
+    {OPT_FREE_PLAY, GAME_TAB}, {OPT_SUBS, GAME_TAB},
 };
 
 const wchar_t* const Frontend::RECORD_TAB_NAMES[Frontend::RECORD_TAB_COUNT] = {L"ACHIEVEMENTS", L"STATS"};
@@ -424,6 +428,11 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPT_TEXT, L"HD TEXT", on_off(settings.hd_text),
                  L"Sharp fonts for menus, captions and score instead of the original pixels"},
                 {OPT_CROSS, L"CROSSHAIR", on_off(settings.crosshair), L"Extra crosshair where the mouse points"},
+                {OPT_CROSS_HIDE, L"HIDE IDLE CROSSHAIR",
+                 settings.crosshair_hide ? L"AFTER " + std::to_wstring(settings.crosshair_hide) + L" S" : std::wstring(L"NEVER"),
+                 L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
+                {OPT_FREE_PLAY, L"FREE PLAY", on_off(settings.free_play),
+                 L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
                 {OPT_MICE, L"SECOND MOUSE", settings.second_mouse ? L"PLAYER 2" : L"OFF",
                  L"A second mouse joins as player 2 with a click while player 1 plays"},
                 {OPT_SUBS, L"SUBTITLES", SUBS[settings.subtitles], L"Captions of what the characters say"},
@@ -550,6 +559,14 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_TEXT: settings.hd_text = !settings.hd_text; push(Action::SettingsChanged); break;
     case OPT_CROSS: settings.crosshair = !settings.crosshair; push(Action::SettingsChanged); break;
     case OPT_MOTION: settings.smooth = !settings.smooth; push(Action::SettingsChanged); break;
+    case OPT_CROSS_HIDE: {   // never, 3, 5, 10 seconds
+        static const int STEPS[4] = {0, 3, 5, 10};
+        int i = int(std::find(std::begin(STEPS), std::end(STEPS), settings.crosshair_hide) - std::begin(STEPS)) % 4;
+        settings.crosshair_hide = STEPS[(i + dir + 4) % 4];
+        push(Action::SettingsChanged);
+        break;
+    }
+    case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
     case OPT_MICE: settings.second_mouse = !settings.second_mouse; push(Action::SettingsChanged); break;
     case OPT_SUBS: settings.subtitles = (settings.subtitles + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_PAD_SPEED:

@@ -22,7 +22,7 @@ struct FrontendSettings {
     bool fullscreen = false;
     int volume = 5;    // 0..10 (output gain)
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
-    int rear_boost = 6;  // dB on the rear pair: 0, 3, 6, 9, 12
+    int rear_boost = 0;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
     int aa = 0;        // 0 MSAA, 1 DLAA, 2 off (takes effect on the next launch)
     int scale = 100;   // 3D resolution in % of the window's (SCALES)
@@ -45,6 +45,9 @@ struct FrontendSettings {
     int rain = 2;          // rain where the game has its own: 0 off, 1 light, 2 heavy
     bool hd_text = true;
     bool crosshair = true;
+    int crosshair_style = 1; // 0 the drawn rings, 1 the crosshair.png pictures when there are any (ui/crosshair_file.h)
+    int crosshair_hide = 0; // seconds without use before a crosshair hides: 0 never, 3, 5 or 10
+    bool free_play = false; // 1 / 2 (or a gun's start button) insert the credit themselves
     bool smooth = true;     // the 3D drawn between game frames at the monitor's refresh rate
     bool second_mouse = true;   // a second mouse is player 2's gun
     int subtitles = 0;      // voice-line subtitles: 0 off, 1 English, 2 Japanese
@@ -72,7 +75,8 @@ class Frontend {
 public:
     enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
-                        StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu };
+                        StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
+                        CrosshairChanged };   // a new crosshair picture (crosshair_pick)
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -117,7 +121,7 @@ private:
         PLAY, OPTIONS, QUIT, ARCADE, BOSS, BACK, RESUME, SETTINGS, QUIT_TO_MENU, TABS,
         BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
-        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT,
+        OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE,
     };
     struct Item {
