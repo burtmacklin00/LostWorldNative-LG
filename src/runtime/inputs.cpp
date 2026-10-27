@@ -66,10 +66,13 @@ void join_update() {
     for (int p = 0; p < 2; p++) {
         if (g_join_at[p] < 0) continue;
         double t = now - g_join_at[p];
-        // Credits are shared: the coin goes in slot 1, as the "5" key does
+        // Credits are shared: the coin goes in slot 1, as the "5" key does.
+        // Start is released here too: with free play nothing else lets go of
+        // it, and a start held since the last join is no press for the game
+        // (the CONTINUE screen took the coin and kept waiting)
         if (t < 0.1) g_inputs.p[0].coin = true;
-        else if (t >= 0.25 && t < 0.35) g_inputs.p[p].start = true;
-        else if (t >= 0.45) g_join_at[p] = -1;
+        g_inputs.p[p].start = t >= 0.25 && t < 0.35;
+        if (t >= 0.45) g_join_at[p] = -1;
     }
 }
 
