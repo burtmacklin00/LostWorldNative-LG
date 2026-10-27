@@ -88,6 +88,11 @@ Want your own crosshair? Drop a `crosshair.png` (with transparency) next to `Los
 `crosshair_p2.png` for player 2 if you want a different one. It is centred on the gun, and its size
 is in pixels of a 1080p screen (it scales with the window).
 
+The menus can be dressed up with files of your own in `third_party/menu/` (not in the repository):
+`background.png` (or `.jpg`) behind the menus, which then sit at the right; `music.mp3` looped in the
+menus (**Options > Audio > Menu music**); `cover.png`, a poster whose logo becomes the title; and
+`sega.png`, SEGA's logo for the credit at the bottom left.
+
 ## More
 
 - [Full manual](docs/MANUAL.md): every option, the modes, texture packs, debugging.
