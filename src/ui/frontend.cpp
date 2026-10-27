@@ -2,6 +2,7 @@
 
 #include "../runtime/bosses.h"
 #include "../runtime/survival.h"
+#include "crosshair_file.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,8 +44,10 @@ std::vector<char> read_file(const std::string& path) {
     return data;
 }
 
-const wchar_t* const FACES[4] = {L"Saira ExtraCondensed ExCond", L"Barlow Condensed", L"Share Tech Mono",
-                                 L"Jurassic Park"};
+bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out);
+
+const wchar_t* const FACES[5] = {L"Saira ExtraCondensed ExCond", L"Barlow Condensed", L"Share Tech Mono",
+                                 L"Jurassic Park", L"Arimo"};
 
 }  // namespace
 
@@ -85,6 +88,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "flashlight") torch = v != "original";
         else if (k == "hd_text") hd_text = on;
         else if (k == "crosshair") crosshair = on;
+        else if (k == "menu_music") menu_music = on;
         else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
         else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
         else if (k == "free_play") free_play = on;
@@ -114,11 +118,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nresolution_3d = %d\nhalf_rate = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play, scale, half_rate);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music, scale, half_rate);
     fclose(f);
 }
 
@@ -174,9 +178,10 @@ int FrontendSettings::quality() const {
 // ---- Setup ----
 
 bool Frontend::init(const std::string& font_dir) {
-    // The last one is optional (free for personal use, not in the repository)
-    static const char* const FILES[4] = {"SairaExtraCondensed-Bold.ttf", "BarlowCondensed-Bold.ttf",
-                                         "ShareTechMono-Regular.ttf", "Jurassic_Park.ttf"};
+    // Jurassic Park is optional (free for personal use, not in the repository);
+    // without Arimo the descriptions fall back on Windows' own sans-serif
+    static const char* const FILES[5] = {"SairaExtraCondensed-Bold.ttf", "BarlowCondensed-Bold.ttf",
+                                         "ShareTechMono-Regular.ttf", "Jurassic_Park.ttf", "Arimo[wght].ttf"};
     bool ok = true;
     for (const char* name : FILES) {
         font_data_.push_back(read_file(font_dir + "/" + name));
@@ -186,7 +191,7 @@ bool Frontend::init(const std::string& font_dir) {
         if (h) {
             font_handles_.push_back(h);
             if (name == FILES[3]) jurassic_ = true;
-        } else if (name != FILES[3]) {
+        } else if (name != FILES[3] && name != FILES[4]) {
             fprintf(stderr, "[menu] could not load the font %s/%s\n", font_dir.c_str(), name);
             ok = false;
         }
@@ -197,11 +202,21 @@ bool Frontend::init(const std::string& font_dir) {
             printf("[menu] poster %ls (%dx%d)\n", p, poster_w_, poster_h_);
             break;
         }
+    load_image(L"third_party/menu/sega.png", sega_.px, sega_.w, sega_.h);
+    if (load_image(L"third_party/menu/logo.png", logo_.px, logo_.w, logo_.h))
+        printf("[menu] logo third_party/menu/logo.png (%dx%d)\n", logo_.w, logo_.h);
+    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
+        if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
+            printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
+            break;
+        }
     return ok;
 }
 
+namespace {
+
 // Any picture format Windows can read (WIC), as BGRA
-bool Frontend::load_poster(const std::wstring& path) {
+bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IWICImagingFactory* wic = nullptr;
     IWICBitmapDecoder* dec = nullptr;
@@ -217,20 +232,24 @@ bool Frontend::load_poster(const std::wstring& path) {
                                          WICBitmapPaletteTypeCustom)) &&
               SUCCEEDED(conv->GetSize(&w, &h)) && w > 0 && h > 0;
     if (ok) {
-        poster_.resize(size_t(w) * h);
-        ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, UINT(poster_.size() * 4),
-                                        reinterpret_cast<BYTE*>(poster_.data())));
+        px.resize(size_t(w) * h);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, UINT(px.size() * 4), reinterpret_cast<BYTE*>(px.data())));
     }
     for (IUnknown* p : std::initializer_list<IUnknown*>{conv, frame, dec, wic})
         if (p) p->Release();
     if (!ok) {
-        poster_.clear();
+        px.clear();
+        w_out = h_out = 0;
         return false;
     }
-    poster_w_ = int(w);
-    poster_h_ = int(h);
+    w_out = int(w);
+    h_out = int(h);
     return true;
 }
+
+}  // namespace
+
+bool Frontend::load_poster(const std::wstring& path) { return load_image(path, poster_, poster_w_, poster_h_); }
 
 void Frontend::shutdown() {
     for (auto& [key, f] : fonts_) DeleteObject(f);
@@ -239,6 +258,25 @@ void Frontend::shutdown() {
     font_handles_.clear();
     if (dc_) DeleteDC(dc_);
     dc_ = nullptr;
+}
+
+// The picture of an option, if there is one
+const Frontend::Picture& Frontend::preview(Id id) {
+    auto it = previews_.find(int(id));
+    if (it != previews_.end()) return it->second;
+    static const struct { Id id; const wchar_t* name; } FILES[] = {
+        {OPT_MOTION, L"motion"}, {OPT_AA, L"anti_aliasing"}, {OPT_HAZE, L"haze"}, {OPT_BLOOM, L"bloom"},
+        {OPT_AO, L"ambient_occlusion"}, {OPT_SKY, L"sky"}, {OPT_SUN, L"sun"}, {OPT_SHADOWS, L"sun_shadows"},
+        {OPT_RT, L"ray_tracing"}, {OPT_SHAFTS, L"light_shafts"}, {OPT_SOFT, L"soft_particles"}, {OPT_HDR, L"hdr"},
+        {OPT_RIM, L"rim_light"}, {OPT_RELIEF, L"surface_detail"}, {OPT_TORCH, L"flashlight"},
+        {OPT_LIGHTNING, L"lightning"}, {OPT_RAIN, L"rain"}, {OPT_SAT, L"saturation"}, {OPT_SHARPEN, L"sharpen"},
+        {OPT_TEXT, L"hd_text"}, {OPT_CROSS, L"crosshair_backdrop"}, {OPT_SUBS, L"subtitles"}};
+    Picture& p = previews_[int(id)];
+    for (const auto& f : FILES)
+        if (f.id == id)
+            for (const wchar_t* ext : {L".jpg", L".png"})
+                if (load_image(L"res/preview/" + std::wstring(f.name) + ext, p.px, p.w, p.h)) break;
+    return p;
 }
 
 // ---- Menu contents and navigation ----
@@ -257,9 +295,10 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_AO, LIGHTING_TAB}, {OPT_BLOOM, LIGHTING_TAB}, {OPT_RIM, LIGHTING_TAB}, {OPT_RELIEF, LIGHTING_TAB}, {OPT_TORCH, LIGHTING_TAB},
     {OPT_SKY, ATMOSPHERE_TAB}, {OPT_HAZE, ATMOSPHERE_TAB}, {OPT_LIGHTNING, ATMOSPHERE_TAB},
     {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
-    {OPT_VOLUME, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
+    {OPT_VOLUME, AUDIO_TAB}, {OPT_MUSIC, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
-    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
+    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
+    {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
     {OPT_MICE, CONTROLS_TAB},
     {OPT_FREE_PLAY, GAME_TAB}, {OPT_SUBS, GAME_TAB},
 };
@@ -273,15 +312,17 @@ int Frontend::tab_of(Id id) {
 }
 
 void Frontend::set_tab(int t) {
+    bool on_back = selected_ > 0 && selected_ == int(items().size()) - 1;
     tab_ = (t + tab_count()) % tab_count();
     scroll_ = 0;
     record_scroll_ = 0;
-    selected_ = std::min(selected_, int(items().size()) - 1);
+    int n = int(items().size());   // on an option: the same row, or the last one of a shorter tab
+    selected_ = on_back ? n - 1 : std::min(selected_, std::max(0, n - 2));
     hovered_ = -1;
     dirty_ = true;
 }
 
-std::vector<Frontend::Item> Frontend::items() const {
+std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) const {
     auto on_off = [](bool v) { return std::wstring(v ? L"ON" : L"OFF"); };
     static const wchar_t* const AA[3] = {L"MSAA 4X", L"DLAA", L"OFF"};
     static const wchar_t* const BLOOM_LEVELS[4] = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
@@ -292,6 +333,221 @@ std::vector<Frontend::Item> Frontend::items() const {
         L"Front and rear sound mixed on two speakers",
         L"Rear sound on your rear speakers, as on the cabinet (4.0, 5.1 or 7.1)",
         L"Two ears: gentle crossfeed, and the rear sound placed behind you"};
+    std::wstring aa_hint = s.aa != aa_at_launch
+                               ? L"Edge smoothing.  Takes effect the next time the game starts"
+                               : L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start";
+    wchar_t gamma_text[16];
+    swprintf(gamma_text, 16, L"%.2f", s.gamma / 100.0);
+    static const wchar_t* const RT_MODES[3] = {L"OFF", L"SHADOWS", L"SHADOWS + AO"};
+    static const wchar_t* const RT_HINTS[3] = {
+        L"Shadows from a shadow map and occlusion from the depth, as without ray tracing",
+        L"Sun shadows traced through the world: every tree and dinosaur, soft with distance",
+        L"Also the ambient occlusion: corners and the ground under things, even off screen"};
+    std::wstring pads = gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads;
+    static const wchar_t* const QUALITY[5] = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"};
+    static const wchar_t* const QUALITY_HINTS[5] = {
+        L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
+        L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
+        L"Fast cards: ray traced sun shadows and every effect",
+        L"Everything on: ray traced sun shadows and ambient occlusion",
+        L"Your own mix of the options.  Pick a level to set the costly ones at once"};
+    int quality = s.quality();
+    std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
+            {OPT_DISPLAY, L"DISPLAY", s.fullscreen ? L"FULLSCREEN" : L"WINDOW",
+             L"Window or full screen (also F11 or Alt+Enter)"},
+            {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(s.scale) + L"%",
+             L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
+            {OPT_HALF_RATE, L"FRAME RATE", s.half_rate ? L"HALF" : L"FULL",
+             L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
+            {OPT_MOTION, L"MOTION", s.smooth ? L"SMOOTH" : L"ORIGINAL",
+             L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
+            {OPT_VOLUME, L"VOLUME", std::to_wstring(s.volume), L"Sound volume"},
+            {OPT_MUSIC, L"MENU MUSIC", on_off(s.menu_music),
+             L"Music in the menus (third_party/menu/music.mp3), at the sound volume"},
+            {OPT_SPEAKERS, L"SPEAKERS", SPEAKERS[s.speakers], SPEAKER_HINTS[s.speakers]},
+            {OPT_REAR, L"REAR BOOST", s.rear_boost ? L"+" + std::to_wstring(s.rear_boost) + L" DB" : std::wstring(L"OFF"),
+             L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
+            {OPT_SAMPLES, L"SAMPLE QUALITY", s.cubic_samples ? L"SMOOTH" : L"ORIGINAL",
+             L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
+            {OPT_AA, L"ANTI-ALIASING", AA[s.aa], aa_hint},
+            {OPT_HAZE, L"DISTANCE HAZE", on_off(s.haze),
+             L"Far scenery fades into the sky instead of appearing suddenly"},
+            {OPT_BLOOM, L"BLOOM", BLOOM_LEVELS[s.bloom], L"Soft glow around fire, lights, the sky and sunlit surfaces"},
+            {OPT_AO, L"AMBIENT OCCLUSION", on_off(s.ao),
+             L"Soft shadows in corners, creases and on the ground around things"},
+            {OPT_SKY, L"SKY", s.sky ? L"PROCEDURAL" : L"ORIGINAL",
+             L"Smooth drifting clouds drawn at full resolution, or the original picture"},
+            {OPT_SUN, L"SUN", on_off(s.sun), L"A sun in the sky and stronger, warmer sunlight outdoors"},
+            {OPT_SHADOWS, L"SUN SHADOWS", on_off(s.shadows),
+             L"Dinosaurs, trees and buildings cast shadows away from the sun"},
+            {OPT_RT, L"RAY TRACING", !rt_available ? L"N/A" : RT_MODES[s.ray_tracing],
+             !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
+                           : RT_HINTS[s.ray_tracing],
+             rt_available},
+            {OPT_SHAFTS, L"LIGHT SHAFTS", on_off(s.shafts),
+             L"Rays of sunlight streaming between trees and silhouettes"},
+            {OPT_SOFT, L"SOFT PARTICLES", on_off(s.soft),
+             L"Smoke, fire and explosions blend softly where they touch the ground and walls"},
+            {OPT_HDR, L"HDR LIGHTING", on_off(s.hdr),
+             L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
+            {OPT_RIM, L"RIM LIGHT", on_off(s.rim),
+             L"A soft edge of light around dinosaurs and people, lifting them off the background"},
+            {OPT_RELIEF, L"SURFACE DETAIL", on_off(s.relief),
+             L"Light and shadow bring out the grain of stone, bark, metal and skin"},
+            {OPT_TORCH, L"FLASHLIGHT", s.torch ? L"MODERN" : L"ORIGINAL",
+             L"At night: a soft beam with real shading and a glow in the air, or the original spot"},
+            {OPT_LIGHTNING, L"LIGHTNING", on_off(s.lightning),
+             L"Flashes of lightning in stormy fog, with the trees standing out against it"},
+            {OPT_RAIN, L"RAIN", RAIN_LEVELS[s.rain],
+             L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
+            {OPT_SAT, L"COLOR SATURATION", std::to_wstring(s.saturation) + L"%",
+             L"How vivid the colours are (100% = original, 80% by default)"},
+            {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
+            {OPT_SHARPEN, L"SHARPEN", on_off(s.sharpen),
+             L"Brings back texture detail after the edge smoothing, without halos"},
+            {OPT_TEXT, L"HD TEXT", on_off(s.hd_text),
+             L"Sharp fonts for menus, captions and score instead of the original pixels"},
+            {OPT_CROSS, L"CROSSHAIR", on_off(s.crosshair), L"Extra crosshair where the mouse points"},
+            {OPT_CROSS_STYLE, L"CROSSHAIR STYLE", s.crosshair_style ? L"CUSTOM" : L"DEFAULT",
+             L"The drawn rings, or your own pictures (crosshair.png and crosshair_p2.png beside the game)"},
+            {OPT_CROSS_P1, L"PLAYER 1 PICTURE", L"CHOOSE PNG...",
+             L"Pick a PNG for player 1's crosshair.  It is copied beside the game as crosshair.png, at its own size in pixels at 1080p"},
+            {OPT_CROSS_P2, L"PLAYER 2 PICTURE", L"CHOOSE PNG...",
+             L"Pick a PNG for player 2's crosshair (crosshair_p2.png).  Without one, player 2 uses player 1's picture"},
+            {OPT_CROSS_HIDE, L"HIDE IDLE CROSSHAIR",
+             s.crosshair_hide ? L"AFTER " + std::to_wstring(s.crosshair_hide) + L" S" : std::wstring(L"NEVER"),
+             L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
+            {OPT_FREE_PLAY, L"FREE PLAY", on_off(s.free_play),
+             L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
+            {OPT_MICE, L"SECOND MOUSE", s.second_mouse ? L"PLAYER 2" : L"OFF",
+             L"A second mouse joins as player 2 with a click while player 1 plays"},
+            {OPT_SUBS, L"SUBTITLES", SUBS[s.subtitles], L"Captions of what the characters say"},
+            {OPT_PAD_SPEED, L"STICK SPEED", std::to_wstring(s.pad_speed),
+             L"How fast the gamepad's sticks move the sight.  " + pads},
+            {OPT_GYRO, L"GYRO AIM", on_off(s.gyro),
+             gyro_pad ? L"Point the gamepad to aim, together with the sticks"
+                      : L"Point the gamepad to aim (DualSense, DualShock 4, Switch Pro).  None connected"},
+            {OPT_GYRO_SPEED, L"GYRO SPEED", std::to_wstring(s.gyro_speed),
+             L"How far the sight moves when you turn the gamepad"},
+            {OPT_VIBRATION, L"VIBRATION", BLOOM_LEVELS[s.vibration],
+             L"The gamepad rumbles when you shoot and when you are hit"},
+            {OPT_ASSIST, L"AIM ASSIST", BLOOM_LEVELS[s.aim_assist],
+             L"With a gamepad the sight slows down over the dinosaurs and follows them a little"}};
+    for (Item& it : all) describe(it, s);
+    return all;
+}
+
+// How a row shows its value, from the setting behind it
+void Frontend::describe(Item& it, const FrontendSettings& s) {
+    auto toggle = [&](bool on) { it.kind = TOGGLE, it.pos = on ? 1 : 0, it.count = 2; };
+    auto choice = [&](int pos, int count, bool levels) {   // levels: OFF and then higher and higher
+        it.kind = CHOICE, it.pos = pos, it.count = count, it.levels = levels;
+    };
+    auto slider = [&](int v, int lo, int hi) { it.kind = SLIDER, it.frac = float(v - lo) / float(hi - lo); };
+    static const int HIDE_STEPS[4] = {0, 3, 5, 10};
+    switch (it.id) {
+    case OPT_DISPLAY: choice(s.fullscreen ? 1 : 0, 2, false); break;
+    case OPT_QUALITY: {   // a dot per level, none lit for a mix of them
+        int q = s.quality();
+        choice(q == FrontendSettings::CUSTOM ? -1 : q, 4, false);
+        break;
+    }
+    case OPT_SCALE: slider(s.scale, FrontendSettings::SCALES[0], 100); break;
+    case OPT_HALF_RATE: choice(s.half_rate ? 1 : 0, 2, false); break;
+    case OPT_MOTION: choice(s.smooth ? 1 : 0, 2, false); break;
+    case OPT_VOLUME: slider(s.volume, 0, 10); break;
+    case OPT_SPEAKERS: choice(s.speakers, 3, false); break;
+    case OPT_REAR: choice(s.rear_boost / 3, 5, true); break;
+    case OPT_SAMPLES: choice(s.cubic_samples ? 1 : 0, 2, false); break;
+    case OPT_AA: choice(s.aa, 3, false); break;
+    case OPT_HAZE: toggle(s.haze); break;
+    case OPT_BLOOM: choice(s.bloom, 4, true); break;
+    case OPT_AO: toggle(s.ao); break;
+    case OPT_SKY: choice(s.sky ? 1 : 0, 2, false); break;
+    case OPT_SUN: toggle(s.sun); break;
+    case OPT_SHADOWS: toggle(s.shadows); break;
+    case OPT_RT: choice(s.ray_tracing, 3, true); break;
+    case OPT_SHAFTS: toggle(s.shafts); break;
+    case OPT_SOFT: toggle(s.soft); break;
+    case OPT_HDR: toggle(s.hdr); break;
+    case OPT_RIM: toggle(s.rim); break;
+    case OPT_RELIEF: toggle(s.relief); break;
+    case OPT_SHARPEN: toggle(s.sharpen); break;
+    case OPT_TORCH: choice(s.torch ? 1 : 0, 2, false); break;
+    case OPT_LIGHTNING: toggle(s.lightning); break;
+    case OPT_RAIN: choice(s.rain, 3, true); break;
+    case OPT_TEXT: toggle(s.hd_text); break;
+    case OPT_CROSS: toggle(s.crosshair); break;
+    case OPT_CROSS_HIDE:
+        choice(int(std::find(std::begin(HIDE_STEPS), std::end(HIDE_STEPS), s.crosshair_hide) - std::begin(HIDE_STEPS)) % 4,
+               4, false);
+        break;
+    case OPT_FREE_PLAY: toggle(s.free_play); break;
+    case OPT_MUSIC: toggle(s.menu_music); break;
+    case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
+    case OPT_CROSS_P1: case OPT_CROSS_P2: it.kind = BUTTON; break;
+    case OPT_MICE: choice(s.second_mouse ? 1 : 0, 2, false); break;
+    case OPT_SUBS: choice(s.subtitles, 3, false); break;
+    case OPT_SAT: slider(s.saturation, 0, 200); break;
+    case OPT_GAMMA: slider(s.gamma, 50, 150); break;
+    case OPT_PAD_SPEED: slider(s.pad_speed, 1, 10); break;
+    case OPT_GYRO: toggle(s.gyro); break;
+    case OPT_GYRO_SPEED: slider(s.gyro_speed, 1, 10); break;
+    case OPT_VIBRATION: choice(s.vibration, 4, true); break;
+    case OPT_ASSIST: choice(s.aim_assist, 4, true); break;
+    default: break;
+    }
+}
+
+void Frontend::reset_tab() {
+    const FrontendSettings d;
+    for (const Item& it : items()) switch (it.id) {
+        case OPT_SCALE: settings.scale = d.scale; break;
+        case OPT_HALF_RATE: settings.half_rate = d.half_rate; break;
+        case OPT_MOTION: settings.smooth = d.smooth; break;
+        case OPT_VOLUME: settings.volume = d.volume; break;
+        case OPT_SPEAKERS: settings.speakers = d.speakers; break;
+        case OPT_REAR: settings.rear_boost = d.rear_boost; break;
+        case OPT_SAMPLES: settings.cubic_samples = d.cubic_samples; break;
+        case OPT_AA: settings.aa = d.aa; break;
+        case OPT_HAZE: settings.haze = d.haze; break;
+        case OPT_BLOOM: settings.bloom = d.bloom; break;
+        case OPT_AO: settings.ao = d.ao; break;
+        case OPT_SKY: settings.sky = d.sky; break;
+        case OPT_SUN: settings.sun = d.sun; break;
+        case OPT_SHADOWS: settings.shadows = d.shadows; break;
+        case OPT_RT: settings.ray_tracing = d.ray_tracing; break;
+        case OPT_SHAFTS: settings.shafts = d.shafts; break;
+        case OPT_SOFT: settings.soft = d.soft; break;
+        case OPT_HDR: settings.hdr = d.hdr; break;
+        case OPT_RIM: settings.rim = d.rim; break;
+        case OPT_RELIEF: settings.relief = d.relief; break;
+        case OPT_SHARPEN: settings.sharpen = d.sharpen; break;
+        case OPT_TORCH: settings.torch = d.torch; break;
+        case OPT_LIGHTNING: settings.lightning = d.lightning; break;
+        case OPT_RAIN: settings.rain = d.rain; break;
+        case OPT_TEXT: settings.hd_text = d.hd_text; break;
+        case OPT_CROSS: settings.crosshair = d.crosshair; break;
+        case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
+        case OPT_CROSS_STYLE: settings.crosshair_style = d.crosshair_style; break;
+        case OPT_FREE_PLAY: settings.free_play = d.free_play; break;
+        case OPT_MUSIC: settings.menu_music = d.menu_music; break;
+        case OPT_MICE: settings.second_mouse = d.second_mouse; break;
+        case OPT_SUBS: settings.subtitles = d.subtitles; break;
+        case OPT_SAT: settings.saturation = d.saturation; break;
+        case OPT_GAMMA: settings.gamma = d.gamma; break;
+        case OPT_PAD_SPEED: settings.pad_speed = d.pad_speed; break;
+        case OPT_GYRO: settings.gyro = d.gyro; break;
+        case OPT_GYRO_SPEED: settings.gyro_speed = d.gyro_speed; break;
+        case OPT_VIBRATION: settings.vibration = d.vibration; break;
+        case OPT_ASSIST: settings.aim_assist = d.aim_assist; break;
+        default: break;   // DISPLAY: the window stays as it is; QUALITY follows the others
+        }
+    push(Action::SettingsChanged);
+    dirty_ = true;
+}
+
+std::vector<Frontend::Item> Frontend::items() const {
     switch (screen_) {
     case Screen::Main:
         return {{PLAY, L"PLAY", L"", L"Start a game"},
@@ -355,98 +611,7 @@ std::vector<Frontend::Item> Frontend::items() const {
         return list;
     }
     case Screen::Options: {
-        std::wstring aa_hint = settings.aa != aa_at_launch
-                                   ? L"Edge smoothing.  Takes effect the next time the game starts"
-                                   : L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start";
-        wchar_t gamma_text[16];
-        swprintf(gamma_text, 16, L"%.2f", settings.gamma / 100.0);
-        static const wchar_t* const RT_MODES[3] = {L"OFF", L"SHADOWS", L"SHADOWS + AO"};
-        static const wchar_t* const RT_HINTS[3] = {
-            L"Shadows from a shadow map and occlusion from the depth, as without ray tracing",
-            L"Sun shadows traced through the world: every tree and dinosaur, soft with distance",
-            L"Also the ambient occlusion: corners and the ground under things, even off screen"};
-        std::wstring pads = gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads;
-        static const wchar_t* const QUALITY[5] = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"};
-        static const wchar_t* const QUALITY_HINTS[5] = {
-            L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
-            L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
-            L"Fast cards: ray traced sun shadows and every effect",
-            L"Everything on: ray traced sun shadows and ambient occlusion",
-            L"Your own mix of the options.  Pick a level to set the costly ones at once"};
-        int quality = settings.quality();
-        std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
-                {OPT_DISPLAY, L"DISPLAY", settings.fullscreen ? L"FULLSCREEN" : L"WINDOW",
-                 L"Window or full screen (also F11 or Alt+Enter)"},
-                {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(settings.scale) + L"%",
-                 L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
-                {OPT_HALF_RATE, L"FRAME RATE", settings.half_rate ? L"HALF" : L"FULL",
-                 L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
-                {OPT_MOTION, L"MOTION", settings.smooth ? L"SMOOTH" : L"ORIGINAL",
-                 L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
-                {OPT_VOLUME, L"VOLUME", std::to_wstring(settings.volume), L"Sound volume"},
-                {OPT_SPEAKERS, L"SPEAKERS", SPEAKERS[settings.speakers], SPEAKER_HINTS[settings.speakers]},
-                {OPT_REAR, L"REAR BOOST", settings.rear_boost ? L"+" + std::to_wstring(settings.rear_boost) + L" DB" : std::wstring(L"OFF"),
-                 L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
-                {OPT_SAMPLES, L"SAMPLE QUALITY", settings.cubic_samples ? L"SMOOTH" : L"ORIGINAL",
-                 L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
-                {OPT_AA, L"ANTI-ALIASING", AA[settings.aa], aa_hint},
-                {OPT_HAZE, L"DISTANCE HAZE", on_off(settings.haze),
-                 L"Far scenery fades into the sky instead of appearing suddenly"},
-                {OPT_BLOOM, L"BLOOM", BLOOM_LEVELS[settings.bloom], L"Soft glow around fire, lights, the sky and sunlit surfaces"},
-                {OPT_AO, L"AMBIENT OCCLUSION", on_off(settings.ao),
-                 L"Soft shadows in corners, creases and on the ground around things"},
-                {OPT_SKY, L"SKY", settings.sky ? L"PROCEDURAL" : L"ORIGINAL",
-                 L"Smooth drifting clouds drawn at full resolution, or the original picture"},
-                {OPT_SUN, L"SUN", on_off(settings.sun), L"A sun in the sky and stronger, warmer sunlight outdoors"},
-                {OPT_SHADOWS, L"SUN SHADOWS", on_off(settings.shadows),
-                 L"Dinosaurs, trees and buildings cast shadows away from the sun"},
-                {OPT_RT, L"RAY TRACING", !rt_available ? L"N/A" : RT_MODES[settings.ray_tracing],
-                 !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
-                               : RT_HINTS[settings.ray_tracing],
-                 rt_available},
-                {OPT_SHAFTS, L"LIGHT SHAFTS", on_off(settings.shafts),
-                 L"Rays of sunlight streaming between trees and silhouettes"},
-                {OPT_SOFT, L"SOFT PARTICLES", on_off(settings.soft),
-                 L"Smoke, fire and explosions blend softly where they touch the ground and walls"},
-                {OPT_HDR, L"HDR LIGHTING", on_off(settings.hdr),
-                 L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
-                {OPT_RIM, L"RIM LIGHT", on_off(settings.rim),
-                 L"A soft edge of light around dinosaurs and people, lifting them off the background"},
-                {OPT_RELIEF, L"SURFACE DETAIL", on_off(settings.relief),
-                 L"Light and shadow bring out the grain of stone, bark, metal and skin"},
-                {OPT_TORCH, L"FLASHLIGHT", settings.torch ? L"MODERN" : L"ORIGINAL",
-                 L"At night: a soft beam with real shading and a glow in the air, or the original spot"},
-                {OPT_LIGHTNING, L"LIGHTNING", on_off(settings.lightning),
-                 L"Flashes of lightning in stormy fog, with the trees standing out against it"},
-                {OPT_RAIN, L"RAIN", RAIN_LEVELS[settings.rain],
-                 L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
-                {OPT_SAT, L"COLOR SATURATION", std::to_wstring(settings.saturation) + L"%",
-                 L"How vivid the colours are (100% = original, 80% by default)"},
-                {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
-                {OPT_SHARPEN, L"SHARPEN", on_off(settings.sharpen),
-                 L"Brings back texture detail after the edge smoothing, without halos"},
-                {OPT_TEXT, L"HD TEXT", on_off(settings.hd_text),
-                 L"Sharp fonts for menus, captions and score instead of the original pixels"},
-                {OPT_CROSS, L"CROSSHAIR", on_off(settings.crosshair), L"Extra crosshair where the mouse points"},
-                {OPT_CROSS_HIDE, L"HIDE IDLE CROSSHAIR",
-                 settings.crosshair_hide ? L"AFTER " + std::to_wstring(settings.crosshair_hide) + L" S" : std::wstring(L"NEVER"),
-                 L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
-                {OPT_FREE_PLAY, L"FREE PLAY", on_off(settings.free_play),
-                 L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
-                {OPT_MICE, L"SECOND MOUSE", settings.second_mouse ? L"PLAYER 2" : L"OFF",
-                 L"A second mouse joins as player 2 with a click while player 1 plays"},
-                {OPT_SUBS, L"SUBTITLES", SUBS[settings.subtitles], L"Captions of what the characters say"},
-                {OPT_PAD_SPEED, L"STICK SPEED", std::to_wstring(settings.pad_speed),
-                 L"How fast the gamepad's sticks move the sight.  " + pads},
-                {OPT_GYRO, L"GYRO AIM", on_off(settings.gyro),
-                 gyro_pad ? L"Point the gamepad to aim, together with the sticks"
-                          : L"Point the gamepad to aim (DualSense, DualShock 4, Switch Pro).  None connected"},
-                {OPT_GYRO_SPEED, L"GYRO SPEED", std::to_wstring(settings.gyro_speed),
-                 L"How far the sight moves when you turn the gamepad"},
-                {OPT_VIBRATION, L"VIBRATION", BLOOM_LEVELS[settings.vibration],
-                 L"The gamepad rumbles when you shoot and when you are hit"},
-                {OPT_ASSIST, L"AIM ASSIST", BLOOM_LEVELS[settings.aim_assist],
-                 L"With a gamepad the sight slows down over the dinosaurs and follows them a little"}};
+        std::vector<Item> all = option_items(settings);
         std::vector<Item> list = {{TABS, L"", L"", L"Left / Right here, Q / E or L1 / R1 change the tab"}};
         for (const OptionTab& o : OPTION_TABS)   // the tab's options in their order, then any not listed
             for (const Item& it : all)
@@ -499,7 +664,7 @@ void Frontend::activate(const Item& it, int dir) {
     dirty_ = true;
     switch (it.id) {
     case PLAY: open(Screen::Play); break;
-    case OPTIONS: options_from_pause_ = false; tab_ = 0; open(Screen::Options); break;
+    case OPTIONS: options_from_pause_ = false; tab_ = 0; open(Screen::Options); selected_ = 1; break;
     case RECORDS: tab_ = 0; record_scroll_ = 0; open(Screen::Records); break;
     case QUIT: push(Action::Quit); break;
     case QUIT_TO_MENU: push(Action::QuitToMenu); break;
@@ -514,7 +679,7 @@ void Frontend::activate(const Item& it, int dir) {
     case LEAVE_BOSS: push(Action::LeaveBossMode); break;
     case BACK: back(); break;
     case RESUME: push(Action::Resume); break;
-    case SETTINGS: options_from_pause_ = true; tab_ = 0; open(Screen::Options); break;
+    case SETTINGS: options_from_pause_ = true; tab_ = 0; open(Screen::Options); selected_ = 1; break;
     case OPT_DISPLAY: push(Action::ToggleFullscreen); break;
     case OPT_VOLUME:
         settings.volume = dir > 0 && settings.volume == 10 && wrap_ ? 0 : std::clamp(settings.volume + dir, 0, 10);
@@ -567,6 +732,19 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
+    case OPT_MUSIC: settings.menu_music = !settings.menu_music; push(Action::SettingsChanged); break;
+    case OPT_CROSS_STYLE: settings.crosshair_style = 1 - settings.crosshair_style; push(Action::SettingsChanged); break;
+    case OPT_CROSS_P1:
+    case OPT_CROSS_P2:   // the Windows file dialog; a picture picked is also shown from then on
+        if (crosshair_pick(it.id == OPT_CROSS_P2 ? 1 : 0)) {
+            crosshair_loaded_ = false;
+            push(Action::CrosshairChanged);
+            if (!settings.crosshair_style) {
+                settings.crosshair_style = 1;
+                push(Action::SettingsChanged);
+            }
+        }
+        break;
     case OPT_MICE: settings.second_mouse = !settings.second_mouse; push(Action::SettingsChanged); break;
     case OPT_SUBS: settings.subtitles = (settings.subtitles + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_PAD_SPEED:
@@ -635,17 +813,18 @@ bool Frontend::key(int vk) {
         case 'Q': case VK_PRIOR: set_tab(tab_ - 1); return true;
         case 'E': case VK_NEXT: set_tab(tab_ + 1); return true;
         case VK_TAB: set_tab(tab_ + ((GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1)); return true;
+        case 'R': reset_tab(); return true;
         }
     switch (vk) {
     case VK_UP: case 'W': select((selected_ + n - 1) % n); return true;
     case VK_DOWN: case 'S': select((selected_ + 1) % n); return true;
     case VK_LEFT: case 'A':
         if (tabs_row) set_tab(tab_ - 1);
-        else if (option_row) activate(list[selected_], -1);
+        else if (option_row && list[selected_].kind != BUTTON) activate(list[selected_], -1);
         return true;
     case VK_RIGHT: case 'D':
         if (tabs_row) set_tab(tab_ + 1);
-        else if (option_row) activate(list[selected_], +1);
+        else if (option_row && list[selected_].kind != BUTTON) activate(list[selected_], +1);
         return true;
     case VK_RETURN: case VK_SPACE:
         hovered_ = -1;
@@ -670,6 +849,14 @@ void Frontend::mouse_move(int x, int y) {
 
 void Frontend::click(int x, int y) {
     POINT p{x, y};
+    if (screen_ == Screen::Options && PtInRect(&reset_rect_, p)) {
+        reset_tab();
+        return;
+    }
+    if (screen_ != Screen::Options && screen_ != Screen::Records && PtInRect(&back_rect_, p)) {
+        back();
+        return;
+    }
     if (screen_ == Screen::Records && (PtInRect(&more_up_, p) || PtInRect(&more_down_, p))) {
         scroll_records(PtInRect(&more_up_, p) ? -1 : 1);
         return;
@@ -685,7 +872,7 @@ void Frontend::click(int x, int y) {
     if (hovered_ < 0 || hovered_ >= int(list.size()) || !list[hovered_].enabled) return;
     if (list[hovered_].id == TABS) {   // the tab under the pointer
         for (int t = 0; t < int(tab_rects_.size()); t++)
-            if (x >= tab_rects_[t].left && x < tab_rects_[t].right) set_tab(t);
+            if (PtInRect(&tab_rects_[t], p)) set_tab(t);
         return;
     }
     // Option rows: a click on the value side goes down left of the middle of the
@@ -707,8 +894,9 @@ void Frontend::wheel(int x, int y, int delta) {
     auto list = items();
     bool on_value = hovered_ >= 0 && hovered_ < int(values_.size()) && values_[hovered_].left >= 0 &&
                     x >= values_[hovered_].left;
-    bool scrolls = screen_ == Screen::Options && int(list.size()) - 2 > VISIBLE_OPTIONS;
-    if (hovered_ >= 0 && hovered_ < int(list.size()) && list[hovered_].id >= OPT_DISPLAY && (on_value || !scrolls)) {
+    bool scrolls = screen_ == Screen::Options && int(list.size()) - 2 > visible_opts_;
+    if (hovered_ >= 0 && hovered_ < int(list.size()) && list[hovered_].id >= OPT_DISPLAY && list[hovered_].kind != BUTTON &&
+        (on_value || !scrolls)) {
         int keep = hovered_;   // over a value: change it
         hovered_ = -1;   // no wrap-around from the wheel
         activate(list[keep], delta > 0 ? +1 : -1);
@@ -826,7 +1014,7 @@ std::vector<Frontend::RecordRow> Frontend::record_rows() const {
 
 void Frontend::scroll_records(int by) {
     int n = int(record_rows().size());
-    int k = std::clamp(record_scroll_ + by, 0, std::max(0, n - VISIBLE_RECORDS));
+    int k = std::clamp(record_scroll_ + by, 0, std::max(0, n - visible_records_));
     if (k != record_scroll_) dirty_ = true;
     record_scroll_ = k;
 }
@@ -835,12 +1023,12 @@ void Frontend::scroll_records(int by) {
 void Frontend::draw_records(int x0, int x1, int y0, int row_h) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     auto rows = record_rows();
-    record_scroll_ = std::clamp(record_scroll_, 0, std::max(0, int(rows.size()) - VISIBLE_RECORDS));
+    record_scroll_ = std::clamp(record_scroll_, 0, std::max(0, int(rows.size()) - visible_records_));
     const Style lit{PALE_TOP, PALE_BOTTOM, 0x080806, U(2), 0.95f};
     const Style dark{DIM, DIM, 0x080806, U(2), 0.9f};
     const Style value{0xF4D27A, 0xE0A848, 0x080806, U(2), 0.95f};
     int label_px = U(32), detail_px = U(19);
-    for (int k = 0; k < VISIBLE_RECORDS && record_scroll_ + k < int(rows.size()); k++) {
+    for (int k = 0; k < visible_records_ && record_scroll_ + k < int(rows.size()); k++) {
         const RecordRow& r = rows[size_t(record_scroll_ + k)];
         int y = y0 + k * row_h;
         if (k % 2 == 0) fill(x0 - U(20), y - U(4), x1 + U(20), y + row_h - U(4), 0xFFFFFF, 0.03f);
@@ -853,8 +1041,8 @@ void Frontend::draw_records(int x0, int x1, int y0, int row_h) {
         triangle(x1 + U(36), y0 + U(10), U(20), -2, GOLD_BOTTOM, 1);
         more_up_ = {x1 + U(10), y0 - U(16), x1 + U(64), y0 + U(36)};
     }
-    if (record_scroll_ + VISIBLE_RECORDS < int(rows.size())) {
-        int yb = y0 + VISIBLE_RECORDS * row_h - U(20);
+    if (record_scroll_ + visible_records_ < int(rows.size())) {
+        int yb = y0 + visible_records_ * row_h - U(20);
         triangle(x1 + U(36), yb, U(20), 2, GOLD_BOTTOM, 1);
         more_down_ = {x1 + U(10), yb - U(26), x1 + U(64), yb + U(26)};
     }
@@ -913,11 +1101,76 @@ void Frontend::triangle(int x, int y, int size, int dir, uint32_t rgb, float alp
     }
 }
 
+void Frontend::hgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1) {
+    if (x1 <= x0) return;
+    for (int x = std::max(x0, 0); x < std::min(x1, w_); x++) {
+        float t = float(x - x0) / float(x1 - x0);
+        int a = int(std::clamp(a0 + (a1 - a0) * t, 0.0f, 1.0f) * 256.0f + 0.5f);
+        for (int y = std::max(y0, 0); y < std::min(y1, h_); y++) {
+            uint32_t& d = px_[size_t(y) * w_ + x];
+            d = over(d, rgb, a);
+        }
+    }
+}
+
+void Frontend::vgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1) {
+    if (y1 <= y0) return;
+    for (int y = std::max(y0, 0); y < std::min(y1, h_); y++)
+        fill(x0, y, x1, y + 1, rgb, a0 + (a1 - a0) * float(y - y0) / float(y1 - y0));
+}
+
+void Frontend::frame(int x0, int y0, int x1, int y1, int t, uint32_t rgb, float alpha) {
+    fill(x0, y0, x1, y0 + t, rgb, alpha);
+    fill(x0, y1 - t, x1, y1, rgb, alpha);
+    fill(x0, y0 + t, x0 + t, y1 - t, rgb, alpha);
+    fill(x1 - t, y0 + t, x1, y1 - t, rgb, alpha);
+}
+
+// A box with half-round ends, smoothed: switches, sliders, the gamepad's buttons
+void Frontend::pill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha) {
+    float r = (y1 - y0) * 0.5f, cy = (y0 + y1) * 0.5f;
+    float lx = x0 + r, rx = x1 - r;
+    if (rx < lx) lx = rx = (x0 + x1) * 0.5f;
+    for (int y = std::max(y0, 0); y < std::min(y1, h_); y++)
+        for (int x = std::max(x0, 0); x < std::min(x1, w_); x++) {
+            float px = x + 0.5f, py = y + 0.5f;
+            float dx = px < lx ? lx - px : px > rx ? px - rx : 0.0f, dy = py - cy;
+            float cov = std::clamp(r - std::sqrt(dx * dx + dy * dy) + 0.5f, 0.0f, 1.0f);
+            if (cov > 0) blend(x, y, rgb, cov * alpha);
+        }
+}
+
+// A picture scaled to cover the box (bilinear), what overhangs cut off
+void Frontend::picture(const Picture& p, int x0, int y0, int x1, int y1) {
+    if (p.w <= 0 || x1 <= x0 || y1 <= y0) return;
+    float sc = std::max(float(x1 - x0) / p.w, float(y1 - y0) / p.h);
+    float ox = (p.w * sc - (x1 - x0)) * 0.5f, oy = (p.h * sc - (y1 - y0)) * 0.5f;
+    for (int y = std::max(y0, 0); y < std::min(y1, h_); y++) {
+        float v = std::clamp((y - y0 + oy + 0.5f) / sc - 0.5f, 0.0f, p.h - 1.001f);
+        int iv = int(v);
+        float fv = v - iv;
+        for (int x = std::max(x0, 0); x < std::min(x1, w_); x++) {
+            float u = std::clamp((x - x0 + ox + 0.5f) / sc - 0.5f, 0.0f, p.w - 1.001f);
+            int iu = int(u);
+            float fu = u - iu;
+            const uint32_t* q = &p.px[size_t(iv) * p.w + iu];
+            uint32_t c[4] = {q[0], q[1], q[p.w], q[p.w + 1]};
+            uint32_t out = 0xFF000000u;
+            for (int sh = 0; sh <= 16; sh += 8) {
+                float a = chan(c[0], sh) + (chan(c[1], sh) - chan(c[0], sh)) * fu;
+                float b = chan(c[2], sh) + (chan(c[3], sh) - chan(c[2], sh)) * fu;
+                out |= uint32_t(std::clamp(a + (b - a) * fv, 0.0f, 1.0f) * 255.0f + 0.5f) << sh;
+            }
+            px_[size_t(y) * w_ + x] = out;
+        }
+    }
+}
+
 HFONT Frontend::font(Family f, int px) {
     auto key = std::make_pair(int(f), px);
     auto it = fonts_.find(key);
     if (it != fonts_.end()) return it->second;
-    HFONT h = CreateFontW(-px, 0, 0, 0, f == MONO || f == JURASSIC ? FW_NORMAL : FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    HFONT h = CreateFontW(-px, 0, 0, 0, f == MONO || f == JURASSIC || f == BODY ? FW_NORMAL : FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                           OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, FACES[f]);
     fonts_[key] = h;
     return h;
@@ -991,6 +1244,37 @@ int Frontend::measure(Family f, int px, const std::wstring& s) {
     return mask(f, px, s, 0).text_w;
 }
 
+int Frontend::extent(Family f, int px, const std::wstring& s) {
+    SelectObject(dc_, font(f, px));
+    SIZE sz{};
+    GetTextExtentPoint32W(dc_, s.c_str(), int(s.size()), &sz);
+    return sz.cx;
+}
+
+// Lines of at most max_w pixels, broken between words
+std::vector<std::wstring> Frontend::wrap(Family f, int px, const std::wstring& s, int max_w) {
+    std::vector<std::wstring> lines;
+    std::wstring line, word;
+    auto put = [&] {
+        if (word.empty()) return;
+        std::wstring longer = line.empty() ? word : line + L" " + word;
+        if (!line.empty() && extent(f, px, longer) > max_w) {
+            lines.push_back(line);
+            line = word;
+        } else {
+            line = longer;
+        }
+        word.clear();
+    };
+    for (wchar_t c : s) {
+        if (c == L' ') put();
+        else word += c;
+    }
+    put();
+    if (!line.empty()) lines.push_back(line);
+    return lines;
+}
+
 // Draws text with its box's top at y; align 0 = left of x, 1 = centred, 2 = right
 int Frontend::text(Family f, int px, const std::wstring& s, int x, int y, int align, const Style& st) {
     if (f == JURASSIC) {   // same capital height and position as Saira at this size
@@ -1022,23 +1306,27 @@ int Frontend::text(Family f, int px, const std::wstring& s, int x, int y, int al
 
 // Poster placement (fractions of the poster's height): where its logo starts
 // and ends, and where its plain stone ends (credits below). The logo is drawn
-// LOGO_SCREEN_H of the window high, starting LOGO_SCREEN_TOP from the top.
+// LOGO_SCREEN_H of the window high, starting LOGO_SCREEN_TOP from the top,
+// centred LOGO_CENTER_X layout units from the left (above the menu's column).
 constexpr float POSTER_LOGO_TOP = 0.16f, POSTER_LOGO_END = 0.53f, POSTER_STONE_END = 0.88f;
-constexpr float LOGO_SCREEN_TOP = 0.05f, LOGO_SCREEN_H = 0.42f;
+constexpr float LOGO_SCREEN_TOP = 0.08f, LOGO_SCREEN_H = 0.36f, LOGO_CENTER_X = 450;
+constexpr float LOGO_PICTURE_X = 350;   // logo.png's centre from the right edge: lined up with the menu's column
 
-void Frontend::poster_layout(float& scale, float& y0) const {
+void Frontend::poster_layout(float& scale, float& x0, float& y0) const {
     scale = LOGO_SCREEN_H * h_ / ((POSTER_LOGO_END - POSTER_LOGO_TOP) * poster_h_);   // window px per poster px
+    float cx = has_backdrop() ? w_ - LOGO_CENTER_X * u_ : LOGO_CENTER_X * u_;   // above the menu's column
+    x0 = cx - poster_w_ * scale * 0.5f;
     y0 = LOGO_SCREEN_TOP * h_ - POSTER_LOGO_TOP * poster_h_ * scale;
 }
 
-// The poster in the middle; beside and below it, its plain stone repeated in
+// The poster at the top left; around and below it, its plain stone repeated in
 // mirror image with the brightness of the poster's edges at that height,
-// cross-faded into the poster and darkened towards the sides of the window
+// cross-faded into the poster and darkened away from it
 void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
     dst.resize(size_t(w_) * h_);
-    float s, y0;
-    poster_layout(s, y0);
-    float pw = poster_w_ * s, x0 = (w_ - pw) * 0.5f;
+    float s, x0, y0;
+    poster_layout(s, x0, y0);
+    float pw = poster_w_ * s;
     float stone0 = poster_h_ * 0.60f, stone_h = poster_h_ * (POSTER_STONE_END - 0.60f);
     auto texel = [&](float u, float v, float* rgb) {   // bilinear, poster pixels
         u = std::clamp(u, 0.0f, poster_w_ - 1.001f);
@@ -1101,7 +1389,7 @@ void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
                 for (int k = 0; k < 4; k++)
                     texel(pingpong(px + (k & 1) * step, float(poster_w_ - 1)),
                           stone0 + pingpong(py + (k >> 1) * step, stone_h), stone_rgb);
-            float side = std::abs(x - w_ * 0.5f) / (w_ * 0.5f);
+            float side = std::min(1.0f, std::abs(x - (x0 + pw * 0.5f)) / float(w_));
             float dark = 1 - 0.4f * side * side;
             uint32_t out = 0xFF000000u;
             for (int k = 0; k < 3; k++) {
@@ -1118,16 +1406,122 @@ void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
     for (auto& t : pool) t.join();
 }
 
+// The background picture: covering the window, darker towards the right where
+// the menu goes, with the poster's logo above it; blurred for the options
+void Frontend::backdrop_background() {
+    uint32_t* keep = px_;
+    bg_.assign(size_t(w_) * h_, 0xFF000000u);
+    px_ = bg_.data();
+    picture(backdrop_, 0, 0, w_, h_);
+    // The blur: the picture averaged down by 16 in each direction, smoothed a
+    // few times and stretched back
+    const int F = 16;
+    Picture blur;
+    blur.w = std::max(4, w_ / F);
+    blur.h = std::max(4, h_ / F);
+    std::vector<float> acc(size_t(blur.w) * blur.h * 3, 0.0f);
+    for (int y = 0; y < blur.h * F && y < h_; y++)
+        for (int x = 0; x < blur.w * F && x < w_; x++) {
+            uint32_t c = bg_[size_t(y) * w_ + x];
+            float* d = &acc[(size_t(y / F) * blur.w + x / F) * 3];
+            for (int m = 0; m < 3; m++) d[m] += chan(c, 16 - 8 * m) / (F * F);
+        }
+    for (int pass = 0; pass < 3; pass++) {   // 3x3 box, three times
+        std::vector<float> src = acc;
+        for (int y = 0; y < blur.h; y++)
+            for (int x = 0; x < blur.w; x++)
+                for (int m = 0; m < 3; m++) {
+                    float sum = 0;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int xx = std::clamp(x + dx, 0, blur.w - 1), yy = std::clamp(y + dy, 0, blur.h - 1);
+                            sum += src[(size_t(yy) * blur.w + xx) * 3 + m];
+                        }
+                    acc[(size_t(y) * blur.w + x) * 3 + m] = sum / 9;
+                }
+    }
+    blur.px.resize(size_t(blur.w) * blur.h);
+    for (size_t i = 0; i < blur.px.size(); i++) {
+        uint32_t out = 0xFF000000u;
+        for (int m = 0; m < 3; m++)
+            out |= uint32_t(std::clamp(acc[i * 3 + m], 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+        blur.px[i] = out;
+    }
+    bg_stone_.assign(size_t(w_) * h_, 0xFF000000u);
+    px_ = bg_stone_.data();
+    picture(blur, 0, 0, w_, h_);
+    fill(0, 0, w_, h_, 0x000000, 0.3f);
+    px_ = bg_.data();
+    hgrad(int(w_ * 0.40f), 0, int(w_ * 0.64f), h_, 0x040508, 0.0f, 0.6f);
+    fill(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.6f);
+    hgrad(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.0f, 0.6f);
+    vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
+    if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
+        int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
+        int lx = int(w_ - LOGO_PICTURE_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
+        float sx = float(logo_.w) / lw, sy = float(logo_.h) / lh;
+        for (int y = std::max(0, ly); y < std::min(h_, ly + lh); y++)
+            for (int x = std::max(0, lx); x < std::min(w_, lx + lw); x++) {
+                int u0 = int((x - lx) * sx), u1 = std::max(u0 + 1, std::min(logo_.w, int((x - lx + 1) * sx)));
+                int v0 = int((y - ly) * sy), v1 = std::max(v0 + 1, std::min(logo_.h, int((y - ly + 1) * sy)));
+                float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
+                for (int v = v0; v < v1; v++)
+                    for (int u = u0; u < u1; u++) {
+                        uint32_t c = logo_.px[size_t(v) * logo_.w + u];
+                        float ca = chan(c, 24);
+                        for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
+                        a += ca;
+                    }
+                if (a <= 0) continue;
+                uint32_t c = 0;
+                for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+                blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
+            }
+    } else if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
+        float s, x0, y0;
+        poster_layout(s, x0, y0);
+        const float CX = 0.497f, CY = 0.331f, R = 0.203f;          // the disc, fractions of the poster's width / height
+        const float BU0 = 0.092f, BU1 = 0.903f, BV0 = 0.333f, BV1 = 0.437f;   // the banner across it
+        float cx = CX * poster_w_, cy = CY * poster_h_, r = R * poster_h_;
+        int sx0 = std::max(0, int(x0 + std::min(cx - r, BU0 * poster_w_) * s) - 2);
+        int sx1 = std::min(w_, int(x0 + std::max(cx + r, BU1 * poster_w_) * s) + 2);
+        int sy0 = std::max(0, int(y0 + (cy - r) * s) - 2), sy1 = std::min(h_, int(y0 + (cy + r) * s) + 2);
+        float feather = 2.5f;   // poster pixels
+        for (int y = sy0; y < sy1; y++)
+            for (int x = sx0; x < sx1; x++) {
+                float u = (x + 0.5f - x0) / s, v = (y + 0.5f - y0) / s;
+                float in_disc = r - std::sqrt((u - cx) * (u - cx) + (v - cy) * (v - cy));
+                float in_banner = std::min(std::min(u - BU0 * poster_w_, BU1 * poster_w_ - u),
+                                           std::min(v - BV0 * poster_h_, BV1 * poster_h_ - v));
+                float a = std::clamp(std::max(in_disc, in_banner) / feather + 0.5f, 0.0f, 1.0f);
+                if (a <= 0) continue;
+                float rgb[3] = {0, 0, 0};   // 2x2 samples per window pixel
+                for (int k = 0; k < 4; k++) {
+                    int pu = std::clamp(int((x + 0.25f + 0.5f * (k & 1) - x0) / s), 0, poster_w_ - 1);
+                    int pv = std::clamp(int((y + 0.25f + 0.5f * (k >> 1) - y0) / s), 0, poster_h_ - 1);
+                    uint32_t c = poster_[size_t(pv) * poster_w_ + pu];
+                    for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * 0.25f;
+                }
+                blend(x, y, uint32_t(rgb[0] * 255) << 16 | uint32_t(rgb[1] * 255) << 8 | uint32_t(rgb[2] * 255), a);
+            }
+    }
+    px_ = keep;
+}
+
 // Main menu backdrop: dark jungle green, a warm glow behind the title and a
 // faint scanline pattern
 void Frontend::background() {
     bg_.resize(size_t(w_) * h_);
+    if (has_backdrop()) {
+        backdrop_background();
+        return;
+    }
     if (has_poster()) {   // both versions at once: switching screens must not stall
         poster_background(false, bg_);
         poster_background(true, bg_stone_);   // the long options list goes on plain stone
         return;
     }
-    float cx = w_ * 0.5f, gy = 250 * u_;
+    float cx = LOGO_CENTER_X * u_, gy = 250 * u_;   // the glow behind the title
     for (int y = 0; y < h_; y++) {
         float t = std::pow(float(y) / float(h_), 0.8f);
         uint32_t base = mix(0x13291A, 0x040806, t);
@@ -1146,6 +1540,443 @@ void Frontend::background() {
     }
 }
 
+
+// ---- Screens ----
+
+namespace {
+constexpr uint32_t WHITE_TOP = 0xFFF6E0, WHITE_BOTTOM = 0xFFE2A8, INK = 0x080806, PANEL = 0x090D0B;
+constexpr uint32_t PAD_A = 0x6FD17A, PAD_B = 0xE8655A, PAD_Y = 0xE8C85A, PAD_X = 0x5AA8E8, KEYCAP = 0xD8D2C0;
+}  // namespace
+
+// One entry of the key help: the gamepad's button (a coloured disc, or a grey
+// pill for the shoulders) or the key ("<>": the left / right arrows), then
+// what it does. x moves past it; the rectangle is for clicks
+RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int h = U(38), x0 = x;
+    if (pad_prompts && pad_button) {
+        std::wstring b = pad_button;
+        uint32_t c = b == L"A" ? PAD_A : b == L"B" ? PAD_B : b == L"Y" ? PAD_Y : b == L"X" ? PAD_X : KEYCAP;
+        int bw = std::max(h, extent(ITEM, U(20), b) + U(20));
+        pill(x, y, x + bw, y + h, c, 1);
+        text(ITEM, U(20), b, x + bw / 2, y + h / 2 - U(11), 1, {0x111111, 0x111111});
+        x += bw + U(10);
+    } else if (key) {
+        std::wstring k = key;
+        bool arrows = k == L"<>";
+        int kw = arrows ? U(70) : std::max(h, extent(MONO, U(18), k) + U(22));
+        fill(x, y, x + kw, y + h, 0x000000, 0.45f);
+        frame(x, y, x + kw, y + h, std::max(1, U(1.5f)), KEYCAP, 0.75f);
+        if (arrows) {
+            triangle(x + kw / 2 - U(14), y + h / 2, U(14), -1, 0xE8E0CC, 1);
+            triangle(x + kw / 2 + U(14), y + h / 2, U(14), +1, 0xE8E0CC, 1);
+        } else {
+            text(MONO, U(18), k, x + kw / 2, y + h / 2 - U(9), 1, {0xE8E0CC, 0xE8E0CC});
+        }
+        x += kw + U(10);
+    }
+    int right = x - U(10);
+    if (what && *what) {
+        right = x + text(ITEM, U(22), what, x, y + h / 2 - U(13), 0, {0xCFC8B4, 0xCFC8B4});
+        x = right + U(44);
+    }
+    return {x0, y, right, y + h};
+}
+
+int Frontend::prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int h = U(38), wd = 0;
+    if (pad_prompts && pad_button) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
+    else if (key) wd = (std::wstring(key) == L"<>" ? U(70) : std::max(h, extent(MONO, U(18), key) + U(22))) + U(10);
+    if (what && *what) wd += measure(ITEM, U(22), what) + U(44);
+    return wd;
+}
+
+// The value side of an option row, between vx0 and vx1
+void Frontend::draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int cy = y + row_h / 2, vcx = (vx0 + vx1) / 2, vpx = U(27);
+    const Style vs = !it.enabled ? Style{DIM, DIM, INK, U(2), 0.9f}
+                     : sel       ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2)}
+                                 : Style{0xF4D27A, 0xE0A848, INK, U(2), 0.95f};
+    int text_y = cy - vpx * 55 / 100;   // the capitals centred on the row
+    switch (it.enabled ? it.kind : PLAIN) {
+    case TOGGLE: {
+        int tw = U(72), th = U(34), x0 = vcx - tw / 2, y0 = cy - th / 2;
+        bool on = it.pos != 0;
+        if (on) {
+            pill(x0, y0, x0 + tw, y0 + th, AMBER, sel ? 1.0f : 0.85f);
+        } else {
+            pill(x0, y0, x0 + tw, y0 + th, 0x4A4A40, 1);
+            pill(x0 + U(2), y0 + U(2), x0 + tw - U(2), y0 + th - U(2), 0x22231E, 1);
+        }
+        int r = U(12), kx = on ? x0 + tw - th / 2 : x0 + th / 2;
+        pill(kx - r, cy - r, kx + r, cy + r, on ? WHITE_TOP : 0x8A8A80, 1);
+        text(ITEM, U(20), on ? L"ON" : L"OFF", x0 - U(16), cy - U(11), 2, {on ? HINT : FOOT, on ? HINT : FOOT});
+        break;
+    }
+    case SLIDER: {
+        int x0 = vx0 + U(26), x1 = vx1 - U(90), th = std::max(2, U(6));
+        int kx = x0 + int(std::clamp(it.frac, 0.0f, 1.0f) * float(x1 - x0) + 0.5f);
+        pill(x0, cy - th / 2, x1, cy - th / 2 + th, 0x3D3B33, 1);
+        if (kx - x0 >= th) pill(x0, cy - th / 2, kx, cy - th / 2 + th, AMBER, 1);
+        int r = U(11), ring = std::max(2, U(3));
+        pill(kx - r - ring, cy - r - ring, kx + r + ring, cy + r + ring, AMBER, 1);
+        pill(kx - r, cy - r, kx + r, cy + r, WHITE_TOP, 1);
+        text(ITEM, vpx, it.value, vx1 - U(14), text_y, 2, vs);
+        if (sel) {
+            triangle(x0 - U(18), cy, U(16), -1, GOLD_BOTTOM, 1);
+            triangle(vx1 + U(2), cy, U(16), +1, GOLD_BOTTOM, 1);
+        }
+        break;
+    }
+    case CHOICE: {
+        text(ITEM, vpx, it.value, vcx, text_y - U(8), 1, vs);
+        float a = sel ? 1.0f : 0.7f;
+        triangle(vx0 + U(14), cy - U(4), U(18), -1, GOLD_BOTTOM, a);
+        triangle(vx1 - U(14), cy - U(4), U(18), +1, GOLD_BOTTOM, a);
+        int n = it.levels ? it.count - 1 : it.count;   // levels: a dot per step above OFF
+        int pw = U(22), gap = U(6), ph = std::max(2, U(4));
+        int px0 = vcx - (n * pw + (n - 1) * gap) / 2, py = cy + U(20);
+        for (int k = 0; k < n; k++) {
+            bool lit = it.levels ? k < it.pos : k == it.pos;
+            fill(px0 + k * (pw + gap), py, px0 + k * (pw + gap) + pw, py + ph, lit ? AMBER : 0x4A473D, 1);
+        }
+        break;
+    }
+    case BUTTON: {
+        int bw = std::min(vx1 - vx0, extent(ITEM, U(22), it.value) + U(40)), bh = U(38);
+        int x0 = vcx - bw / 2, y0 = cy - bh / 2;
+        fill(x0, y0, x0 + bw, y0 + bh, sel ? AMBER : 0x2A2B25, sel ? 0.9f : 1.0f);
+        frame(x0, y0, x0 + bw, y0 + bh, std::max(1, U(1.5f)), AMBER, sel ? 1.0f : 0.6f);
+        text(ITEM, U(22), it.value, vcx, cy - U(13), 1, sel ? Style{0x1A1205, 0x1A1205} : Style{HINT, HINT});
+        break;
+    }
+    default: text(ITEM, vpx, it.value, vcx, text_y, 1, vs); break;
+    }
+}
+
+// Main, Play, Boss and Survival on the backdrop, and Pause (or the boss list)
+// over the game: the entries in a column at the left, under the logo or the title
+void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int w = w_, h = h_;
+    bool right = has_backdrop() && !over_game;   // the column at the right, clear of the picture's subject
+    int left = U(110), col_w = U(720);
+    int tx = right ? w - left : left, talign = right ? 2 : 0;   // where the column's text lines up
+    int band0 = right ? w - left - col_w : 0, band1 = right ? w : left + col_w;
+    bool boss = screen_ == Screen::Boss || screen_ == Screen::Survival;
+    int y0;
+    if (over_game) {
+        fill(0, 0, w, h, 0x000000, 0.5f);   // the frozen game shows through, darkened
+        hgrad(0, 0, U(1100), h, 0x000000, 0.75f, 0.0f);
+        text(display(), U(96), screen_ == Screen::Boss ? L"BOSSES" : L"PAUSED", left, U(70), 0,
+             {GOLD_TOP, GOLD_BOTTOM, EDGE, U(5), 1, U(5)});
+        y0 = U(300);
+    } else {
+        if (!right) hgrad(0, 0, U(1100), h, 0x030504, 0.5f, 0.0f);   // the column a little darker than the stone
+        if (has_logo()) {
+            y0 = int((LOGO_SCREEN_TOP + LOGO_SCREEN_H) * h_) + U(40);
+        } else if (has_poster()) {   // the poster is the title
+            float ps, px0, py0;
+            poster_layout(ps, px0, py0);
+            y0 = int(py0 + POSTER_LOGO_END * poster_h_ * ps) + U(40);
+        } else {
+            if (jurassic_) text(JURASSIC, U(54), L"JURASSIC PARK", tx, U(84), talign, {0xD8C49A, 0xB09A70, EDGE, U(2)});
+            else text(MONO, U(30), L"J U R A S S I C    P A R K", tx, U(104), talign, {0xD8C49A, 0xB09A70});
+            text(display(), jurassic_ ? U(150) : U(180), L"THE LOST WORLD", tx, jurassic_ ? U(122) : U(112), talign,
+                 {GOLD_TOP, GOLD_BOTTOM, EDGE, U(7), 1, U(8)});
+            y0 = U(430);
+        }
+        const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA"
+                             : boss ? L"SELECT BOSS" : nullptr;
+        if (sub) {
+            text(MONO, U(24), sub, tx, y0, talign, {0xF0C070, 0xE0A050});
+            y0 += U(50);
+        }
+    }
+    if (screen_ == Screen::Main && !over_game) {   // how far the player has got, in the top corner away from the logo
+        int got = 0;
+        for (int64_t t : records.unlocked) got += t != 0;
+        int best = *std::max_element(std::begin(records.stats.best_score), std::end(records.stats.best_score));
+        std::vector<std::pair<std::wstring, std::wstring>> chips = {
+            {L"ACHIEVEMENTS", std::to_wstring(got) + L"/" + std::to_wstring(achievement_table().size())}};
+        if (best > 0) chips.push_back({L"BEST SCORE", grouped(best)});
+        int x1 = w - U(70), cy0 = U(56), ch = U(56);
+        if (right) {   // from the left edge: the total width first
+            x1 = U(70) - U(16);
+            for (const auto& c : chips)
+                x1 += U(22) + extent(ITEM, U(21), c.first) + U(12) + extent(ITEM, U(26), c.second) + U(22) + U(16);
+        }
+        for (int i = int(chips.size()) - 1; i >= 0; i--) {
+            int lw = extent(ITEM, U(21), chips[i].first), vw = extent(ITEM, U(26), chips[i].second);
+            int cw = U(22) + lw + U(12) + vw + U(22), x0 = x1 - cw;
+            fill(x0, cy0, x1, cy0 + ch, PANEL, 0.8f);
+            frame(x0, cy0, x1, cy0 + ch, std::max(1, U(1.5f)), AMBER, 0.3f);
+            text(ITEM, U(21), chips[i].first, x0 + U(22), cy0 + ch / 2 - U(12), 0, {PALE_TOP, PALE_BOTTOM});
+            text(ITEM, U(26), chips[i].second, x1 - U(22), cy0 + ch / 2 - U(15), 2, {GOLD_TOP, GOLD_BOTTOM});
+            x1 = x0 - U(16);
+        }
+    }
+
+    // The entries share what is left of the height, the description under them
+    int n = int(list.size());
+    int spacing = std::clamp((h - U(190) - y0) / std::max(1, n), U(46), U(86));
+    int item_px = std::min(U(60), spacing * 72 / 100);
+    int y = y0;
+    for (int i = 0; i < n; i++) {
+        const Item& it = list[i];
+        bool sel = i == selected_;
+        if (sel) {
+            float a = it.enabled ? 0.34f : 0.16f;
+            hgrad(band0, y, band1, y + spacing, AMBER, right ? 0.0f : a, right ? a : 0.0f);
+            int edge = std::max(3, U(8));
+            fill(right ? w - edge : 0, y, right ? w : edge, y + spacing, AMBER, it.enabled ? 1.0f : 0.5f);
+        }
+        const Style st = !it.enabled ? Style{DIM, DIM, INK, U(2), 0.9f, U(3)}
+                         : sel       ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2), 1, U(3)}
+                                     : Style{PALE_TOP, PALE_BOTTOM, INK, U(2), 0.95f, U(3)};
+        int ty = y + spacing / 2 - item_px * 55 / 100;
+        text(TITLE, item_px, it.label, tx, ty, talign, st);
+        if (!it.value.empty())   // e.g. the stage of a boss, "NOT READY" or a record
+            text(ITEM, U(24), it.value, right ? tx - measure(TITLE, item_px, it.label) - U(30) : left + col_w - U(60),
+                 y + spacing / 2 - U(14), 2, {0xF4D27A, 0xE0A848});
+        hit_.push_back({band0, y, band1, y + spacing});
+        values_.push_back({-1, 0});
+        y += spacing;
+    }
+    if (selected_ < n)
+        for (const std::wstring& line : wrap(BODY, U(23), list[selected_].hint, col_w - U(20))) {
+            y += U(32);
+            text(BODY, U(23), line, tx, y - U(16), talign, {0xE8C890, 0xE8C890});
+        }
+
+    vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
+    const wchar_t* back_what = screen_ == Screen::Main ? nullptr : screen_ == Screen::Pause ? L"RESUME" : L"BACK";
+    int py = h - U(64), x = U(80);
+    if (!over_game) {   // the key help at the bottom right; at the left, the credit to the makers of the game
+        x = w - U(80) + U(44) - prompt_width(L"A", L"ENTER", L"SELECT") - (back_what ? prompt_width(L"B", L"ESC", back_what) : 0);
+        if (sega_.w > 0) {   // their logo, its own transparency kept
+            int lh = U(52), lw = lh * sega_.w / sega_.h, lx = U(80), ly = h - U(46) - lh;
+            for (int j = 0; j < lh; j++)
+                for (int i = 0; i < lw; i++) {
+                    uint32_t q = sega_.px[size_t(j * sega_.h / lh) * sega_.w + size_t(i * sega_.w / lw)];
+                    blend(lx + i, ly + j, q & 0xFFFFFF, float(q >> 24) / 255.0f);
+                }
+            text(ITEM, U(18), L"\u00A9 1997 SEGA", lx + lw + U(16), ly + lh / 2 - U(10), 0, {FOOT, FOOT});
+        } else {
+            text(ITEM, U(22), L"ORIGINAL ARCADE GAME \u00A9 1997 SEGA", U(80), py + U(6), 0, {0xB8B09A, 0xA09884});
+        }
+    }
+    prompt(x, py, L"A", L"ENTER", L"SELECT");
+    if (back_what) back_rect_ = prompt(x, py, L"B", L"ESC", back_what);
+}
+
+// Options and Records: the categories down the left, the rows in the middle and
+// a panel at the right about the selected row (its picture, what it does, its default)
+void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int w = w_, h = h_;
+    bool rec_page = screen_ == Screen::Records;
+    fill(0, 0, w, h, 0x000000, over_game ? 0.72f : 0.35f);
+    bool wide = w / u_ >= 1800;   // 16:9 and wider; 4:3 gets narrower columns
+    int margin = U(wide ? 70.0f : 50.0f);
+    int rail0 = margin, rail1 = rail0 + U(wide ? 300.0f : 260.0f);
+    int side1 = w - margin, side0 = side1 - U(wide ? 600.0f : 420.0f);
+    int list0 = rail1 + U(30), list1 = side0 - U(30);
+    int top = U(170), bottom = h - U(110);
+    text(display(), U(72), rec_page ? L"RECORDS" : over_game ? L"SETTINGS" : L"OPTIONS", margin + U(10), U(36), 0,
+         {GOLD_TOP, GOLD_BOTTOM, EDGE, U(4), 1, U(4)});
+
+    // Categories (the TABS entry); Left / Right on it, Q / E or L1 / R1 anywhere change them
+    int cat_h = U(64), cat_y = top + U(20);
+    bool rail_focus = selected_ == 0;
+    tab_rects_.clear();
+    for (int t = 0; t < tab_count(); t++) {
+        int y = cat_y + t * cat_h;
+        bool open_tab = t == tab_;
+        if (open_tab) {
+            hgrad(rail0, y, rail1, y + cat_h, AMBER, rail_focus ? 0.42f : 0.25f, 0.0f);
+            fill(rail0, y, rail0 + std::max(3, U(5)), y + cat_h, AMBER, 1);
+            if (rail_focus) frame(rail0, y, rail1, y + cat_h, std::max(1, U(1.5f)), AMBER, 0.6f);
+        }
+        const Style cs = open_tab ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2)} : Style{0xA9A390, 0x8F8978, INK, U(2), 0.95f};
+        text(TITLE, U(30), tab_name(t), rail0 + U(26), y + cat_h / 2 - U(17), 0, cs);
+        tab_rects_.push_back({rail0, y, rail1, y + cat_h});
+    }
+    hit_.push_back({rail0, cat_y, rail1, cat_y + tab_count() * cat_h});
+    values_.push_back({-1, 0});
+    {
+        int x = rail0 + U(14), y = cat_y + tab_count() * cat_h + U(26);
+        prompt(x, y, L"LB", L"Q", L"");
+        prompt(x, y, L"RB", L"E", L"CATEGORY");
+    }
+
+    int n_opts = int(list.size()) - 2;
+    if (rec_page) {
+        int row_h = U(78);
+        visible_records_ = std::max(3, (bottom - top - U(30)) / row_h);
+        draw_records(list0 + U(22), list1 - U(22), top + U(30), row_h);
+    } else {
+        int row_h = U(58), y_rows = top + U(20);
+        visible_opts_ = std::max(3, (bottom - y_rows) / row_h);
+        int shown = std::min(n_opts, visible_opts_);
+        scroll_ = std::clamp(scroll_, 0, std::max(0, n_opts - shown));
+        int k = selected_ - 1;   // keep the selected option in view
+        if (k >= 0 && k < n_opts) {
+            if (k < scroll_) scroll_ = k;
+            if (k >= scroll_ + shown) scroll_ = k - shown + 1;
+        }
+        int vw = U(wide ? 300.0f : 250.0f);
+        for (int i = 1; i <= n_opts; i++) {
+            int slot = i - 1 - scroll_;
+            if (slot < 0 || slot >= shown) {   // scrolled out of view: no hit area
+                hit_.push_back(RECT{});
+                values_.push_back({-1, 0});
+                continue;
+            }
+            const Item& it = list[i];
+            bool sel = i == selected_;
+            int y = y_rows + slot * row_h;
+            if (sel) {
+                hgrad(list0, y, list1, y + row_h, AMBER, it.enabled ? 0.30f : 0.15f, it.enabled ? 0.12f : 0.06f);
+                frame(list0, y, list1, y + row_h, std::max(1, U(1.5f)), AMBER, 0.6f);
+            } else {
+                fill(list0 + U(10), y + row_h - std::max(1, U(1)), list1 - U(10), y + row_h, 0xFFFFFF, 0.06f);
+            }
+            const Style ls = !it.enabled ? Style{DIM, DIM, INK, U(2), 0.9f}
+                             : sel       ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2)}
+                                         : Style{PALE_TOP, PALE_BOTTOM, INK, U(2), 0.95f};
+            text(ITEM, U(29), it.label, list0 + U(22), y + row_h / 2 - U(16), 0, ls);
+            int vx1 = list1 - U(22), vx0 = vx1 - vw;
+            draw_value(it, sel, vx0, vx1, y, row_h);
+            hit_.push_back({list0, y, list1, y + row_h});
+            values_.push_back({vx0, (vx0 + vx1) / 2});
+        }
+        if (scroll_ > 0) {   // more rows above / below: arrows past the right edge, clickable
+            triangle(list1 + U(15), y_rows + U(12), U(18), -2, GOLD_BOTTOM, 1);
+            more_up_ = {list1, y_rows - U(10), list1 + U(30), y_rows + U(34)};
+        }
+        if (scroll_ + shown < n_opts) {
+            int yb = y_rows + shown * row_h - U(12);
+            triangle(list1 + U(15), yb, U(18), 2, GOLD_BOTTOM, 1);
+            more_down_ = {list1, yb - U(22), list1 + U(30), yb + U(10)};
+        }
+    }
+    hit_.push_back(RECT{});   // BACK: its key help at the bottom (below)
+    values_.push_back({-1, 0});
+
+    // The panel about the selected row
+    fill(side0, top, side1, bottom, PANEL, 0.8f);
+    frame(side0, top, side1, bottom, std::max(1, U(1.5f)), AMBER, 0.28f);
+    int px0 = side0 + U(28), px1 = side1 - U(28), y = top + U(24);
+    const Item* cur = selected_ < int(list.size()) ? &list[selected_] : nullptr;
+    bool option = cur && cur->id >= OPT_DISPLAY;
+    std::wstring title = option ? cur->label : cur && cur->id == BACK ? cur->label : std::wstring(tab_name(tab_));
+    text(TITLE, U(40), title, px0, y, 0, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
+    y += U(70);
+    bool crosshair_row = option && (cur->id == OPT_CROSS || cur->id == OPT_CROSS_STYLE || cur->id == OPT_CROSS_P1 ||
+                                    cur->id == OPT_CROSS_P2);
+    if (crosshair_row) {
+        int ph = (px1 - px0) * 9 / 16;
+        crosshair_preview(px0, y, px1, y + ph);
+        frame(px0, y, px1, y + ph, std::max(1, U(1)), 0x3A3A34, 1);
+        y += ph + U(22);
+    } else if (option) {
+        const Picture& pic = preview(cur->id);
+        if (pic.w > 0) {
+            int ph = (px1 - px0) * 9 / 16;
+            picture(pic, px0, y, px1, y + ph);
+            frame(px0, y, px1, y + ph, std::max(1, U(1)), 0x3A3A34, 1);
+            y += ph + U(22);
+        }
+    }
+    if (cur)
+        for (const std::wstring& line : wrap(BODY, U(23), rec_page && cur->id == TABS ? list[0].hint : cur->hint,
+                                             px1 - px0)) {
+            text(BODY, U(23), line, px0, y, 0, {0xD8D1BD, 0xD8D1BD});
+            y += U(34);
+        }
+    if (option && cur->enabled && cur->id != OPT_DISPLAY && cur->kind != BUTTON) {   // its default and when it takes effect
+        y += U(18);
+        std::wstring def;
+        for (const Item& d : option_items(FrontendSettings{}))
+            if (d.id == cur->id) def = d.value;
+        auto meta = [&](const wchar_t* label, const std::wstring& value) {
+            text(ITEM, U(21), label, px0, y, 0, {FOOT, FOOT});
+            text(ITEM, U(21), value, px0 + U(130), y, 0, {PALE_TOP, PALE_BOTTOM});
+            y += U(36);
+        };
+        meta(L"DEFAULT", def);
+        meta(L"APPLIES", cur->id == OPT_AA ? L"NEXT START" : L"AT ONCE");
+    }
+
+    // Key help
+    vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
+    int x = U(80), py = h - U(64);
+    if (rec_page) {
+        prompt(x, py, L"LB", L"Q", L"");
+        prompt(x, py, L"RB", L"E", L"TAB");
+    } else {
+        prompt(x, py, L"A", L"<>", L"CHANGE");
+        reset_rect_ = prompt(x, py, L"Y", L"R", L"RESET TO DEFAULTS");
+    }
+    back_rect_ = prompt(x, py, L"B", L"ESC", L"BACK");
+    hit_.back() = {back_rect_.left - U(8), back_rect_.top - U(8), back_rect_.right + U(8), back_rect_.bottom + U(8)};
+    if (selected_ == int(list.size()) - 1) frame(hit_.back().left, hit_.back().top, hit_.back().right,
+                                                 hit_.back().bottom, std::max(1, U(2)), AMBER, 0.9f);
+}
+
+// Both players' crosshairs at the size the game draws them (pictures at their
+// pixels at 1080p, or the rings), side by side over a stretch of the game
+void Frontend::crosshair_preview(int x0, int y0, int x1, int y1) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    if (!crosshair_loaded_) {
+        for (int p = 0; p < 2; p++) {
+            Picture& c = crosshair_[p];
+            std::vector<uint8_t> rgba;
+            c = Picture{};
+            if (!crosshair_load(p, c.w, c.h, rgba) || rgba.size() < size_t(c.w) * c.h * 4) {
+                c.w = c.h = 0;
+                continue;
+            }
+            c.px.resize(size_t(c.w) * c.h);
+            for (size_t i = 0; i < c.px.size(); i++)
+                c.px[i] = uint32_t(rgba[i * 4 + 3]) << 24 | uint32_t(rgba[i * 4]) << 16 | uint32_t(rgba[i * 4 + 1]) << 8 |
+                          rgba[i * 4 + 2];
+        }
+        crosshair_loaded_ = true;
+    }
+    const Picture& back = preview(OPT_CROSS);
+    if (back.w > 0) picture(back, x0, y0, x1, y1);
+    else fill(x0, y0, x1, y1, 0x1A2016, 1);
+    float k = h_ / 1080.0f;
+    for (int p = 0; p < 2; p++) {
+        int cx = x0 + (x1 - x0) * (p + 1) / 3, cy = (y0 + y1) / 2;
+        const Picture& c = crosshair_[p];
+        if (settings.crosshair_style && c.w > 0) {   // its own picture, centred, nearest pixel
+            int dw = std::max(1, int(c.w * k + 0.5f)), dh = std::max(1, int(c.h * k + 0.5f));
+            for (int j = 0; j < dh; j++)
+                for (int i = 0; i < dw; i++) {
+                    uint32_t q = c.px[size_t(j * c.h / dh) * c.w + size_t(i * c.w / dw)];
+                    int x = cx - dw / 2 + i, y = cy - dh / 2 + j;
+                    if (x >= x0 && x < x1 && y >= y0 && y < y1) blend(x, y, q & 0xFFFFFF, float(q >> 24) / 255.0f);
+                }
+        } else {   // the game's ring: yellow for player 1, cyan for player 2
+            float r = std::max(10.0f, h_ / 60.0f), t = std::max(2.0f, r / 5);
+            uint32_t col = p ? 0x33E6FF : 0xFFF233;
+            int b = int(r + t) + 2;
+            for (int y = cy - b; y <= cy + b; y++)
+                for (int x = cx - b; x <= cx + b; x++) {
+                    float d = std::sqrt(float((x - cx) * (x - cx) + (y - cy) * (y - cy)));
+                    float cov = std::clamp(t * 0.5f - std::abs(d - r) + 0.5f, 0.0f, 1.0f);
+                    if (cov > 0) blend(x, y, col, cov);
+                }
+        }
+        text(ITEM, U(20), p ? L"PLAYER 2" : L"PLAYER 1", cx, y1 - U(34), 1, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
+    }
+}
+
 bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     if (!active() || w <= 0 || h <= 0) return false;
     if (!dirty_ && w == w_ && h == h_ && out.size() == size_t(w) * h) return false;
@@ -1156,198 +1987,20 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
         bg_.clear();
         bg_stone_.clear();
     }
-    auto U = [&](float v) { return int(v * u_ + 0.5f); };
-    bool over_game = screen_ == Screen::Pause || (screen_ == Screen::Options && options_from_pause_) ||
-                     (screen_ == Screen::Boss && boss_over_game_);
-    bool boss = screen_ == Screen::Boss || screen_ == Screen::Survival;   // a list of entries
+    bool over_game = this->over_game();
+    bool page = screen_ == Screen::Options || screen_ == Screen::Records;
     if (over_game) out.assign(size_t(w) * h, 0);
     else {
         if (bg_.empty()) background();
-        out = has_poster() && screen_ == Screen::Options ? bg_stone_ : bg_;
+        out = has_poster() && page ? bg_stone_ : bg_;
     }
     px_ = out.data();
     hit_.clear();
     values_.clear();
+    more_up_ = more_down_ = back_rect_ = reset_rect_ = RECT{};
     auto list = items();
-    int cx = w / 2;
-    bool records = screen_ == Screen::Records;
-    bool options = screen_ == Screen::Options || records;   // records use the settings' card and tab row
-    const Style gold{GOLD_TOP, GOLD_BOTTOM, EDGE, U(3)};
-    const Style pale{PALE_TOP, PALE_BOTTOM, 0x080806, U(2), 0.95f};
-    const Style dim{DIM, DIM, 0x080806, U(2), 0.9f};
-
-    int y_items, spacing, item_px, hint_y, foot_y;
-    if (!over_game && has_poster() && !options) {   // the poster is the title; the menu goes on the stone below it
-        float ps, py0;
-        poster_layout(ps, py0);
-        int logo_end = int(py0 + POSTER_LOGO_END * poster_h_ * ps);
-        const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA" : boss ? L"SELECT BOSS" : options ? L"OPTIONS" : nullptr;
-        if (sub) text(MONO, U(28), sub, cx, options ? U(390) : logo_end + U(20), 1, {0xF0C070, 0xE0A050});
-        y_items = options ? U(432) : logo_end + U(80);
-        spacing = options ? U(56) : screen_ == Screen::Survival ? U(52) : boss ? U(66) : U(84);
-        item_px = options ? U(42) : screen_ == Screen::Survival ? U(42) : boss ? U(48) : U(60);
-        hint_y = h - U(options ? 110.0f : 150.0f);
-        foot_y = h - U(64);
-    } else if (!over_game && options) {   // a card over the stone, no big title
-        int top = U(70), bottom = h - U(70), half = U(580);
-        fill(cx - half, top, cx + half, bottom, 0x06100A, 0.74f);
-        band(cx, top, top + std::max(2, U(3)), half, AMBER, 0.9f);
-        band(cx, bottom - std::max(2, U(3)), bottom, half, AMBER, 0.9f);
-        text(display(), U(96), records ? L"RECORDS" : L"OPTIONS", cx, top + U(34), 1,
-             {GOLD_TOP, GOLD_BOTTOM, EDGE, U(5), 1, U(5)});
-        y_items = top + U(196);
-        spacing = U(70);
-        item_px = U(46);
-        hint_y = bottom - U(116);
-        foot_y = bottom - U(62);
-    } else if (!over_game) {
-        if (jurassic_) text(JURASSIC, U(54), L"JURASSIC PARK", cx, U(84), 1, {0xD8C49A, 0xB09A70, EDGE, U(2)});
-        else text(MONO, U(30), L"J U R A S S I C    P A R K", cx, U(104), 1, {0xD8C49A, 0xB09A70});
-        text(display(), jurassic_ ? U(176) : U(212), L"THE LOST WORLD", cx, jurassic_ ? U(122) : U(112), 1,
-             {GOLD_TOP, GOLD_BOTTOM, EDGE, U(8), 1, U(9)});
-        band(cx, U(388), U(388) + std::max(2, U(3)), U(330), AMBER, 0.85f);
-        const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA" : boss ? L"SELECT BOSS" : options ? L"OPTIONS" : nullptr;
-        if (sub) text(MONO, U(28), sub, cx, U(408), 1, {0xF0C070, 0xE0A050});
-        y_items = options ? U(452) : U(490);
-        spacing = options ? U(56) : screen_ == Screen::Survival ? U(52) : boss ? U(66) : U(84);
-        item_px = options ? U(42) : screen_ == Screen::Survival ? U(42) : boss ? U(48) : U(60);
-        hint_y = h - U(options ? 110.0f : 150.0f);
-        foot_y = h - U(64);
-    } else {
-        fill(0, 0, w, h, 0x000000, 0.62f);   // the frozen game shows through, darkened
-        int n = options ? VISIBLE_OPTIONS + 2 : int(list.size());   // same panel for every settings tab
-        spacing = options ? U(56) : U(80);
-        item_px = options ? U(44) : U(58);
-        int panel_h = U(170) + n * spacing + U(130);   // title, items, hint and key help
-        int top = (h - panel_h) / 2;
-        int half = options ? U(560) : U(460);
-        fill(cx - half, top, cx + half, top + panel_h, 0x06100A, 0.92f);
-        band(cx, top, top + std::max(2, U(3)), half, AMBER, 0.9f);
-        band(cx, top + panel_h - std::max(2, U(3)), top + panel_h, half, AMBER, 0.9f);
-        text(display(), U(110), options ? L"SETTINGS" : boss ? L"BOSSES" : L"PAUSED", cx, top + U(22), 1,
-             {GOLD_TOP, GOLD_BOTTOM, EDGE, U(5), 1, U(5)});
-        y_items = top + U(170);
-        hint_y = top + panel_h - U(96);
-        foot_y = top + panel_h - U(46);
-    }
-    // Settings tabs show at most VISIBLE_OPTIONS rows; longer ones scroll (the
-    // tab row and BACK stay put), keeping the selected row in view
-    int n_opts = options ? int(list.size()) - 2 : 0, shown_opts = n_opts;
-    more_up_ = more_down_ = RECT{};
-    if (options) {
-        shown_opts = std::min(n_opts, VISIBLE_OPTIONS);
-        scroll_ = std::clamp(scroll_, 0, std::max(0, n_opts - shown_opts));
-        int k = selected_ - 1;   // selected option (0-based), if it is one
-        if (k >= 0 && k < n_opts) {
-            if (k < scroll_) scroll_ = k;
-            if (k >= scroll_ + shown_opts) scroll_ = k - shown_opts + 1;
-        }
-    }
-    if (records) {   // the list of records fills the rows of the options
-        shown_opts = VISIBLE_OPTIONS;
-        draw_records(cx - U(420), cx + U(400), y_items + spacing + U(24), VISIBLE_OPTIONS * spacing / VISIBLE_RECORDS);
-    }
-    auto slot_of = [&](int i) {   // screen row of list entry i, -1 when scrolled out of view
-        if (!options || i == 0) return i;
-        if (i == int(list.size()) - 1) return shown_opts + 1;   // BACK
-        int k = i - 1 - scroll_;
-        return k >= 0 && k < shown_opts ? k + 1 : -1;
-    };
-
-    for (int i = 0; i < int(list.size()); i++) {
-        const Item& it = list[i];
-        bool sel = i == selected_;
-        int slot = slot_of(i);
-        int y = y_items + slot * spacing + (options && slot > 0 ? U(24) : 0);   // room under the tabs
-        int row_h = spacing;
-        int half_w = options ? U(470) : U(320);
-        if (slot < 0) {   // scrolled out of view: no hit area
-            hit_.push_back(RECT{});
-            values_.push_back({-1, 0});
-            continue;
-        }
-        hit_.push_back({cx - half_w, y - (row_h - item_px) / 2 - U(6), cx + half_w, y + item_px + (row_h - item_px) / 2});
-        values_.push_back({-1, 0});
-        if (options && slot == 1 && scroll_ > 0) {   // more rows above / below: arrows at the right edge
-            triangle(cx + half_w + U(16), y - U(4), U(20), -2, GOLD_BOTTOM, 1);
-            more_up_ = {cx + half_w - U(10), y - U(30), cx + half_w + U(44), y + U(16)};
-        }
-        if (options && slot == shown_opts && scroll_ + shown_opts < n_opts) {
-            triangle(cx + half_w + U(16), y + item_px + U(8), U(20), 2, GOLD_BOTTOM, 1);
-            more_down_ = {cx + half_w - U(10), y + item_px - U(8), cx + half_w + U(44), y + item_px + U(34)};
-        }
-        if (sel) band(cx, y - U(8), y + item_px + U(14), half_w, 0xFF9A30, it.enabled ? 0.20f : 0.10f);
-        const Style& st = !it.enabled ? dim : sel ? gold : pale;
-        if (it.id == TABS) {   // tab names side by side, the open one underlined
-            int gap = U(44), total = 0, tab_px = item_px * 17 / 20;
-            for (int t = 0; t < tab_count(); t++) total += measure(display(), tab_px, tab_name(t)) + gap;
-            if (total - gap > 2 * half_w - U(80)) {   // more tabs than fit: smaller names
-                tab_px = tab_px * (2 * half_w - U(80)) / (total - gap);
-                gap = gap * (2 * half_w - U(80)) / (total - gap);
-                total = 0;
-                for (int t = 0; t < tab_count(); t++) total += measure(display(), tab_px, tab_name(t)) + gap;
-            }
-            int x = cx - (total - gap) / 2;
-            tab_rects_.clear();
-            for (int t = 0; t < tab_count(); t++) {
-                bool open_tab = t == tab_;
-                const Style& ts = open_tab ? gold : Style{0x9A927E, 0x7E7766, 0x080806, U(2), 0.95f};
-                int ty0 = y + (item_px - tab_px) / 2;
-                int tw = text(display(), tab_px, tab_name(t), x, ty0, 0, ts);
-                if (open_tab) fill(x, ty0 + tab_px + U(6), x + tw, ty0 + tab_px + U(6) + std::max(2, U(4)), GOLD_BOTTOM, 1);
-                tab_rects_.push_back({x - gap / 2, y, x + tw + gap / 2, y + item_px});
-                x += tw + gap;
-            }
-            if (sel) {
-                int ty = y + item_px * 6 / 10;
-                triangle(tab_rects_.front().left - U(10), ty, U(18), -1, GOLD_BOTTOM, 1);
-                triangle(tab_rects_.back().right + U(10), ty, U(18), +1, GOLD_BOTTOM, 1);
-            }
-            continue;
-        }
-        if (!options || it.id == BACK) {
-            int tw = text(display(), item_px, it.label, cx, y, 1, st);
-            int ty = y + item_px * 6 / 10;
-            if (sel && it.enabled) {
-                triangle(cx - tw / 2 - U(34), ty, U(20), +1, GOLD_BOTTOM, 1);
-                triangle(cx + tw / 2 + U(34), ty, U(20), -1, GOLD_BOTTOM, 1);
-            }
-            if (!it.value.empty())   // e.g. the stage of a boss, or "NOT READY"
-                text(MONO, U(20), it.value, cx + tw / 2 + U(it.enabled ? 62.0f : 18.0f), y + item_px / 2 - U(6), 0,
-                     {0xB89050, 0xA07838});   // past the arrow of a selected entry
-            continue;
-        }
-        int left = cx - U(410), right = cx + U(410);   // symmetric about the centre
-        text(display(), item_px, it.label, left, y, 0, st);
-        int ty = y + item_px * 6 / 10;
-        int vx0;
-        if (it.id == OPT_VOLUME) {   // ten segments
-            int seg_w = U(20), gap = U(6), seg_h = U(26);
-            vx0 = right - 10 * seg_w - 9 * gap;
-            for (int s = 0; s < 10; s++) {
-                int x0 = vx0 + s * (seg_w + gap);
-                bool lit = s < settings.volume;
-                uint32_t c = lit ? mix(GOLD_TOP, GOLD_BOTTOM, float(s) / 9) : 0x3A3A30;
-                fill(x0 - 1, ty - seg_h / 2 - 1, x0 + seg_w + 1, ty + seg_h / 2 + 1, 0x000000, 0.8f);
-                fill(x0, ty - seg_h / 2, x0 + seg_w, ty + seg_h / 2, c, sel || !lit ? 1.0f : 0.8f);
-            }
-        } else {
-            const Style& vs = sel ? gold : Style{0xF4D27A, 0xE0A848, 0x080806, U(2), 0.95f};
-            vx0 = right - text(ITEM, item_px, it.value, right, y, 2, vs);
-        }
-        values_.back() = {vx0 - U(48), (vx0 + right) / 2};
-        if (sel) {
-            triangle(vx0 - U(24), ty, U(18), -1, GOLD_BOTTOM, 1);
-            triangle(right + U(24), ty, U(18), +1, GOLD_BOTTOM, 1);
-        }
-    }
-
-    if (selected_ < int(list.size()))
-        text(MONO, U(26), list[selected_].hint, cx, hint_y, 1, {HINT, HINT});
-    const wchar_t* foot = records   ? L"ARROWS  SCROLL / TAB      WHEEL  SCROLL      ESC  BACK"
-                          : options ? L"ARROWS  SELECT / CHANGE      Q / E  TAB      ESC  BACK"
-                                  : L"ARROWS  SELECT      ENTER / CLICK  CONFIRM      ESC  BACK";
-    text(MONO, U(21), foot, cx, foot_y, 1, {FOOT, FOOT});
+    if (page) draw_options(over_game, list);
+    else draw_menu(over_game, list);
     dirty_ = false;
     return true;
 }

@@ -40,6 +40,7 @@
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
+#include "../ui/menu_music.h"
 #include "../ui/survival_ui.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
@@ -1035,6 +1036,7 @@ int main(int argc, char** argv) {
         FrontendSettings& s = frontend.settings;
         s.fullscreen = ini.fullscreen;
         s.volume = std::clamp(int(g_opt.volume + 0.5f), 0, 10);
+        s.menu_music = ini.menu_music;
         s.speakers = std::clamp(g_opt.speakers, 0, 2);
         s.cubic_samples = g_opt.cubic_samples;
         s.rear_boost = std::clamp(g_opt.rear_boost / 3 * 3, 0, 12);
@@ -1212,6 +1214,9 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> toast_pixels;
     bool toast_shown = toast.init("third_party/fonts") && toast_layer.init(presenter);
     toast.set_volume(g_opt.volume);
+    MenuMusic music;   // over the menus' backdrop, when there is a music file
+    if (g_opt.menu && !g_opt.headless) music.open();
+    double music_time = qpc_seconds();
 
     // Composes the 2D layers of a vblank (out.frame, its layer memory in
     // out.vram) for the renderer. One composition at a time (prep_mutex): the
@@ -1732,13 +1737,24 @@ int main(int argc, char** argv) {
                 }
             }
             static Frontend::Screen menu_was = Frontend::Screen::None;
-            if (frontend.screen() == Frontend::Screen::Records && menu_was != Frontend::Screen::Records) {
+            if ((frontend.screen() == Frontend::Screen::Records || frontend.screen() == Frontend::Screen::Main) &&
+                frontend.screen() != menu_was) {   // the records page, and the main menu's achievements and best score
                 frontend.records = stats_view();   // the game stands still while the menu is open
                 frontend.invalidate();
             }
             menu_was = frontend.screen();
+            {
+                double t = qpc_seconds();
+                music.update(frontend.active() && !frontend.over_game() && frontend.settings.menu_music,
+                             frontend.settings.volume, t - music_time);
+                music_time = t;
+            }
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
             presenter.set_cursor_visible(frontend.active() && !pad_in_menu);
+            if (frontend.pad_prompts != pad_in_menu) {   // the key help shows the gamepad's buttons or the keys
+                frontend.pad_prompts = pad_in_menu;
+                frontend.invalidate();
+            }
             if (frontend.active()) {
                 RECT rc;
                 GetClientRect(presenter.hwnd(), &rc);
@@ -1768,7 +1784,7 @@ int main(int argc, char** argv) {
             frontend.invalidate();
         }
         for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
-            static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E'};
+            static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'R'};
             bool resume = frontend.screen() == Frontend::Screen::Pause;
             if (frontend.active()) {
                 frontend.key(k == PadKey::Start ? (resume ? VK_ESCAPE : VK_RETURN) : VK[int(k)]);
@@ -2109,6 +2125,7 @@ int main(int argc, char** argv) {
     g_quit = true;
     if (g_opt.replay.empty())
         for (int i = 0; i < 100 && !g_parked; i++) Sleep(10);   // a frame takes ~17 ms; 1 s is plenty
+    music.close();
     g_audio.stop();
     stats_save();
     fflush(stdout);
