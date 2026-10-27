@@ -12,7 +12,8 @@
 //   START   join the game (credit + start) or pause during one
 //   BACK    pause (Share, View, -)           L3 / R3 sight to the centre
 //   menus   d-pad or left stick, A to accept and B to go back (on Nintendo
-//           pads the A and B they print), L1 / R1 change the settings tab
+//           pads the A and B they print), L1 / R1 change the settings tab,
+//           the top face button resets the tab to its defaults
 #pragma once
 #include <cstdint>
 #include <string>
@@ -35,7 +36,7 @@ struct AimTarget {
 };
 
 // What the pads send to the menus (any pad)
-enum class PadKey { Up, Down, Left, Right, Accept, Back, TabPrev, TabNext, Start };
+enum class PadKey { Up, Down, Left, Right, Accept, Back, TabPrev, TabNext, Reset, Start };
 
 struct PadState {
     bool connected = false, has_gyro = false;

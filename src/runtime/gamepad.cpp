@@ -212,6 +212,7 @@ void Gamepads::poll(const GamepadSettings& set, bool focused, bool menu) {
             if (pressed(accept)) keys_.push_back(PadKey::Accept);
             if (pressed(back) || pressed(SDL_GAMEPAD_BUTTON_BACK)) keys_.push_back(PadKey::Back);
             if (pressed(SDL_GAMEPAD_BUTTON_START)) keys_.push_back(PadKey::Start);
+            if (pressed(SDL_GAMEPAD_BUTTON_NORTH)) keys_.push_back(PadKey::Reset);
             if (pressed(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || lt_pressed) keys_.push_back(PadKey::TabPrev);
             if (pressed(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || rt_pressed) keys_.push_back(PadKey::TabNext);
             // Direction: the d-pad or the left stick past half way, repeated while held

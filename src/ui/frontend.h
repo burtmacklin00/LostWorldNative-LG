@@ -1,5 +1,8 @@
 // PC front end: main menu (Play, Options, Quit) shown at launch instead of
 // the arcade attract loop, and the pause menu Esc opens during the game.
+// Menus are a column of entries at the left (the logo or the screen's title
+// above); the settings and the records have their categories down the left,
+// the rows in the middle and a panel about the selected row at the right.
 //
 // Drawn on the CPU into a full-window BGRA picture (premultiplied alpha) with
 // the OFL fonts in third_party/fonts and the game's yellow-to-orange letter
@@ -89,6 +92,7 @@ public:
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
     bool gyro_pad = false;  // one of them has a gyroscope
+    bool pad_prompts = false;   // a gamepad drives the menu: its buttons in the key help, not the keyboard's
 
     // Boss mode (runtime/bosses.h): the runtime says which fights are ready
     // and reads the one picked (StartBoss; also "retry" from the pause menu)
@@ -114,11 +118,18 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
     };
+    // How an option row shows its value: a switch, a choice with a dot per
+    // value, a slider, or a button that opens something
+    enum Kind { PLAIN, TOGGLE, CHOICE, SLIDER, BUTTON };
     struct Item {
         Id id;
         std::wstring label, value, hint;
         bool enabled = true;
         int index = -1;   // BOSS_ENTRY: which boss
+        Kind kind = PLAIN;
+        int pos = 0, count = 0;   // CHOICE: which value of how many; TOGGLE: pos 1 = on
+        bool levels = false;      // CHOICE: low to high (the dots up to it lit)
+        float frac = 0;           // SLIDER: 0..1
     };
     struct Mask {   // text coverage (0..255) with `pad` pixels around the text box
         int w = 0, h = 0, pad = 0, text_w = 0, text_h = 0;
@@ -132,12 +143,15 @@ private:
         float alpha = 1;
         int shadow = 0;         // drop shadow offset (pixels), black
     };
-    enum Family { TITLE, ITEM, MONO, JURASSIC };
+    enum Family { TITLE, ITEM, MONO, JURASSIC, BODY };
     // Titles and menu entries: the Jurassic Park font when it is installed
     Family display() const { return jurassic_ ? JURASSIC : TITLE; }
 
     std::vector<Item> items() const;
+    std::vector<Item> option_items(const FrontendSettings& s) const;   // every option, as with these settings
+    static void describe(Item& it, const FrontendSettings& s);         // its Kind and position
     void activate(const Item& it, int dir);
+    void reset_tab();   // the open settings tab back to its defaults
     void back();
     void push(Action a) { actions_.push_back(a); }
     void select(int index);
@@ -146,11 +160,24 @@ private:
     const Mask& mask(Family f, int px, const std::wstring& text, int edge_px);
     int text(Family f, int px, const std::wstring& s, int x, int y, int align, const Style& st);
     int measure(Family f, int px, const std::wstring& s);
+    int extent(Family f, int px, const std::wstring& s);   // width without making a mask (body text)
+    std::vector<std::wstring> wrap(Family f, int px, const std::wstring& s, int max_w);
     void fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha);
     void band(int cx, int y0, int y1, int half_w, uint32_t rgb, float alpha);
     void triangle(int x, int y, int size, int dir, uint32_t rgb, float alpha);
     void blend(int x, int y, uint32_t rgb, float a);
+    void hgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1);   // alpha a0 at the left to a1
+    void vgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1);   // alpha a0 at the top to a1
+    void frame(int x0, int y0, int x1, int y1, int t, uint32_t rgb, float alpha);   // outline, t pixels
+    void pill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha);           // round ends (a disc when square)
     void background();
+    // The screens: the column of entries, and the settings / records page
+    void draw_menu(bool over_game, const std::vector<Item>& list);
+    void draw_options(bool over_game, const std::vector<Item>& list);
+    void draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h);
+    // Key help along the bottom: button (or key) and what it does; returns its rectangle
+    RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
+    RECT back_rect_{}, reset_rect_{};   // the BACK and RESET prompts, clickable
 
     Screen screen_ = Screen::None;
     bool options_from_pause_ = false;
@@ -182,12 +209,12 @@ private:
         bool lit = true;   // an achievement: unlocked
     };
     std::vector<RecordRow> record_rows() const;
-    static constexpr int VISIBLE_RECORDS = 7;
+    int visible_records_ = 7;   // as many as fit the window
     int record_scroll_ = 0;
     void scroll_records(int by);
     void draw_records(int x0, int x1, int y0, int row_h);
-    // A settings tab shows this many options at most; the rest scroll
-    static constexpr int VISIBLE_OPTIONS = 6;
+    // A settings tab shows as many options as fit the window; the rest scroll
+    int visible_opts_ = 12;
     int scroll_ = 0;           // first option shown
     RECT more_up_{}, more_down_{};   // clickable "more" arrows of a scrolled tab
     std::vector<RECT> tab_rects_;   // a step past the end starts again (clicks on the label)
@@ -211,7 +238,13 @@ private:
     std::vector<uint32_t> poster_;
     int poster_w_ = 0, poster_h_ = 0;
     bool load_poster(const std::wstring& path);
+    // Optional pictures of what an option does (third_party/menu/preview/<name>.jpg),
+    // loaded the first time their option is selected; w = 0: none
+    struct Picture { std::vector<uint32_t> px; int w = 0, h = 0; };
+    std::map<int, Picture> previews_;
+    const Picture& preview(Id id);
+    void picture(const Picture& p, int x0, int y0, int x1, int y1);   // scaled to fill the box, cropped
     bool has_poster() const { return poster_w_ > 0; }
     void poster_background(bool stone_only, std::vector<uint32_t>& dst);
-    void poster_layout(float& scale, float& y0) const;
+    void poster_layout(float& scale, float& x0, float& y0) const;   // the logo at the top left
 };

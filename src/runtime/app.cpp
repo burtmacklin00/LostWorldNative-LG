@@ -1663,13 +1663,18 @@ int main(int argc, char** argv) {
                 }
             }
             static Frontend::Screen menu_was = Frontend::Screen::None;
-            if (frontend.screen() == Frontend::Screen::Records && menu_was != Frontend::Screen::Records) {
+            if ((frontend.screen() == Frontend::Screen::Records || frontend.screen() == Frontend::Screen::Main) &&
+                frontend.screen() != menu_was) {   // the records page, and the main menu's achievements and best score
                 frontend.records = stats_view();   // the game stands still while the menu is open
                 frontend.invalidate();
             }
             menu_was = frontend.screen();
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
             presenter.set_cursor_visible(frontend.active() && !pad_in_menu);
+            if (frontend.pad_prompts != pad_in_menu) {   // the key help shows the gamepad's buttons or the keys
+                frontend.pad_prompts = pad_in_menu;
+                frontend.invalidate();
+            }
             if (frontend.active()) {
                 RECT rc;
                 GetClientRect(presenter.hwnd(), &rc);
@@ -1699,7 +1704,7 @@ int main(int argc, char** argv) {
             frontend.invalidate();
         }
         for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
-            static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E'};
+            static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'R'};
             bool resume = frontend.screen() == Frontend::Screen::Pause;
             if (frontend.active()) {
                 frontend.key(k == PadKey::Start ? (resume ? VK_ESCAPE : VK_RETURN) : VK[int(k)]);
