@@ -22,7 +22,7 @@ struct FrontendSettings {
     bool fullscreen = false;
     int volume = 5;    // 0..10 (output gain)
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
-    int rear_boost = 6;  // dB on the rear pair: 0, 3, 6, 9, 12
+    int rear_boost = 0;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
     int aa = 0;        // 0 MSAA, 1 DLAA, 2 off (takes effect on the next launch)
     bool haze = true;  // distance haze

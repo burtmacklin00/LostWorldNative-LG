@@ -124,7 +124,7 @@ const std::vector<Entry>& table() {
                [](Options& o, const char* v) {
                    o.speakers = strcmp(v, "surround") == 0 ? 1 : strcmp(v, "headphones") == 0 ? 2 : 0;
                }),
-        num("--rear-boost", &Options::rear_boost, "extra dB on the rear speakers (roars and effects; 6)"),
+        num("--rear-boost", &Options::rear_boost, "extra dB on the rear speakers (roars and effects; 0)"),
         off("--linear-samples", &Options::cubic_samples, "linear interpolation of the samples, like the original SCSP"),
         text("--wav", "FILE", &Options::wav_path, "record the sound to a WAV"),
         section("Players"),
