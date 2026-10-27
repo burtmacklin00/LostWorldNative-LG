@@ -3,6 +3,8 @@
 // pixel of the game world, a few directions are walked across the depth
 // buffer and the highest point seen above the surface in each tells how much
 // of the sky the surrounding geometry hides. Output: 1 = open, 0 = enclosed.
+// Drawn at half the resolution each way: each texel is the full-resolution
+// pixel at twice its position (ao_apply.frag reads it back from there).
 // Built with RAY_TRACING it can instead trace short rays through the world
 // (raytrace.glsl), which also sees what is off screen or hidden behind.
 #extension GL_GOOGLE_include_directive : require
@@ -43,7 +45,7 @@ float traced_open(vec3 p, vec3 n, float noise) {
 layout(location = 0) out vec4 out_ao;
 
 void main() {
-    vec2 frag = gl_FragCoord.xy;
+    vec2 frag = floor(gl_FragCoord.xy) * 2.0 + 0.5;   // the full-resolution pixel
     vec3 p = ao_view_pos(frag);
     if (p.z >= 0.0) {   // no 3D here (2D backdrop)
         out_ao = vec4(1.0);
@@ -58,7 +60,7 @@ void main() {
     if (dot(n, p) > 0.0) n = -n;   // towards the camera
 
     // Rotated per pixel (and per frame with DLAA, which averages it out)
-    float noise = fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))) + ao.misc.x);
+    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + ao.misc.x);
     // Fogged surfaces lose their shading, so they lose the occlusion too
     float fog = clamp(ao.params.w + (-p.z) * ao.params.z, 0.0, 1.0);
 #ifdef RAY_TRACING

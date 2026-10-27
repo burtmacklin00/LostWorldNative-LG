@@ -524,6 +524,42 @@ static std::string full_path(const std::string& path) {
 
 // The zip the ROM came from (empty when it came from a data folder): the boss
 // state makers are started on the same ROM
+// QUALITY for the first start, from the graphics card's name: a rough guess
+// at its speed (NVIDIA RTX and AMD RX by series and model, a laptop's a step
+// lower; MEDIUM when the name says nothing). The options menu changes it.
+static int suggest_quality(const VkPresenter& vk) {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(vk.gpu(), &props);
+    if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) return FrontendSettings::LOW;
+    std::string name = props.deviceName;
+    for (char& c : name) c = char(tolower((unsigned char)c));
+    auto number_after = [&](const char* word) {
+        size_t at = name.find(word);
+        return at == std::string::npos ? 0 : atoi(name.c_str() + at + strlen(word));
+    };
+    bool laptop = name.find("laptop") != std::string::npos || name.find("mobile") != std::string::npos ||
+                  name.find("max-q") != std::string::npos;
+    // Ti, Super, XT: half a model up. Scores: 60 a desktop RTX 2060, +10 a model, +10 a series
+    bool plus = name.find(" ti") != std::string::npos || name.find("super") != std::string::npos ||
+                name.find(" xt") != std::string::npos;
+    int score = 0, cap = FrontendSettings::ULTRA;
+    if (int n = number_after("rtx "); n >= 2000) {   // 2060, 3070, 4080, 5090...
+        score = n % 100 + (n / 1000 - 2) * 10;
+    } else if (int r = number_after("rx "); r >= 5000 && r < 10000) {   // 6600, 7800 XT, 9070 XT...
+        int series = r / 1000, model = (r / 100) % 10 ? (r / 100) % 10 : (r / 10) % 10;
+        score = model * 10 + (series >= 9 ? 20 : (series - 6) * 10);
+        cap = FrontendSettings::HIGH;   // slower ray tracing than NVIDIA's
+    } else if (name.find("gtx") != std::string::npos || name.find("radeon") != std::string::npos) {
+        return FrontendSettings::LOW;   // older cards without ray tracing (or an unknown Radeon)
+    } else {
+        return FrontendSettings::MEDIUM;
+    }
+    score += (plus ? 5 : 0) - (laptop ? 10 : 0);
+    int q = score >= 100 ? FrontendSettings::ULTRA : score >= 85 ? FrontendSettings::HIGH
+          : score >= 60 ? FrontendSettings::MEDIUM : FrontendSettings::LOW;
+    return std::min(q, cap);
+}
+
 static std::string g_rom_zip;
 
 // Loads the ROM from the first of: --rom or LW_ROM_ZIP (lostwsga.zip read
@@ -595,6 +631,8 @@ int main(int argc, char** argv) {
     // those always start from the same defaults
     g_opt.menu = !options_disable_menu(argc, argv, {"--trace-survival"});
     FrontendSettings ini;
+    // The first start (no settings saved yet) picks the QUALITY for the graphics card
+    bool first_start = g_opt.menu && !file_exists("save/settings.ini");
     if (g_opt.menu) {   // save/settings.ini, written by the options menu; command-line options win
         ini.load("save/settings.ini");
         g_opt.volume = float(ini.volume);
@@ -603,6 +641,8 @@ int main(int argc, char** argv) {
         g_opt.rear_boost = ini.rear_boost;
         g_opt.dlaa = ini.aa == 1;
         if (ini.aa == 2) g_opt.msaa = 1;
+        g_opt.supersample = ini.scale / 100.0f;
+        g_opt.half_rate = ini.half_rate;
         g_opt.haze = ini.haze ? 1.0f : 0.0f;
         g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
         g_opt.ao = ini.ao ? 1.0f : 0.0f;
@@ -771,6 +811,23 @@ int main(int argc, char** argv) {
         CreateThread(nullptr, 512u << 20, game_thread, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
     }
 
+    if (first_start) {
+        int q = suggest_quality(presenter);
+        static const char* const NAMES[4] = {"LOW", "MEDIUM", "HIGH", "ULTRA"};
+        printf("[video] first start: quality %s for this graphics card (options menu, DISPLAY)\n", NAMES[q]);
+        ini.set_quality(q);
+        // What QUALITY sets (FrontendSettings::set_quality), now from the level picked
+        g_opt.supersample = ini.scale / 100.0f;
+        g_opt.half_rate = ini.half_rate;
+        g_opt.ray_tracing = ini.ray_tracing;
+        g_opt.ao = ini.ao ? 1.0f : 0.0f;
+        g_opt.shadows = ini.shadows;
+        g_opt.shafts = ini.shafts;
+        g_opt.soft = ini.soft;
+        g_opt.sky_procedural = ini.sky;
+        g_opt.relief = ini.relief;
+        g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
+    }
     R3DRenderer renderer;
     if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa)) {
         fprintf(stderr, "Could not start the 3D renderer\n");
@@ -938,6 +995,10 @@ int main(int argc, char** argv) {
         s.cubic_samples = g_opt.cubic_samples;
         s.rear_boost = std::clamp(g_opt.rear_boost / 3 * 3, 0, 12);
         s.aa = g_opt.dlaa ? 1 : g_opt.msaa <= 1 ? 2 : 0;
+        s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
+        for (int sc : FrontendSettings::SCALES)
+            if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
+        s.half_rate = g_opt.half_rate;
         s.haze = g_opt.haze > 0;
         s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
         s.ao = g_opt.ao > 0;
@@ -1328,6 +1389,7 @@ int main(int argc, char** argv) {
     const int queue_depth = getenv("LW_QUEUE") ? atoi(getenv("LW_QUEUE")) : 2;
     int queue_extra = 0;
     double went_out = 0, last_miss = -100;
+    bool repeat_image = false;   // HALF FRAME RATE: this refresh shows the last image again
     for (;;) {
         {   // before the inputs are read
             int depth = queue_depth ? queue_depth + queue_extra : 0;
@@ -1470,6 +1532,8 @@ int main(int argc, char** argv) {
                     Scsp::set_cubic(g_opt.cubic_samples = s.cubic_samples);
                     g_sound.set_rear_boost(g_opt.rear_boost = s.rear_boost);
                     g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers = s.speakers));
+                    renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
+                    g_opt.half_rate = s.half_rate;
                     renderer.set_distance_haze(s.haze ? haze_strength : 0);
                     renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
@@ -1696,6 +1760,21 @@ int main(int argc, char** argv) {
             ready_frames.clear();
         }
         double display = display_clock.tick(presenter.hwnd());
+        // HALF FRAME RATE: above 100 Hz every other refresh shows the image
+        // before again (only the crosshairs move), half the work of the GPU
+        bool half = g_opt.half_rate && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
+                    film.empty();
+        repeat_image = half && !repeat_image;
+        if (repeat_image) {
+            presenter.frame([&](VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
+                renderer.record_repeat(cmd, view, extent);
+                if (survival_shown) survival_layer.record(cmd, view, extent);
+                ui.record(cmd, view, extent);
+                if (toast_shown) toast_layer.record(cmd, view, extent);
+            });
+            presents++;
+            continue;
+        }
         std::shared_ptr<const R3DFrameState> latest;
         std::shared_ptr<Prepared> newest;   // the newest frame made ready
         std::deque<std::shared_ptr<Prepared>> waiting;   // those after the one built (made after the switch)

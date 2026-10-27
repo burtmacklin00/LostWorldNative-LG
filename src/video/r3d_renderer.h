@@ -79,7 +79,15 @@ public:
     }
 
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
+    // The image of the last record() composed again, with the crosshairs where
+    // they are now and nothing else redrawn (HALF FRAME RATE: every other
+    // refresh of a fast monitor); a full record() if there is none to repeat
+    // or the window changed size
+    void record_repeat(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
     void set_max_aspect(float aspect) { max_aspect_ = aspect; }
+    // Internal 3D resolution: this factor times the window's (the targets
+    // are made again on the next frame)
+    void set_supersample(float factor) { supersample_ = factor < 0.5f ? 0.5f : (factor > 4.0f ? 4.0f : factor); }
     // true: 2D layers upscaled with xBR; false: plain square pixels
     void set_smooth_2d(bool smooth) { smooth_2d_ = smooth; }
     // true: HUD elements at the sides go to the edges of a widescreen window
@@ -197,10 +205,26 @@ private:
                      const std::vector<uint8_t>& rgba,
                      bool replace = false);   // replace: the slot's previous picture is freed
 
-    // record(), pass by pass. Frame: what they all need; ComposePush: the
-    // push constants of compose.frag (both defined in r3d_renderer.cpp)
-    struct Frame;
-    struct ComposePush;
+    // record(), pass by pass. Frame: what they all need
+    struct Frame {
+        VkCommandBuffer cmd;
+        VkExtent2D extent;       // the window
+        ScreenLayout lay;        // placement of the game screen in it
+        uint32_t out_w, out_h;   // internal 3D resolution
+        size_t vcount;           // vertices of the scene
+        float before;            // motion vectors: how far back the previously displayed image was
+        float jitter_x, jitter_y, alpha_seed;   // DLAA: sub-pixel shift and alpha-test noise seed
+    };
+    // Push constants of compose.frag (layout(push_constant) uniform Compose), in
+    // its order; what each field means is documented there
+    struct ComposePush {
+        float scale[2], offset[2], crosshair[2], window[2], layer2d[2], filter2d[2];
+        float hud[4], sky[4], effects[4], motion[4], crosshair2[4];
+    };
+    Frame repeat_frame_{};        // the last record(), for record_repeat()
+    ComposePush repeat_push_{};
+    bool can_repeat_ = false;
+    void place_crosshairs(const ScreenLayout& lay, ComposePush& pc) const;
     void record_uploads(const Frame& f);
     void record_shadows(const Frame& f);
     void record_world(const Frame& f);
