@@ -1314,19 +1314,19 @@ void Frontend::backdrop_background() {
     bg_.assign(size_t(w_) * h_, 0xFF000000u);
     px_ = bg_.data();
     picture(backdrop_, 0, 0, w_, h_);
-    Picture small;   // the blur: drawn small, then stretched back
-    small.w = std::max(16, w_ / 12);
-    small.h = std::max(9, h_ / 12);
-    small.px.resize(size_t(small.w) * small.h);
+    Picture blur;   // the blur: drawn blur, then stretched back
+    blur.w = std::max(16, w_ / 12);
+    blur.h = std::max(9, h_ / 12);
+    blur.px.resize(size_t(blur.w) * blur.h);
     {
         int ww = w_, hh = h_;
-        w_ = small.w, h_ = small.h, px_ = small.px.data();
+        w_ = blur.w, h_ = blur.h, px_ = blur.px.data();
         picture(backdrop_, 0, 0, w_, h_);
         w_ = ww, h_ = hh;
     }
     bg_stone_.assign(size_t(w_) * h_, 0xFF000000u);
     px_ = bg_stone_.data();
-    picture(small, 0, 0, w_, h_);
+    picture(blur, 0, 0, w_, h_);
     fill(0, 0, w_, h_, 0x000000, 0.3f);
     px_ = bg_.data();
     hgrad(int(w_ * 0.40f), 0, int(w_ * 0.64f), h_, 0x040508, 0.0f, 0.6f);
