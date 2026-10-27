@@ -84,6 +84,10 @@ Light guns that Windows sees as a mouse (Sinden, Gun4IR and the like) work as is
 Game > Free play** lets 1 / 2 (a gun's start button) start and continue without a coin, and
 **Controls > Hide idle crosshair** clears a crosshair whose gun has not been used for a few seconds.
 
+Want your own crosshair? Drop a `crosshair.png` (with transparency) next to `LostWorld.exe`, and
+`crosshair_p2.png` for player 2 if you want a different one. It is centred on the gun, and its size
+is in pixels of a 1080p screen (it scales with the window).
+
 ## More
 
 - [Full manual](docs/MANUAL.md): every option, the modes, texture packs, debugging.

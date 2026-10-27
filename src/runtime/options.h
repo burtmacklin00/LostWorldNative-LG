@@ -50,6 +50,7 @@ struct Options {
     int ray_tracing = 2;             // --rt off|shadows|ao (--no-rt): traced sun shadows (1) and ambient occlusion (2)
     bool sun = true;                 // --no-sun: no sun in the procedural sky
     bool show_crosshair = true;      // menu option; the C key toggles it
+    bool custom_crosshair = true;    // menu option: crosshair.png pictures (ui/crosshair_file.h) instead of the rings
     int crosshair_hide = 0;          // --crosshair-hide N: hide a crosshair after N seconds unused (0 = never)
     int subtitles = 0;               // --subtitles off|en|jp: 0, 1, 2
     // Sound

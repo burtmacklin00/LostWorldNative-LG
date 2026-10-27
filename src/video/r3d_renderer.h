@@ -77,6 +77,9 @@ public:
         crosshair_x_[player] = x;
         crosshair_y_[player] = y;
     }
+    // A player's own crosshair picture (crosshair.png beside the exe), drawn
+    // centred on the gun instead of the built-in ring; empty rgba: the ring again
+    void set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba);
 
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
     void set_max_aspect(float aspect) { max_aspect_ = aspect; }
@@ -195,7 +198,7 @@ private:
     void ensure_targets(uint32_t w, uint32_t h);
     void upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler sampler, uint32_t slot, int w, int h,
                      const std::vector<uint8_t>& rgba,
-                     bool replace = false);   // replace: the slot's previous picture is freed
+                     std::unordered_map<uint32_t, Image>* replace = nullptr);   // the slot's previous picture there is freed
 
     // record(), pass by pass. Frame: what they all need; ComposePush: the
     // push constants of compose.frag (both defined in r3d_renderer.cpp)
@@ -296,6 +299,7 @@ private:
 
     std::vector<Image> replacements_;
     std::unordered_map<uint32_t, Image> overlay_images_;   // 2D replacement and backdrop pictures by slot
+    std::unordered_map<uint32_t, Image> crosshair_images_;   // the players' own crosshair pictures
     VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, replace_sampler_ = VK_NULL_HANDLE,
               overlay_sampler_ = VK_NULL_HANDLE;
     float overlay_brightness_ = 0;
@@ -340,4 +344,5 @@ private:
     void step_sky_sun(const WorldPose& pose, const float view[4], float view_w, float out[3]);
     float back_shift_ = 0.0f;
     float crosshair_x_[2] = {}, crosshair_y_[2] = {};
+    bool crosshair_picture_[2] = {};
 };

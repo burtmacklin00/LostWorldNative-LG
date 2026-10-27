@@ -22,6 +22,7 @@ layout(set = 0, binding = 9) uniform sampler2D sky_coords;   // backdrop replace
 layout(set = 0, binding = 10) uniform sampler2D light_shafts;   // rays.frag
 layout(set = 0, binding = 12) uniform sampler2D diffusion;   // the picture behind the HUD, blurred (bloom.frag)
 layout(set = 0, binding = 11) uniform sampler2D exposure_log;   // 1x1: average log brightness of the 3D image, eased
+layout(set = 0, binding = 13) uniform sampler2D crosshair_pictures[2];   // crosshair.png, crosshair_p2.png
 
 layout(push_constant) uniform Compose {
     vec2 scale;       // image size relative to the window
@@ -41,7 +42,8 @@ layout(push_constant) uniform Compose {
     vec4 effects;     // x: bloom strength (0 = off); y: colour saturation (1 = original);
                       // z: gamma (1 = original, higher = brighter mid-tones); w: 1 = light shafts
     vec4 motion;      // x: interpolation of the back layers: the fraction of each row's scroll
-                      // since the previous game frame (in sky_coords) to draw them back by
+                      // since the previous game frame (in sky_coords) to draw them back by;
+                      // y: which players have their own crosshair picture (1 = player 1, 2 = player 2)
     vec4 crosshair2;  // xy: player 2's crosshair, like crosshair; z: sharpening (0 = off); w unused
 } pc;
 
@@ -68,6 +70,21 @@ vec4 crosshair(vec2 frag, vec2 at, vec3 tint) {
     if (core < 3.0) return vec4(0.0, 0.0, 0.0, 0.85);   // outline
     if (r < 1.8) return vec4(tint, 1.0);                // centre dot
     return vec4(0.0);
+}
+
+// A player's own crosshair picture, centred on the gun: its pixels count as
+// pixels of a 1080-line screen, so it keeps its size at any resolution
+vec4 crosshair_picture(vec2 frag, vec2 at, int player) {
+    vec2 size = vec2(textureSize(crosshair_pictures[player], 0)) * (pc.window.y / 1080.0);
+    vec2 t = (frag - at) / size + 0.5;
+    if (any(lessThan(t, vec2(0.0))) || any(greaterThan(t, vec2(1.0)))) return vec4(0.0);
+    return texture(crosshair_pictures[player], t);
+}
+
+// Player 1 or 2's crosshair: their own picture if there is one, else the ring
+vec4 player_crosshair(vec2 frag, vec2 at, int player, vec3 tint) {
+    if ((int(pc.motion.y) & (1 << player)) != 0) return crosshair_picture(frag, at, player);
+    return crosshair(frag, at, tint);
 }
 
 // ---- xBR-lv2 ---------------------------------------------------------------
@@ -535,11 +552,11 @@ void main() {
     c = clamp(mix(vec3(luma), c, pc.effects.y), 0.0, 1.0);
     c = pow(c, vec3(1.0 / pc.effects.z));
     if (pc.crosshair2.x >= 0.0) {
-        vec4 x = crosshair(uv * pc.window, pc.crosshair2.xy, vec3(0.2, 0.9, 1.0));
+        vec4 x = player_crosshair(uv * pc.window, pc.crosshair2.xy, 1, vec3(0.2, 0.9, 1.0));
         c = mix(c, x.rgb, x.a);
     }
     if (pc.crosshair.x >= 0.0) {
-        vec4 x = crosshair(uv * pc.window, pc.crosshair, vec3(1.0, 0.95, 0.2));
+        vec4 x = player_crosshair(uv * pc.window, pc.crosshair, 0, vec3(1.0, 0.95, 0.2));
         c = mix(c, x.rgb, x.a);
     }
     color = vec4(c, 1.0);

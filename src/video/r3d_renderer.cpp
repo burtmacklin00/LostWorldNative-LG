@@ -270,8 +270,8 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     li.pNext = nullptr;
     // 5: high-resolution text atlas (only bound when there is one), 6: text cells,
     // 7: alpha of the 3D image (in red), 8: bloom, 9: backdrop replacement coordinates,
-    // 10: light shafts, 11: exposure, 12: diffusion
-    VkDescriptorSetLayoutBinding cb[13];
+    // 10: light shafts, 11: exposure, 12: diffusion, 13: the players' own crosshair pictures
+    VkDescriptorSetLayoutBinding cb[14];
     for (uint32_t i = 0; i < 3; i++)
         cb[i] = {i, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[3] = {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Pack2D::MAX_SLOTS, VK_SHADER_STAGE_FRAGMENT_BIT};
@@ -284,11 +284,12 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     cb[10] = {10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[11] = {11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[12] = {12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
-    VkDescriptorBindingFlags cflags[13] = {0, 0, 0, bflags[1], 0, bflags[1], 0, 0, 0, 0, 0, 0, 0};
-    bfi.bindingCount = 13;
+    cb[13] = {13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkDescriptorBindingFlags cflags[14] = {0, 0, 0, bflags[1], 0, bflags[1], 0, 0, 0, 0, 0, 0, 0, bflags[1]};
+    bfi.bindingCount = 14;
     bfi.pBindingFlags = cflags;
     li.pNext = &bfi;
-    li.bindingCount = 13;
+    li.bindingCount = 14;
     li.pBindings = cb;
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &compose_set_layout_);
     li.pNext = nullptr;
@@ -301,7 +302,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &ao_set_layout_);
 
     VkDescriptorPoolSize ps[4] = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32 + TexturePack::MAX_SLOTS + Pack2D::MAX_SLOTS},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 34 + TexturePack::MAX_SLOTS + Pack2D::MAX_SLOTS},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
@@ -797,6 +798,11 @@ void R3DRenderer::set_text_atlas(const TextHD& text) {
     upload_slot(compose_set_, 5, overlay_sampler_, 0, text.atlas_w, text.atlas_h, text.atlas_rgba);
 }
 
+void R3DRenderer::set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba) {
+    crosshair_picture_[player] = !rgba.empty();
+    if (!rgba.empty()) upload_slot(compose_set_, 13, overlay_sampler_, uint32_t(player), w, h, rgba, &crosshair_images_);
+}
+
 void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0, int y1) {
     memcpy(static_cast<uint8_t*>(texture_staging_.mapped) + size_t(y0) * 2048 * 2, rows.data(), rows.size() * 2);
     if (tex_y0_ >= tex_y1_) {
@@ -809,7 +815,7 @@ void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0,
 }
 
 void R3DRenderer::upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler sampler, uint32_t slot, int w, int h,
-                              const std::vector<uint8_t>& rgba, bool replace) {
+                              const std::vector<uint8_t>& rgba, std::unordered_map<uint32_t, Image>* replace) {
     {
         uint32_t mips = 1;
         while ((std::max(w, h) >> mips) > 0) mips++;
@@ -891,13 +897,13 @@ void R3DRenderer::upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler s
         wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         wr.pImageInfo = &info;
         if (replace) {   // the slot's previous picture is no longer needed
-            auto old = overlay_images_.find(slot);
-            if (old != overlay_images_.end()) {
+            auto old = replace->find(slot);
+            if (old != replace->end()) {
                 vkDeviceWaitIdle(dev_);   // frames in flight may still read it
                 destroy_image(old->second);
             }
             vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
-            overlay_images_[slot] = img;
+            (*replace)[slot] = img;
             return;
         }
         vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
@@ -912,12 +918,12 @@ void R3DRenderer::add_replacements(const std::vector<RgbaImage>& images) {
 
 void R3DRenderer::add_overlays(const std::vector<RgbaImage>& images) {
     for (const RgbaImage& src : images)
-        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, true);
+        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, &overlay_images_);
 }
 
 void R3DRenderer::add_sky_pictures(const std::vector<RgbaImage>& images) {
     for (const RgbaImage& src : images)
-        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, true);
+        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, &overlay_images_);
 }
 
 // The background layers continue beside the 4:3 area only while the 3D
@@ -1812,7 +1818,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                            extend_back ? 1.0f : 0.0f},
                    .sky = {seconds, 0, sun_ ? 1.0f : 0.0f, 0},
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
-                   .motion = {back_shift_, 0, 0, 0},
+                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f), 0, 0},
                    .crosshair2 = {-1, -1, sharpen_, 0}};
     float* at[2] = {pc.crosshair, pc.crosshair2};
     for (int p = 0; p < 2; p++)
@@ -2151,5 +2157,6 @@ void R3DRenderer::shutdown() {
         destroy_image(*img);
     for (Image& img : replacements_) destroy_image(img);
     for (auto& [slot, img] : overlay_images_) destroy_image(img);
+    for (auto& [slot, img] : crosshair_images_) destroy_image(img);
     for (Buffer* b : {&texture_staging_, &layer_staging_, &vertices_, &atmosphere_uniform_}) destroy_buffer(*b);
 }
