@@ -347,20 +347,24 @@ static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
 // whole refreshes, and starts again after a stall (a window drag, a slow frame).
 // DWM's vblanks are those of one monitor (the main one): they are not used
 // when the window's monitor runs at another refresh rate (two monitors at 60
-// and 144 Hz), nor when the images go out faster than its refreshes (vsync
-// turned off in the driver's settings), where they are not tied to vblanks
+// and 144 Hz). When the images do not go out one per refresh (vsync turned
+// off in the driver, G-Sync/FreeSync below the monitor's rate, refreshes
+// missed) they are not tied to vblanks either: each goes out about as soon
+// as it is ready, so its moment is when this thread prepares it (it waits
+// for the previous presents first, so its wake-ups follow theirs)
 struct DisplayClock {
+    enum Mode { Vblanks, Refreshes, Presents };
     double at = 0, last = 0, period = 1.0 / 60;
-    double interval = 0;      // between wake-ups, averaged over ~20
+    double interval = 0;      // between wake-ups, averaged over ~100
     double monitor_hz = 0;    // the refresh rate of the window's monitor (0: unknown)
     double checked = -100;    // when monitor_hz was read
-    bool use_dwm = true;
-    bool told = false;        // the choice was printed once
+    Mode mode = Vblanks;
+    bool told = false;        // the mode was printed
     double tick(HWND hwnd) {
         double now = qpc_seconds();
         if (last > 0 && now - last < 0.1) {
             double dt = std::clamp(now - last, 1.0 / 1000, 0.05);
-            interval = interval > 0 ? interval + 0.05 * (dt - interval) : dt;
+            interval = interval > 0 ? interval + 0.01 * (dt - interval) : dt;
         }
         if (now - checked > 1) {   // the window may have moved to another monitor
             checked = now;
@@ -377,33 +381,36 @@ struct DisplayClock {
         info.cbSize = sizeof(info);
         bool dwm = SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &info)) && info.qpcRefreshPeriod > 0;
         double f = double(g_qpf.QuadPart), dwm_period = dwm ? double(info.qpcRefreshPeriod) / f : 0;
-        if (dwm) {
-            // (59 for 59.94 Hz: whole numbers)
-            bool other_monitor = monitor_hz > 0 && std::abs(1 / dwm_period - monitor_hz) > 1.5;
-            bool faster = interval > 0 && interval < 0.85 * dwm_period;
-            bool slower = interval > 0 && interval > 0.95 * dwm_period;
-            bool was = use_dwm;
-            if (other_monitor || (use_dwm && faster)) use_dwm = false;
-            else if (!use_dwm && slower) use_dwm = true;
-            if (use_dwm != was || !told) {
-                told = true;
-                if (use_dwm) {
-                    printf("[video] display clock: vblanks reported by Windows (%.1f Hz)\n", 1 / dwm_period);
-                } else {
-                    printf("[video] display clock: timed from the presents (Windows reports %.1f Hz, the window's "
-                           "monitor %.0f Hz, presents every %.2f ms%s)\n",
-                           1 / dwm_period, monitor_hz, interval * 1000, faster ? ": vsync off?" : "");
-                    if (monitor_hz > 0) period = 1 / monitor_hz;
-                    at = 0;
-                }
-                fflush(stdout);
-            }
-        } else if (!told) {
+        // (59 for 59.94 Hz: whole numbers)
+        bool other_monitor = dwm && monitor_hz > 0 && std::abs(1 / dwm_period - monitor_hz) > 1.5;
+        double refresh = dwm && !other_monitor ? dwm_period : monitor_hz > 0 ? 1 / monitor_hz : period;
+        // One image per refresh: the wake-ups at the refresh rate, within 2%
+        // (4% to stop: a refresh missed now and then is still one per refresh)
+        double off = interval > 0 ? std::abs(interval / refresh - 1) : 0;
+        bool per_refresh = mode == Presents ? off < 0.02 : off < 0.04;
+        Mode was = mode;
+        mode = !per_refresh ? Presents : dwm && !other_monitor ? Vblanks : Refreshes;
+        if (mode != was || !told) {
             told = true;
-            printf("[video] display clock: timed from the presents (Windows reports no vblanks)\n");
-            if (monitor_hz > 0) period = 1 / monitor_hz;
+            if (mode == Vblanks)
+                printf("[video] display clock: vblanks reported by Windows (%.1f Hz)\n", 1 / dwm_period);
+            else if (mode == Refreshes)
+                printf("[video] display clock: one image per refresh, timed from the presents (the window's monitor "
+                       "%.0f Hz, Windows reports %.1f Hz)\n", monitor_hz, dwm ? 1 / dwm_period : 0.0);
+            else
+                printf("[video] display clock: each image when it is ready (%.1f images per second on a %.0f Hz "
+                       "monitor: vsync off, G-Sync/FreeSync or refreshes missed)\n",
+                       1 / interval, 1 / refresh);
+            fflush(stdout);
+            period = refresh;
+            at = 0;
         }
-        if (dwm && use_dwm) {
+        if (mode == Presents) {
+            if (dwm && !other_monitor) period = dwm_period;
+            at = last = now;
+            return at;
+        }
+        if (mode == Vblanks) {
             double vblank = double(info.qpcVBlank) / f;
             period = dwm_period;
             double next = vblank + std::ceil((now - vblank) / period) * period;
