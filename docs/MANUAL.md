@@ -221,14 +221,10 @@ saved games and are not versioned.
   speakers (4.0, 5.1 or 7.1; with 5.1 to the sides if there are no rears); on
   headphones they are mixed with crossfeed and the rears sound duller and
   wider, as if from behind.
-- --rear-boost N (AUDIO tab, REAR BOOST; default 6): extra dB on the
-  rear speakers (slave SCSP). In the arcade they are in the seat, next
-  to the head, and they carry the T-Rex roars and many effects; without
-  this they were drowned out by the music.
-- The T-Rex roars and the other big effects (the slots the game plays loud
-  and also sends to the reverb) are 12 dB louder than in the original mix,
-  which put them about level with the gunfire; that plays over them all
-  through a boss fight and covered them.
+- --rear-boost N (AUDIO tab, REAR BOOST; default OFF): extra dB (3 to
+  12) on the rear speakers (slave SCSP). In the arcade they are in the
+  seat, next to the head, and they carry the T-Rex roars and many effects.
+  The T-Rex roars and the rest of the mix play at their original level.
 - --linear-samples (AUDIO tab, SAMPLE QUALITY = ORIGINAL): linear
   sample interpolation like the original chip. Default is cubic
   (SMOOTH), with less harshness in low sounds and voices.
