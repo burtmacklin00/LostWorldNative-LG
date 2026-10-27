@@ -117,6 +117,7 @@ add_executable(LostWorld
     src/video/vk_presenter.cpp
     src/video/ui_overlay.cpp
     src/ui/crosshair_file.cpp
+    src/ui/menu_music.cpp
     src/ui/frontend.cpp
     src/video/r3d_state.cpp
     src/video/r3d_scene.cpp

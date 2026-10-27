@@ -86,6 +86,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "flashlight") torch = v != "original";
         else if (k == "hd_text") hd_text = on;
         else if (k == "crosshair") crosshair = on;
+        else if (k == "menu_music") menu_music = on;
         else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
         else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
         else if (k == "free_play") free_play = on;
@@ -115,11 +116,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nmenu_music = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music);
     fclose(f);
 }
 
@@ -240,7 +241,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_AO, LIGHTING_TAB}, {OPT_BLOOM, LIGHTING_TAB}, {OPT_RIM, LIGHTING_TAB}, {OPT_RELIEF, LIGHTING_TAB}, {OPT_TORCH, LIGHTING_TAB},
     {OPT_SKY, ATMOSPHERE_TAB}, {OPT_HAZE, ATMOSPHERE_TAB}, {OPT_LIGHTNING, ATMOSPHERE_TAB},
     {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
-    {OPT_VOLUME, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
+    {OPT_VOLUME, AUDIO_TAB}, {OPT_MUSIC, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
     {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
     {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
@@ -294,6 +295,8 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
             {OPT_MOTION, L"MOTION", s.smooth ? L"SMOOTH" : L"ORIGINAL",
              L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
             {OPT_VOLUME, L"VOLUME", std::to_wstring(s.volume), L"Sound volume"},
+            {OPT_MUSIC, L"MENU MUSIC", on_off(s.menu_music),
+             L"Music in the menus (third_party/menu/music.mp3), at the sound volume"},
             {OPT_SPEAKERS, L"SPEAKERS", SPEAKERS[s.speakers], SPEAKER_HINTS[s.speakers]},
             {OPT_REAR, L"REAR BOOST", s.rear_boost ? L"+" + std::to_wstring(s.rear_boost) + L" DB" : std::wstring(L"OFF"),
              L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
@@ -406,6 +409,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
                4, false);
         break;
     case OPT_FREE_PLAY: toggle(s.free_play); break;
+    case OPT_MUSIC: toggle(s.menu_music); break;
     case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
     case OPT_CROSS_P1: case OPT_CROSS_P2: it.kind = BUTTON; break;
     case OPT_MICE: choice(s.second_mouse ? 1 : 0, 2, false); break;
@@ -451,6 +455,7 @@ void Frontend::reset_tab() {
         case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
         case OPT_CROSS_STYLE: settings.crosshair_style = d.crosshair_style; break;
         case OPT_FREE_PLAY: settings.free_play = d.free_play; break;
+        case OPT_MUSIC: settings.menu_music = d.menu_music; break;
         case OPT_MICE: settings.second_mouse = d.second_mouse; break;
         case OPT_SUBS: settings.subtitles = d.subtitles; break;
         case OPT_SAT: settings.saturation = d.saturation; break;
@@ -635,6 +640,7 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
+    case OPT_MUSIC: settings.menu_music = !settings.menu_music; push(Action::SettingsChanged); break;
     case OPT_CROSS_STYLE: settings.crosshair_style = 1 - settings.crosshair_style; push(Action::SettingsChanged); break;
     case OPT_CROSS_P1:
     case OPT_CROSS_P2:   // the Windows file dialog; a picture picked is also shown from then on
@@ -1834,8 +1840,7 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
         bg_.clear();
         bg_stone_.clear();
     }
-    bool over_game = screen_ == Screen::Pause || (screen_ == Screen::Options && options_from_pause_) ||
-                     (screen_ == Screen::Boss && boss_over_game_);
+    bool over_game = this->over_game();
     bool page = screen_ == Screen::Options || screen_ == Screen::Records;
     if (over_game) out.assign(size_t(w) * h, 0);
     else {

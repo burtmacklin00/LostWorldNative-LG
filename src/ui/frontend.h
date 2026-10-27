@@ -59,6 +59,7 @@ struct FrontendSettings {
     int gyro_speed = 5;     // 1..10
     int vibration = 2;      // gamepad vibration: 0 off, 1 low, 2 medium, 3 high
     int aim_assist = 2;     // gamepad aim assist: 0 off, 1 low, 2 medium, 3 high
+    bool menu_music = true; // ui/menu_music.h, when there is a music file
 
     // save/settings.ini; missing keys keep their current value
     void load(const char* path);
@@ -78,6 +79,11 @@ public:
     void open(Screen s);
     Screen screen() const { return screen_; }
     bool active() const { return screen_ != Screen::None; }
+    // A menu over the paused game (the pause menu, its settings, the boss list from it)
+    bool over_game() const {
+        return screen_ == Screen::Pause || (screen_ == Screen::Options && options_from_pause_) ||
+               (screen_ == Screen::Boss && boss_over_game_);
+    }
 
     // Window input; true when the menu used it
     bool key(int vk);
@@ -117,7 +123,7 @@ private:
         BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC,
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
