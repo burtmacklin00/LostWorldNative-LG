@@ -43,6 +43,7 @@ struct FrontendSettings {
     int rain = 2;          // rain where the game has its own: 0 off, 1 light, 2 heavy
     bool hd_text = true;
     bool crosshair = true;
+    int crosshair_style = 1; // 0 the drawn rings, 1 the crosshair.png pictures when there are any (ui/crosshair_file.h)
     int crosshair_hide = 0; // seconds without use before a crosshair hides: 0 never, 3, 5 or 10
     bool free_play = false; // 1 / 2 (or a gun's start button) insert the credit themselves
     bool smooth = true;     // the 3D drawn between game frames at the monitor's refresh rate
@@ -65,7 +66,8 @@ class Frontend {
 public:
     enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
-                        StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu };
+                        StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
+                        CrosshairChanged };   // a new crosshair picture (crosshair_pick)
 
     bool init(const std::string& font_dir);
     void shutdown();

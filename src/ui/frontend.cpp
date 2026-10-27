@@ -83,6 +83,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "flashlight") torch = v != "original";
         else if (k == "hd_text") hd_text = on;
         else if (k == "crosshair") crosshair = on;
+        else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
         else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
         else if (k == "free_play") free_play = on;
         else if (k == "motion") smooth = v != "original";
@@ -111,11 +112,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_hide = %d\nfree_play = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_hide, free_play);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play);
     fclose(f);
 }
 

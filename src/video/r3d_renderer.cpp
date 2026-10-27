@@ -799,8 +799,8 @@ void R3DRenderer::set_text_atlas(const TextHD& text) {
 }
 
 void R3DRenderer::set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba) {
-    upload_slot(compose_set_, 13, overlay_sampler_, uint32_t(player), w, h, rgba);
-    crosshair_picture_[player] = true;
+    crosshair_picture_[player] = !rgba.empty();
+    if (!rgba.empty()) upload_slot(compose_set_, 13, overlay_sampler_, uint32_t(player), w, h, rgba, &crosshair_images_);
 }
 
 void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0, int y1) {
@@ -815,7 +815,7 @@ void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0,
 }
 
 void R3DRenderer::upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler sampler, uint32_t slot, int w, int h,
-                              const std::vector<uint8_t>& rgba, bool replace) {
+                              const std::vector<uint8_t>& rgba, std::unordered_map<uint32_t, Image>* replace) {
     {
         uint32_t mips = 1;
         while ((std::max(w, h) >> mips) > 0) mips++;
@@ -897,13 +897,13 @@ void R3DRenderer::upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler s
         wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         wr.pImageInfo = &info;
         if (replace) {   // the slot's previous picture is no longer needed
-            auto old = overlay_images_.find(slot);
-            if (old != overlay_images_.end()) {
+            auto old = replace->find(slot);
+            if (old != replace->end()) {
                 vkDeviceWaitIdle(dev_);   // frames in flight may still read it
                 destroy_image(old->second);
             }
             vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
-            overlay_images_[slot] = img;
+            (*replace)[slot] = img;
             return;
         }
         vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
@@ -918,12 +918,12 @@ void R3DRenderer::add_replacements(const std::vector<RgbaImage>& images) {
 
 void R3DRenderer::add_overlays(const std::vector<RgbaImage>& images) {
     for (const RgbaImage& src : images)
-        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, true);
+        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, &overlay_images_);
 }
 
 void R3DRenderer::add_sky_pictures(const std::vector<RgbaImage>& images) {
     for (const RgbaImage& src : images)
-        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, true);
+        upload_slot(compose_set_, 3, overlay_sampler_, src.slot, src.w, src.h, src.rgba, &overlay_images_);
 }
 
 // The background layers continue beside the 4:3 area only while the 3D
@@ -2157,5 +2157,6 @@ void R3DRenderer::shutdown() {
         destroy_image(*img);
     for (Image& img : replacements_) destroy_image(img);
     for (auto& [slot, img] : overlay_images_) destroy_image(img);
+    for (auto& [slot, img] : crosshair_images_) destroy_image(img);
     for (Buffer* b : {&texture_staging_, &layer_staging_, &vertices_, &atmosphere_uniform_}) destroy_buffer(*b);
 }

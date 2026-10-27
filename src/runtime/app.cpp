@@ -38,9 +38,9 @@
 #include "survival.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
+#include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
 #include "../ui/survival_ui.h"
-#include "../video/image_io.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
 #include "../video/r3d_scene.h"
@@ -185,6 +185,18 @@ static void poll_keyboard_mouse(HWND hwnd) {
     bool c_down = down('C');
     if (c_down && !c_was_down) g_opt.show_crosshair = !g_opt.show_crosshair;
     c_was_down = c_down;
+}
+
+// crosshair.png / crosshair_p2.png beside LostWorld.exe (ui/crosshair_file.h)
+// replace the drawn crosshairs unless Crosshair style is Default; again after
+// the menu picks a new one
+static void load_crosshairs(R3DRenderer& renderer) {
+    for (int p = 0; p < 2; p++) {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+        if (g_opt.custom_crosshair && crosshair_load(p, w, h, rgba)) printf("[video] player %d crosshair: %dx%d picture\n", p + 1, w, h);
+        renderer.set_crosshair_picture(p, w, h, rgba);
+    }
 }
 
 // Settings > Controls > Hide idle crosshair: a gun that has not moved (more
@@ -645,6 +657,7 @@ int main(int argc, char** argv) {
         g_opt.classic_text = !ini.hd_text;
         g_opt.subtitles = ini.subtitles;
         g_opt.show_crosshair = ini.crosshair;
+        g_opt.custom_crosshair = ini.crosshair_style == 1;
         g_opt.crosshair_hide = ini.crosshair_hide;
         g_opt.free_play = ini.free_play;
         g_opt.interp = ini.smooth;
@@ -855,16 +868,7 @@ int main(int argc, char** argv) {
     uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
     TextHD text;   // menus, captions and score drawn from vector fonts
     if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
-    // crosshair.png beside LostWorld.exe replaces the drawn crosshairs, and
-    // crosshair_p2.png player 2's (who otherwise takes crosshair.png too)
-    for (int p = 0; p < 2; p++) {
-        int w, h;
-        std::vector<uint8_t> rgba;
-        std::string name = exe_folder() + (p ? "crosshair_p2.png" : "crosshair.png");
-        if (!png_load(name, w, h, rgba) && !(p && png_load(name = exe_folder() + "crosshair.png", w, h, rgba))) continue;
-        renderer.set_crosshair_picture(p, w, h, rgba);
-        printf("[video] player %d crosshair: %s (%dx%d)\n", p + 1, name.c_str(), w, h);
-    }
+    load_crosshairs(renderer);
     std::atomic<bool> capture_2d{false};   // F12 / --shot: the next 2D composition is saved
     bool f12_was_down = false, f9_was_down = false;
     builder.set_vrom(g_vrom.data(), g_vrom.size());
@@ -992,6 +996,7 @@ int main(int argc, char** argv) {
         s.hd_text = !g_opt.classic_text;
         s.subtitles = g_subtitles;
         s.crosshair = g_opt.show_crosshair;
+        s.crosshair_style = g_opt.custom_crosshair ? 1 : 0;
         s.crosshair_hide = g_opt.crosshair_hide;
         s.free_play = g_opt.free_play;
         s.smooth = g_opt.interp;
@@ -1501,6 +1506,7 @@ int main(int argc, char** argv) {
                     break;
                 case Frontend::Action::Quit: presenter.close(); break;
                 case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
+                case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
                 case Frontend::Action::SettingsChanged:
                     g_sound.set_volume(float(s.volume));
                     toast.set_volume(float(s.volume));
@@ -1537,6 +1543,10 @@ int main(int argc, char** argv) {
                     }
                     g_opt.show_crosshair = s.crosshair;
                     g_opt.crosshair_hide = s.crosshair_hide;
+                    if (g_opt.custom_crosshair != (s.crosshair_style == 1)) {
+                        g_opt.custom_crosshair = s.crosshair_style == 1;
+                        load_crosshairs(renderer);
+                    }
                     g_opt.free_play = s.free_play;
                     if (g_opt.interp != s.smooth) {
                         g_opt.interp = s.smooth;
