@@ -174,10 +174,12 @@ saved games and are not versioned.
   haze, the sky's sun, its rays and the shadows also follow
   the camera between frames (except on camera cuts).
   Windows reports the vblanks of one monitor (the main one): when the
-  window is on a monitor with another refresh rate, or the images go out
-  faster than the refreshes (vsync turned off in the driver), each image's
-  moment is timed from the presents instead (the log says which, `[video]
-  display clock`). If the motion stutters: keep vsync on (*Vertical sync:
+  window is on a monitor with another refresh rate, the refreshes are timed
+  from the presents instead; and when the images do not go out one per
+  refresh (vsync turned off in the driver, G-Sync/FreeSync below the
+  monitor's rate, refreshes missed), each image's moment is when it is
+  prepared, since it goes out about as soon as it is ready (the log says
+  which, `[video] display clock`). If the motion stutters: keep vsync on (*Vertical sync:
   Use the 3D application setting* in the NVIDIA Control Panel), check that
   the window title shows the monitor's refresh rate (fewer Hz than the
   monitor without G-Sync/FreeSync means the GPU misses refreshes: lower
