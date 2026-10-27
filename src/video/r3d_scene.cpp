@@ -194,23 +194,54 @@ void R3DSceneBuilder::link_previous(R3DScene& out) {
             if (trace < 1.0f + 2.0f * 0.866f) spinning.insert(in.key);   // more than 30 degrees
         }
     prev_axes_.swap(axes);
-    std::unordered_map<uint64_t, uint32_t> index;
-    index.reserve(out.vertices.size());
+    index_.reset(out.vertices.size());
     for (size_t i = 0; i < out.vertices.size(); i++) {
         R3DVertex& v = out.vertices[i];
         memcpy(v.prev, v.pos, sizeof(v.pos));
-        index.emplace(keys_[i], uint32_t(i));
-        auto it = prev_index_.find(keys_[i]);
-        if (it == prev_index_.end() || spinning.count(uint32_t(keys_[i] >> 32))) continue;
-        const float* p = prev_vertices_[it->second].pos;
+        index_.insert(keys_[i], uint32_t(i));
+        uint32_t was = prev_index_.find(keys_[i]);
+        if (was == KeyIndex::EMPTY || (!spinning.empty() && spinning.count(uint32_t(keys_[i] >> 32)))) continue;
+        const float* p = prev_positions_[was].data();
         float dx = p[0] - v.pos[0], dy = p[1] - v.pos[1], dz = p[2] - v.pos[2];
         float limit = 0.25f * std::max(1.0f, std::fabs(v.pos[2]));
         if (dx * dx + dy * dy + dz * dz > limit * limit) continue;
         memcpy(v.prev, p, sizeof(v.prev));
         out.moving += dx != 0 || dy != 0 || dz != 0;
     }
-    prev_index_.swap(index);
-    prev_vertices_ = out.vertices;
+    std::swap(prev_index_, index_);
+    prev_positions_.resize(out.vertices.size());
+    for (size_t i = 0; i < out.vertices.size(); i++) memcpy(prev_positions_[i].data(), out.vertices[i].pos, 12);
+}
+
+void R3DSceneBuilder::KeyIndex::reset(size_t count) {
+    size_t size = 1024;
+    while (size < 2 * count) size *= 2;
+    if (vertex.size() != size) {
+        keys.resize(size);
+        vertex.assign(size, EMPTY);
+        mask = uint32_t(size - 1);
+    } else {
+        std::fill(vertex.begin(), vertex.end(), EMPTY);
+    }
+}
+
+void R3DSceneBuilder::KeyIndex::insert(uint64_t key, uint32_t v) {
+    for (uint32_t at = uint32_t((key * 0x9E3779B97F4A7C15ull) >> 32) & mask;; at = (at + 1) & mask) {
+        if (vertex[at] == EMPTY) {
+            keys[at] = key;
+            vertex[at] = v;
+            return;
+        }
+        if (keys[at] == key) return;
+    }
+}
+
+uint32_t R3DSceneBuilder::KeyIndex::find(uint64_t key) const {
+    if (vertex.empty()) return EMPTY;
+    for (uint32_t at = uint32_t((key * 0x9E3779B97F4A7C15ull) >> 32) & mask;; at = (at + 1) & mask) {
+        if (vertex[at] == EMPTY) return EMPTY;
+        if (keys[at] == key) return vertex[at];
+    }
 }
 
 // Marks every textured triangle with its replacement slot (0 = none)

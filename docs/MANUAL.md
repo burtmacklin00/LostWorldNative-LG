@@ -138,7 +138,20 @@ saved games and are not versioned.
   antialiasing.
 - --aniso N (default 8; 0 = original look without mipmaps): texture
   filtering with the game's own mipmaps and N anisotropic samples.
-- --scale F: internal 3D resolution (2 = 2x2 supersampling).
+- --scale F: internal 3D resolution (2 = 2x2 supersampling; 0.75 = 75%, faster).
+  In the settings: RENDER RESOLUTION (50-100%, DISPLAY tab), applied at once.
+- --half-rate (or FRAME RATE: HALF in the settings): on monitors above 100 Hz
+  the 3D is drawn every other refresh (72 images per second at 144 Hz) and the
+  refresh in between shows the same picture with only the crosshairs redrawn.
+  About half the GPU work, with the motion still even.
+- QUALITY (settings, DISPLAY tab): LOW, MEDIUM, HIGH and ULTRA set together the
+  options that cost the most (render resolution, frame rate, ray tracing,
+  ambient occlusion, sun shadows, light shafts, soft particles, sky, surface
+  detail, bloom); CUSTOM when they are mixed. On the first start (no
+  save/settings.ini) a level is picked from the graphics card's name: an RTX
+  3060 laptop gets MEDIUM, a 4070 HIGH, a 5070 Ti ULTRA. Measured on an RTX
+  5070 Ti at 1440p, the most expensive effects are the ambient occlusion, the
+  render resolution, the procedural sky and the sun shadows.
 - --letterbox: keeps the black bars in scenes (removed by default).
 - --boot: shows the boot screens (WARNING notice and copyright). By
   default they run at full speed with a black screen (about 2 s instead of
@@ -409,7 +422,7 @@ normal behaviour when unset):
 | LW_FOGDBG | Prints per frame the camera, the ground and the models matched by the world tracking |
 | LW_FOGSUN=x,y,z | Forces the sun direction (view space) for the sun disc and shadows |
 | LW_RTSPLIT | Ray traced shadows and occlusion on the left half of the picture, the shadow map and the depth based occlusion on the right, to compare them |
-| LW_GPUTIME | Every 300 images, the GPU time of the ray tracing build, the 3D pass (with the shadow map) and the whole frame |
+| LW_GPUTIME | Every 300 images, the GPU time of the whole frame and of each pass (ray tracing build, shadow map, 3D opaque, ambient occlusion, rest of the 3D, DLAA, bloom, light shafts, diffusion, exposure, composition) |
 | LW_MIST=rise,banks | Sets the two distance haze parameters |
 | LW_FLASH=brightness | Fixes the grey-fog lightning brightness and shows its bolt |
 | LW_RAIN=amount | Fixes the rain amount (0 to 1) even if the game isn't raining |
