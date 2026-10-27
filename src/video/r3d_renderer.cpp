@@ -77,13 +77,6 @@ VkShaderModule make_module(VkDevice dev, const uint32_t* code, size_t bytes) {
 
 }  // namespace
 
-// Push constants of compose.frag (layout(push_constant) uniform Compose), in
-// its order; what each field means is documented there
-struct R3DRenderer::ComposePush {
-    float scale[2], offset[2], crosshair[2], window[2], layer2d[2], filter2d[2];
-    float hud[4], sky[4], effects[4], motion[4], crosshair2[4];
-};
-
 ScreenLayout compute_layout(float win_w, float win_h, float max_aspect) {
     ScreenLayout l{};
     float aspect = win_h > 0 ? win_w / win_h : 4.0f / 3.0f;
@@ -613,7 +606,9 @@ void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
                  VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                  VK_IMAGE_ASPECT_DEPTH_BIT);
     depth_.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    create_image(ao_, w, h, VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+    // The occlusion at half the resolution each way (a quarter of the rays),
+    // smoothed back up to full resolution by ao_apply.frag
+    create_image(ao_, (w + 1) / 2, (h + 1) / 2, VK_FORMAT_R8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                  VK_IMAGE_ASPECT_COLOR_BIT);
     {
         VkDescriptorImageInfo src[2] = {
@@ -1371,17 +1366,6 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
     memcpy(atmosphere_uniform_.mapped, &u, sizeof(u));
 }
 
-// What every pass of a frame needs
-struct R3DRenderer::Frame {
-    VkCommandBuffer cmd;
-    VkExtent2D extent;       // the window
-    ScreenLayout lay;        // placement of the game screen in it
-    uint32_t out_w, out_h;   // internal 3D resolution
-    size_t vcount;           // vertices of the scene
-    float before;            // motion vectors: how far back the previously displayed image was
-    float jitter_x, jitter_y, alpha_seed;   // DLAA: sub-pixel shift and alpha-test noise seed
-};
-
 // Texture RAM rows, 2D layers and the scene's vertices changed since the last frame
 void R3DRenderer::record_uploads(const Frame& f) {
     VkCommandBuffer cmd = f.cmd;
@@ -1613,7 +1597,9 @@ void R3DRenderer::record_world(const Frame& f) {
                     for (size_t k = i; k < j; k++)
                         if (vps[k].world) w = &vps[k];
                     vkCmdEndRendering(cmd);
+                    gpu_time_mark(cmd, 3);
                     record_world_depth(f, *w, msaa, ao_on);
+                    gpu_time_mark(cmd, 4);
                     // The 3D pass goes on where it was; the world depth stays
                     // readable (no resolve into it any more this frame)
                     VkRenderingAttachmentInfo again[3] = {cas[0], cas[1], cas[2]};
@@ -1759,7 +1745,7 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     };
     ao_.layout = VK_IMAGE_LAYOUT_UNDEFINED;   // fully rewritten
     transition(cmd, ao_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    fullscreen(ao_pass_, ao_, ao_.view, out_w, out_h);
+    fullscreen(ao_pass_, ao_, ao_.view, ao_.w, ao_.h);
     transition(cmd, ao_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     // Multiplied into the colour as drawn so far (the opaque world)
     Image& ctarget = msaa ? color_ms_ : color_;
@@ -1820,13 +1806,19 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
                    .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f), 0, 0},
                    .crosshair2 = {-1, -1, sharpen_, 0}};
+    place_crosshairs(lay, pc);
+    return pc;
+}
+
+void R3DRenderer::place_crosshairs(const ScreenLayout& lay, ComposePush& pc) const {
     float* at[2] = {pc.crosshair, pc.crosshair2};
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < 2; p++) {
+        at[p][0] = at[p][1] = -1;
         if (crosshair_visible_[p]) {   // game-screen fraction -> window pixels
             at[p][0] = lay.ox + (lay.game_x0 + crosshair_x_[p] * SCREEN_W) * lay.scale;
             at[p][1] = lay.oy + crosshair_y_[p] * SCREEN_H * lay.scale;
         }
-    return pc;
+    }
 }
 
 // The reduced passes (glow, light shaft mask, diffusion) see the whole 3D
@@ -2096,52 +2088,88 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
     if (gpu_time && !gpu_times_) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        qi.queryCount = 4;
+        qi.queryCount = GPU_MARKS;
         vkCreateQueryPool(dev_, &qi, nullptr, &gpu_times_);
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(vk_->gpu(), &props);
         timestamp_period_ = props.limits.timestampPeriod;
     }
     if (gpu_times_ && gpu_pending_) {
-        uint64_t t[4];
-        if (vkGetQueryPoolResults(dev_, gpu_times_, 0, 4, sizeof(t), t, 8, VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
-            for (int i = 0; i < 3; i++) gpu_sum_[i] += double(t[i == 2 ? 3 : i + 1] - t[i == 2 ? 0 : i]) * timestamp_period_ * 1e-6;
+        // Each pass is the time from the previous mark written (a pass left out
+        // this frame wrote none, and counts 0)
+        uint64_t t[GPU_MARKS][2];   // timestamp, availability
+        VkResult r = vkGetQueryPoolResults(dev_, gpu_times_, 0, GPU_MARKS, sizeof(t), t, sizeof(t[0]),
+                                           VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+        if ((r == VK_SUCCESS || r == VK_NOT_READY) && t[0][1] && t[GPU_MARKS - 1][1]) {
+            uint64_t last = t[0][0];
+            for (int i = 1; i < GPU_MARKS; i++)
+                if (t[i][1]) {
+                    gpu_sum_[i] += double(t[i][0] - last) * timestamp_period_ * 1e-6;
+                    last = t[i][0];
+                }
+            gpu_sum_[0] += double(t[GPU_MARKS - 1][0] - t[0][0]) * timestamp_period_ * 1e-6;
             if (++gpu_frames_ == 300) {
-                printf("[gpu] ms/image: ray tracing build %.3f  3D pass %.3f  whole frame %.3f  (%zu traced triangles, %ux%u)\n",
-                       gpu_sum_[0] / 300, gpu_sum_[1] / 300, gpu_sum_[2] / 300, rt_frame_ ? rt_.triangles() : size_t(0),
-                       f.out_w, f.out_h);
-                gpu_sum_[0] = gpu_sum_[1] = gpu_sum_[2] = 0;
+                static const char* const names[GPU_MARKS] = {"whole frame", "ray tracing build", "shadow map",
+                                                             "3D opaque", "ambient occlusion", "3D rest", "DLAA",
+                                                             "bloom", "light shafts", "diffusion", "exposure",
+                                                             "composition"};
+                printf("[gpu] ms/image at %ux%u (msaa %d, %zu traced triangles):", f.out_w, f.out_h, int(samples_),
+                       rt_frame_ ? rt_.triangles() : size_t(0));
+                for (int i = 0; i < GPU_MARKS; i++) printf("%s %s %.3f", i ? "," : "", names[i], gpu_sum_[i] / 300);
+                printf("\n");
+                fflush(stdout);
+                for (double& v : gpu_sum_) v = 0;
                 gpu_frames_ = 0;
             }
         }
     }
     if (gpu_times_) {
-        vkCmdResetQueryPool(cmd, gpu_times_, 0, 4);
+        vkCmdResetQueryPool(cmd, gpu_times_, 0, GPU_MARKS);
         gpu_time_mark(cmd, 0);
     }
     record_ray_tracing(f);
-    if (gpu_times_) gpu_time_mark(cmd, 1);
+    gpu_time_mark(cmd, 1);
     record_shadows(f);
+    gpu_time_mark(cmd, 2);
     record_world(f);
-    if (gpu_times_) gpu_time_mark(cmd, 2);
+    gpu_time_mark(cmd, 5);
     record_dlaa(f);
+    gpu_time_mark(cmd, 6);
     ComposePush pc = compose_push(f);
     record_bloom(f, pc);
+    gpu_time_mark(cmd, 7);
     // Light shafts: the visible sky around the sun, then smeared towards it
     bool shafts = rays_strength_ > 0 && sun_light_ > 0;
     pc.effects[3] = shafts ? 1.0f : 0.0f;
     record_light_shafts(f, pc, shafts);
+    gpu_time_mark(cmd, 8);
     record_diffusion(f, pc);
+    gpu_time_mark(cmd, 9);
     record_exposure(f, pc);
+    gpu_time_mark(cmd, 10);
     record_compose(f, pc, target);
-    if (gpu_times_) {
-        gpu_time_mark(cmd, 3);
-        gpu_pending_ = true;
+    gpu_time_mark(cmd, GPU_MARKS - 1);
+    if (gpu_times_) gpu_pending_ = true;
+    repeat_frame_ = f;
+    repeat_push_ = pc;
+    can_repeat_ = true;
+}
+
+void R3DRenderer::record_repeat(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent) {
+    if (!can_repeat_ || extent.width != repeat_frame_.extent.width || extent.height != repeat_frame_.extent.height) {
+        record(cmd, target, extent);
+        return;
     }
+    // Everything the composition reads is as the last record() left it
+    Frame f = repeat_frame_;
+    f.cmd = cmd;
+    ComposePush pc = repeat_push_;
+    place_crosshairs(f.lay, pc);
+    record_compose(f, pc, target);
 }
 
 void R3DRenderer::gpu_time_mark(VkCommandBuffer cmd, uint32_t index) {
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_times_, index);
+    if (gpu_times_) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_times_, index);
 }
 
 void R3DRenderer::shutdown() {

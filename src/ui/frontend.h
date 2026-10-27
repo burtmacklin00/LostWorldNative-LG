@@ -25,6 +25,8 @@ struct FrontendSettings {
     int rear_boost = 0;  // dB on the rear pair: 0, 3, 6, 9, 12
     bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
     int aa = 0;        // 0 MSAA, 1 DLAA, 2 off (takes effect on the next launch)
+    int scale = 100;   // 3D resolution in % of the window's (SCALES)
+    bool half_rate = false;   // above 100 Hz the 3D is drawn every other refresh
     bool haze = true;  // distance haze
     int bloom = 2;     // glow around bright things: 0 off, 1 low, 2 medium, 3 high
     bool ao = true;    // ambient occlusion
@@ -60,6 +62,13 @@ struct FrontendSettings {
     // save/settings.ini; missing keys keep their current value
     void load(const char* path);
     void save(const char* path) const;
+
+    // QUALITY: the graphics options that cost the most, set together. quality()
+    // is the level they match, CUSTOM if none
+    enum Quality { LOW, MEDIUM, HIGH, ULTRA, CUSTOM };
+    static constexpr int SCALES[5] = {50, 67, 75, 85, 100};
+    void set_quality(int q);
+    int quality() const;
 };
 
 class Frontend {
@@ -113,6 +122,7 @@ private:
         BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
+        OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE,
     };
     struct Item {
         Id id;

@@ -1,7 +1,8 @@
 #version 450
-// Ambient occlusion, second step: the raw occlusion is smoothed over 4x4
-// pixels, without mixing across depth edges, and multiplied into the image
-// of the game world (the colour target blends with dst * src).
+// Ambient occlusion, second step: the raw occlusion (half resolution) is
+// smoothed over the 4x4 of its texels around each pixel, without mixing
+// across depth edges, and multiplied into the image of the game world (the
+// colour target blends with dst * src).
 #extension GL_GOOGLE_include_directive : require
 #include "ao_common.glsl"
 
@@ -15,12 +16,15 @@ void main() {
         return;
     }
     float z = AO_NEAR / d;
-    ivec2 size = textureSize(ao_tex, 0);
+    ivec2 size = textureSize(ao_tex, 0), full = textureSize(depth_tex, 0);
+    // Texel i holds full-resolution pixel 2i: the four each way whose pixels
+    // are nearest this one (centred on odd pixels, one pixel off on even ones)
+    ivec2 first = (ivec2(frag) - 3) >> 1;
     float sum = 0.0, weight = 0.0;
-    for (int y = -2; y < 2; y++)
-        for (int x = -2; x < 2; x++) {
-            ivec2 q = clamp(ivec2(frag) + ivec2(x, y), ivec2(0), size - 1);
-            float dq = texelFetch(depth_tex, q, 0).r;
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++) {
+            ivec2 q = clamp(first + ivec2(x, y), ivec2(0), size - 1);
+            float dq = texelFetch(depth_tex, min(q * 2, full - 1), 0).r;
             if (dq <= 0.0) continue;
             float w = exp(-abs(AO_NEAR / dq - z) / (0.03 * z));
             sum += texelFetch(ao_tex, q, 0).r * w;

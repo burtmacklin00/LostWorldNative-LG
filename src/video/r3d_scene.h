@@ -147,8 +147,20 @@ private:
     // Interpolation: every vertex gets a key (scene path + model instance +
     // polygon + corner) to find where it was in the previous frame
     std::vector<uint64_t> keys_, opaque_keys_, trans_keys_;
-    std::unordered_map<uint64_t, uint32_t> prev_index_;   // key -> vertex in prev_vertices_
-    std::vector<R3DVertex> prev_vertices_;
+    // Key -> first vertex with that key: an open-addressing table kept from
+    // frame to frame (a new std::unordered_map of every vertex each frame
+    // was most of the scene build's time)
+    struct KeyIndex {
+        static constexpr uint32_t EMPTY = ~0u;
+        std::vector<uint64_t> keys;
+        std::vector<uint32_t> vertex;   // EMPTY: free slot
+        uint32_t mask = 0;
+        void reset(size_t count);   // empty, with room for `count` keys
+        void insert(uint64_t key, uint32_t v);   // the first vertex with a key stays
+        uint32_t find(uint64_t key) const;       // EMPTY if absent
+    };
+    KeyIndex index_, prev_index_;                    // this frame's, the previous frame's
+    std::vector<std::array<float, 3>> prev_positions_;   // the previous frame's vertices
     struct PrevInstance {
         uint32_t key, path;
         float origin[3];

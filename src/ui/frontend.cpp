@@ -65,6 +65,8 @@ void FrontendSettings::load(const char* path) {
         else if (k == "rear_boost") rear_boost = std::clamp(atoi(value) / 3 * 3, 0, 12);
         else if (k == "sample_interpolation") cubic_samples = v != "linear";
         else if (k == "aa") aa = v == "dlaa" ? 1 : (v == "none" || v == "off") ? 2 : 0;
+        else if (k == "resolution_3d") scale = std::clamp(atoi(value), SCALES[0], 100);
+        else if (k == "half_rate") half_rate = on;
         else if (k == "haze") haze = on;
         else if (k == "bloom") bloom = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : on ? 2 : 0;
         else if (k == "ao") ao = on;
@@ -112,12 +114,61 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nresolution_3d = %d\nhalf_rate = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, scale, half_rate);
     fclose(f);
+}
+
+namespace {
+// What each QUALITY level sets (the other options are left as they are)
+struct QualityLevel {
+    int scale;
+    bool half_rate;
+    int ray_tracing;   // 0 off, 1 sun shadows, 2 also ambient occlusion
+    bool ao, shadows, shafts, soft, sky, relief;
+    int bloom;
+};
+const QualityLevel QUALITY_LEVELS[4] = {
+    // LOW: laptops and older cards. Measured on an RTX 5070 Ti at 1440p, the
+    // costly ones are the ambient occlusion, the 3D resolution, the procedural
+    // sky (its composition) and the sun shadows; the rest cost little
+    {75, true, 0, false, false, false, true, false, true, 1},
+    // MEDIUM: mid-range cards (RTX 3060, RX 6600)
+    {100, true, 0, true, true, true, true, true, true, 1},
+    // HIGH
+    {100, false, 1, true, true, true, true, true, true, 2},
+    // ULTRA: everything (the defaults)
+    {100, false, 2, true, true, true, true, true, true, 2},
+};
+}  // namespace
+
+void FrontendSettings::set_quality(int q) {
+    if (q < LOW || q > ULTRA) return;
+    const QualityLevel& l = QUALITY_LEVELS[q];
+    scale = l.scale;
+    half_rate = l.half_rate;
+    ray_tracing = l.ray_tracing;
+    ao = l.ao;
+    shadows = l.shadows;
+    shafts = l.shafts;
+    soft = l.soft;
+    sky = l.sky;
+    relief = l.relief;
+    bloom = l.bloom;
+}
+
+int FrontendSettings::quality() const {
+    for (int q = LOW; q <= ULTRA; q++) {
+        const QualityLevel& l = QUALITY_LEVELS[q];
+        if (scale == l.scale && half_rate == l.half_rate && ray_tracing == l.ray_tracing && ao == l.ao &&
+            shadows == l.shadows && shafts == l.shafts && soft == l.soft && sky == l.sky && relief == l.relief &&
+            bloom == l.bloom)
+            return q;
+    }
+    return CUSTOM;
 }
 
 // ---- Setup ----
@@ -199,7 +250,8 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"L
 // the one place to put a new option (besides `all` in items()); an option
 // missing here goes at the end of GAME. Tabs past VISIBLE_OPTIONS rows scroll.
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
-    {OPT_DISPLAY, DISPLAY_TAB}, {OPT_MOTION, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB}, {OPT_TEXT, DISPLAY_TAB},
+    {OPT_QUALITY, DISPLAY_TAB}, {OPT_DISPLAY, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_HALF_RATE, DISPLAY_TAB},
+    {OPT_MOTION, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB}, {OPT_TEXT, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
     {OPT_SUN, LIGHTING_TAB}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_RT, LIGHTING_TAB}, {OPT_SHAFTS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB},
     {OPT_AO, LIGHTING_TAB}, {OPT_BLOOM, LIGHTING_TAB}, {OPT_RIM, LIGHTING_TAB}, {OPT_RELIEF, LIGHTING_TAB}, {OPT_TORCH, LIGHTING_TAB},
@@ -314,8 +366,21 @@ std::vector<Frontend::Item> Frontend::items() const {
             L"Sun shadows traced through the world: every tree and dinosaur, soft with distance",
             L"Also the ambient occlusion: corners and the ground under things, even off screen"};
         std::wstring pads = gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads;
-        std::vector<Item> all = {{OPT_DISPLAY, L"DISPLAY", settings.fullscreen ? L"FULLSCREEN" : L"WINDOW",
+        static const wchar_t* const QUALITY[5] = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"};
+        static const wchar_t* const QUALITY_HINTS[5] = {
+            L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
+            L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
+            L"Fast cards: ray traced sun shadows and every effect",
+            L"Everything on: ray traced sun shadows and ambient occlusion",
+            L"Your own mix of the options.  Pick a level to set the costly ones at once"};
+        int quality = settings.quality();
+        std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
+                {OPT_DISPLAY, L"DISPLAY", settings.fullscreen ? L"FULLSCREEN" : L"WINDOW",
                  L"Window or full screen (also F11 or Alt+Enter)"},
+                {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(settings.scale) + L"%",
+                 L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
+                {OPT_HALF_RATE, L"FRAME RATE", settings.half_rate ? L"HALF" : L"FULL",
+                 L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
                 {OPT_MOTION, L"MOTION", settings.smooth ? L"SMOOTH" : L"ORIGINAL",
                  L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
                 {OPT_VOLUME, L"VOLUME", std::to_wstring(settings.volume), L"Sound volume"},
@@ -459,6 +524,22 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
     case OPT_SAMPLES: settings.cubic_samples = !settings.cubic_samples; push(Action::SettingsChanged); break;
     case OPT_AA: settings.aa = (settings.aa + dir + 3) % 3; push(Action::SettingsChanged); break;
+    case OPT_QUALITY: {
+        int q = settings.quality();
+        settings.set_quality(q == FrontendSettings::CUSTOM ? (dir > 0 ? FrontendSettings::LOW : FrontendSettings::ULTRA)
+                                                           : (q + dir + 4) % 4);
+        push(Action::SettingsChanged);
+        break;
+    }
+    case OPT_SCALE: {
+        const int* scales = FrontendSettings::SCALES;
+        int i = 0;   // the next step from the nearest one at or below
+        while (i < 4 && scales[i + 1] <= settings.scale) i++;
+        settings.scale = scales[(i + dir + 5) % 5];
+        push(Action::SettingsChanged);
+        break;
+    }
+    case OPT_HALF_RATE: settings.half_rate = !settings.half_rate; push(Action::SettingsChanged); break;
     case OPT_HAZE: settings.haze = !settings.haze; push(Action::SettingsChanged); break;
     case OPT_BLOOM: settings.bloom = (settings.bloom + dir + 4) % 4; push(Action::SettingsChanged); break;
     case OPT_AO: settings.ao = !settings.ao; push(Action::SettingsChanged); break;
