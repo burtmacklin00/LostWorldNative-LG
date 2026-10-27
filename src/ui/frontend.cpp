@@ -1320,15 +1320,39 @@ void Frontend::backdrop_background() {
     bg_.assign(size_t(w_) * h_, 0xFF000000u);
     px_ = bg_.data();
     picture(backdrop_, 0, 0, w_, h_);
-    Picture blur;   // the blur: drawn blur, then stretched back
-    blur.w = std::max(16, w_ / 12);
-    blur.h = std::max(9, h_ / 12);
+    // The blur: the picture averaged down by 16 in each direction, smoothed a
+    // few times and stretched back
+    const int F = 16;
+    Picture blur;
+    blur.w = std::max(4, w_ / F);
+    blur.h = std::max(4, h_ / F);
+    std::vector<float> acc(size_t(blur.w) * blur.h * 3, 0.0f);
+    for (int y = 0; y < blur.h * F && y < h_; y++)
+        for (int x = 0; x < blur.w * F && x < w_; x++) {
+            uint32_t c = bg_[size_t(y) * w_ + x];
+            float* d = &acc[(size_t(y / F) * blur.w + x / F) * 3];
+            for (int m = 0; m < 3; m++) d[m] += chan(c, 16 - 8 * m) / (F * F);
+        }
+    for (int pass = 0; pass < 3; pass++) {   // 3x3 box, three times
+        std::vector<float> src = acc;
+        for (int y = 0; y < blur.h; y++)
+            for (int x = 0; x < blur.w; x++)
+                for (int m = 0; m < 3; m++) {
+                    float sum = 0;
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int xx = std::clamp(x + dx, 0, blur.w - 1), yy = std::clamp(y + dy, 0, blur.h - 1);
+                            sum += src[(size_t(yy) * blur.w + xx) * 3 + m];
+                        }
+                    acc[(size_t(y) * blur.w + x) * 3 + m] = sum / 9;
+                }
+    }
     blur.px.resize(size_t(blur.w) * blur.h);
-    {
-        int ww = w_, hh = h_;
-        w_ = blur.w, h_ = blur.h, px_ = blur.px.data();
-        picture(backdrop_, 0, 0, w_, h_);
-        w_ = ww, h_ = hh;
+    for (size_t i = 0; i < blur.px.size(); i++) {
+        uint32_t out = 0xFF000000u;
+        for (int m = 0; m < 3; m++)
+            out |= uint32_t(std::clamp(acc[i * 3 + m], 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+        blur.px[i] = out;
     }
     bg_stone_.assign(size_t(w_) * h_, 0xFF000000u);
     px_ = bg_stone_.data();
@@ -1339,23 +1363,30 @@ void Frontend::backdrop_background() {
     fill(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.6f);
     hgrad(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.0f, 0.6f);
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
-    if (has_poster()) {   // the logo, its stone fading out around it
+    if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
         float s, x0, y0;
         poster_layout(s, x0, y0);
-        float pw = poster_w_ * s;
-        float ly0 = y0 + POSTER_LOGO_TOP * poster_h_ * s, ly1 = y0 + POSTER_LOGO_END * poster_h_ * s;
-        float cx = x0 + pw * 0.5f, cy = (ly0 + ly1) * 0.5f, hw = pw * 0.55f, hh = (ly1 - ly0) * 0.62f;
-        for (int y = std::max(0, int(cy - hh)); y < std::min(h_, int(cy + hh) + 1); y++)
-            for (int x = std::max(0, int(cx - hw)); x < std::min(w_, int(cx + hw) + 1); x++) {
-                float nx = (x - cx) / hw, ny = (y - cy) / hh;
-                float a = std::clamp((1 - std::sqrt(nx * nx + ny * ny)) / 0.14f, 0.0f, 1.0f);
+        const float CX = 0.497f, CY = 0.331f, R = 0.203f;          // the disc, fractions of the poster's width / height
+        const float BU0 = 0.092f, BU1 = 0.903f, BV0 = 0.333f, BV1 = 0.437f;   // the banner across it
+        float cx = CX * poster_w_, cy = CY * poster_h_, r = R * poster_h_;
+        int sx0 = std::max(0, int(x0 + std::min(cx - r, BU0 * poster_w_) * s) - 2);
+        int sx1 = std::min(w_, int(x0 + std::max(cx + r, BU1 * poster_w_) * s) + 2);
+        int sy0 = std::max(0, int(y0 + (cy - r) * s) - 2), sy1 = std::min(h_, int(y0 + (cy + r) * s) + 2);
+        float feather = 2.5f;   // poster pixels
+        for (int y = sy0; y < sy1; y++)
+            for (int x = sx0; x < sx1; x++) {
+                float u = (x + 0.5f - x0) / s, v = (y + 0.5f - y0) / s;
+                float in_disc = r - std::sqrt((u - cx) * (u - cx) + (v - cy) * (v - cy));
+                float in_banner = std::min(std::min(u - BU0 * poster_w_, BU1 * poster_w_ - u),
+                                           std::min(v - BV0 * poster_h_, BV1 * poster_h_ - v));
+                float a = std::clamp(std::max(in_disc, in_banner) / feather + 0.5f, 0.0f, 1.0f);
                 if (a <= 0) continue;
                 float rgb[3] = {0, 0, 0};   // 2x2 samples per window pixel
                 for (int k = 0; k < 4; k++) {
-                    int u = std::clamp(int((x + 0.25f + 0.5f * (k & 1) - x0) / s), 0, poster_w_ - 1);
-                    int v = std::clamp(int((y + 0.25f + 0.5f * (k >> 1) - y0) / s), 0, poster_h_ - 1);
-                    uint32_t c = poster_[size_t(v) * poster_w_ + u];
-                    for (int j = 0; j < 3; j++) rgb[j] += chan(c, 16 - 8 * j) * 0.25f;
+                    int pu = std::clamp(int((x + 0.25f + 0.5f * (k & 1) - x0) / s), 0, poster_w_ - 1);
+                    int pv = std::clamp(int((y + 0.25f + 0.5f * (k >> 1) - y0) / s), 0, poster_h_ - 1);
+                    uint32_t c = poster_[size_t(pv) * poster_w_ + pu];
+                    for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * 0.25f;
                 }
                 blend(x, y, uint32_t(rgb[0] * 255) << 16 | uint32_t(rgb[1] * 255) << 8 | uint32_t(rgb[2] * 255), a);
             }
@@ -1592,8 +1623,8 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         int ty = y + spacing / 2 - item_px * 55 / 100;
         text(TITLE, item_px, it.label, tx, ty, talign, st);
         if (!it.value.empty())   // e.g. the stage of a boss, "NOT READY" or a record
-            text(ITEM, U(24), it.value, right ? band0 + U(60) : left + col_w - U(60), y + spacing / 2 - U(14),
-                 right ? 0 : 2, {0xF4D27A, 0xE0A848});
+            text(ITEM, U(24), it.value, right ? tx - measure(TITLE, item_px, it.label) - U(30) : left + col_w - U(60),
+                 y + spacing / 2 - U(14), 2, {0xF4D27A, 0xE0A848});
         hit_.push_back({band0, y, band1, y + spacing});
         values_.push_back({-1, 0});
         y += spacing;
