@@ -48,6 +48,21 @@ You need Windows 10/11 (64-bit), a Vulkan GPU, [Python 3](https://www.python.org
 and [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
 with the *Desktop development with C++* workload.
 
+<details>
+<summary>Smaller install of the Build Tools (only what the build uses)</summary>
+
+The full workload is over 6 GB. The build only needs the MSVC compiler, CMake and a
+Windows SDK. In a command prompt:
+
+```
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
+```
+
+Or in the Visual Studio Installer, choose *Individual components* instead of the workload and
+tick *MSVC v143 - VS 2022 C++ x64/x86 build tools (Latest)*, *C++ CMake tools for Windows*
+and one *Windows 11 SDK* (it works on Windows 10 too).
+</details>
+
 1. Download or clone this repository.
 2. Put `lostwsga.zip` next to `build.bat`.
 3. Run `build.bat` once. It takes a few minutes and downloads SDL3 and NVIDIA DLSS on the first run.
