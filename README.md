@@ -90,8 +90,8 @@ is in pixels of a 1080p screen (it scales with the window).
 
 The menus can be dressed up with files of your own in `third_party/menu/` (not in the repository):
 `background.png` (or `.jpg`) behind the menus, which then sit at the right; `music.mp3` looped in the
-menus (**Options > Audio > Menu music**); `cover.png`, a poster whose logo becomes the title; and
-`sega.png`, SEGA's logo for the credit at the bottom left.
+menus (**Options > Audio > Menu music**); `logo.png`, the title over the background (transparent
+PNG); `cover.png`, a poster whose logo becomes the title otherwise; and `sega.png`, SEGA's logo for the credit at the bottom left.
 
 ## More
 

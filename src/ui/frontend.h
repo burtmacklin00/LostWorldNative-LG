@@ -262,6 +262,8 @@ private:
     // the options
     Picture backdrop_;
     Picture sega_;   // optional third_party/menu/sega.png: the credit at the bottom left of the menus
+    Picture logo_;   // optional third_party/menu/logo.png: the title over the backdrop, its own transparency kept
+    bool has_logo() const { return logo_.w > 0 && has_backdrop(); }
     bool has_backdrop() const { return backdrop_.w > 0; }
     void backdrop_background();
     bool has_poster() const { return poster_w_ > 0; }

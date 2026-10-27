@@ -152,6 +152,8 @@ bool Frontend::init(const std::string& font_dir) {
             break;
         }
     load_image(L"third_party/menu/sega.png", sega_.px, sega_.w, sega_.h);
+    if (load_image(L"third_party/menu/logo.png", logo_.px, logo_.w, logo_.h))
+        printf("[menu] logo third_party/menu/logo.png (%dx%d)\n", logo_.w, logo_.h);
     for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
         if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
             printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
@@ -1363,7 +1365,28 @@ void Frontend::backdrop_background() {
     fill(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.6f);
     hgrad(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.0f, 0.6f);
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
-    if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
+    if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
+        int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
+        int lx = int(w_ - LOGO_CENTER_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
+        float sx = float(logo_.w) / lw, sy = float(logo_.h) / lh;
+        for (int y = std::max(0, ly); y < std::min(h_, ly + lh); y++)
+            for (int x = std::max(0, lx); x < std::min(w_, lx + lw); x++) {
+                int u0 = int((x - lx) * sx), u1 = std::max(u0 + 1, std::min(logo_.w, int((x - lx + 1) * sx)));
+                int v0 = int((y - ly) * sy), v1 = std::max(v0 + 1, std::min(logo_.h, int((y - ly + 1) * sy)));
+                float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
+                for (int v = v0; v < v1; v++)
+                    for (int u = u0; u < u1; u++) {
+                        uint32_t c = logo_.px[size_t(v) * logo_.w + u];
+                        float ca = chan(c, 24);
+                        for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
+                        a += ca;
+                    }
+                if (a <= 0) continue;
+                uint32_t c = 0;
+                for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+                blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
+            }
+    } else if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
         float s, x0, y0;
         poster_layout(s, x0, y0);
         const float CX = 0.497f, CY = 0.331f, R = 0.203f;          // the disc, fractions of the poster's width / height
@@ -1561,7 +1584,9 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         y0 = U(300);
     } else {
         if (!right) hgrad(0, 0, U(1100), h, 0x030504, 0.5f, 0.0f);   // the column a little darker than the stone
-        if (has_poster()) {   // the poster is the title
+        if (has_logo()) {
+            y0 = int((LOGO_SCREEN_TOP + LOGO_SCREEN_H) * h_) + U(40);
+        } else if (has_poster()) {   // the poster is the title
             float ps, px0, py0;
             poster_layout(ps, px0, py0);
             y0 = int(py0 + POSTER_LOGO_END * poster_h_ * ps) + U(40);
