@@ -854,6 +854,7 @@ int main(int argc, char** argv) {
         Layers2D layers;
         uint64_t serial = 0;
         double ready_at = 0;   // when it was ready
+        double period = 1.0 / 57.524;   // since the frame built before it (where its vertices come from)
     };
     R3DScene own_scene;   // built on this thread (no interpolation)
     const R3DScene* scene = &own_scene;
@@ -867,7 +868,7 @@ int main(int argc, char** argv) {
     // here (the game's CPU time plus this loop's wait for it; follows the
     // latest frames, easing down slowly)
     std::shared_ptr<const R3DFrameState> seen;
-    double next_period = 1.0 / 57.524, lateness = 0.004, lateness_rose = 0;
+    double next_period = 1.0 / 57.524, lateness = 0.004, lateness_rose = 0, lateness_spike = -100;
     DisplayClock display_clock;
 
     struct Snapshot2D {
@@ -1202,8 +1203,12 @@ int main(int argc, char** argv) {
     // the images went out unevenly). The interpolation delay follows when
     // the frames are ready (lateness), so it includes this work
     std::mutex prep_mutex;    // one composition and one scene build at a time
-    std::mutex ready_mutex;   // ready_newest and ready_pictures
-    std::shared_ptr<Prepared> ready_newest;
+    std::mutex ready_mutex;   // ready_frames and ready_pictures
+    // The last frames made ready, oldest first: the picture runs behind the
+    // game by the frames' lateness, so after a slow frame several can be
+    // waiting, and each is taken in turn (its vertices move from the frame
+    // before it, so skipping one would stretch that motion over two)
+    std::deque<std::shared_ptr<Prepared>> ready_frames;
     // New pictures for the GPU slots, in order: handed over when their frame
     // (or a later one) is taken, also those of frames never taken
     struct NewPictures {
@@ -1242,6 +1247,7 @@ int main(int argc, char** argv) {
             }
             if (!prep_on) done.reset();
             if (prep_stop || !prep_on || !state || state == done) continue;
+            double before = done ? done->time : 0;
             done = state;
             std::shared_ptr<Prepared> p;
             for (auto& q : pool)
@@ -1252,6 +1258,7 @@ int main(int argc, char** argv) {
             if (!p) pool.push_back(p = std::make_shared<Prepared>());
             p->state = state;
             p->serial = ++serial;
+            p->period = before > 0 ? std::clamp(state->time - before, 1.0 / 240, 0.1) : 1.0 / 57.524;
             NewPictures pictures;
             pictures.serial = p->serial;
             {
@@ -1278,7 +1285,10 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_pictures.push_back(std::move(pictures));
             p->ready_at = qpc_seconds();
-            if (prep_on) ready_newest = p;
+            if (prep_on) {
+                ready_frames.push_back(p);
+                if (ready_frames.size() > 8) ready_frames.pop_front();
+            }
         }
     });
     // LW_FRAMELOG: a thread notes when each present reaches the screen
@@ -1683,41 +1693,67 @@ int main(int argc, char** argv) {
         if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
             prep_on = interpolating;
             std::lock_guard<std::mutex> lock(ready_mutex);
-            ready_newest.reset();
+            ready_frames.clear();
         }
         double display = display_clock.tick(presenter.hwnd());
         std::shared_ptr<const R3DFrameState> latest;
-        std::shared_ptr<Prepared> ready;
+        std::shared_ptr<Prepared> newest;   // the newest frame made ready
+        std::deque<std::shared_ptr<Prepared>> waiting;   // those after the one built (made after the switch)
         if (interpolating) {
             std::lock_guard<std::mutex> lock(ready_mutex);
-            ready = ready_newest;
+            while (!ready_frames.empty() && built && ready_frames.front()->state->frame <= built->frame)
+                ready_frames.pop_front();
+            waiting = ready_frames;
         } else {
             std::lock_guard<std::mutex> lock(g_r3d_mutex);
             latest = g_r3d_latest;
         }
-        if (ready && built && ready->state->frame < built->frame) ready.reset();   // made before the switch
-        if (ready) latest = ready->state;
+        if (!waiting.empty()) newest = waiting.back(), latest = newest->state;
         if (latest && latest != seen) {
             if (seen) next_period = std::clamp(latest->time - seen->time, 1.0 / 240, 0.1);
             // How long after its vblank the frame was ready to take, plus how
             // far ahead of now this image's moment is: from the preparation
             // thread, when it finished; from the game, when this loop saw it
-            double late = ready ? ready->ready_at - latest->time + (display - display_clock.last) : display - latest->time;
-            // It rises at once with 1.5 ms to spare and, after 5 s without
-            // rising, eases down 1.7 ms per second, so that later frames by a
-            // little do not each step the motion back (on a slower PC, frames
-            // late now and then would otherwise step it back every few seconds)
+            double late = newest ? newest->ready_at - latest->time + (display - display_clock.last) : display - latest->time;
+            // It rises at once with 1.5 ms to spare, so that later frames by a
+            // little do not each step the motion back; a frame much later
+            // than the rest (a one-off slow 2D composition) only raises it if
+            // another follows 0.25-3 s later: alone it costs one hitch, while
+            // raising it would add that delay for a long while. After 5 s
+            // without rising it eases down, by 1% of its excess per frame
+            // (at least 1.7 ms per second): the motion runs up to ~2% faster
             late = std::clamp(late, 0.0, 0.05);
             if (late > lateness) {
-                lateness = late + 0.0015;
-                lateness_rose = display;
+                // (the frames right after a slow one are late too: the same hitch)
+                bool spike = false;
+                if (late > lateness + 0.004) {
+                    double since = display - lateness_spike;
+                    if (since > 3) lateness_spike = display;
+                    spike = since > 3 || since < 0.25;
+                }
+                if (!spike) {
+                    lateness = late + 0.0015;
+                    lateness_rose = display;
+                }
             } else if (display - lateness_rose > 5) {
-                lateness = std::max(lateness - 0.00003, late);
+                lateness = std::max(lateness - std::max(0.00003, 0.01 * (lateness - late)), late);
             }
             seen = latest;
         }
         double shown_time = display - lateness - next_period - 0.0005;
         bool take = latest && latest != built && (!interpolating || !built || shown_time >= built->time);
+        // The frame to take: the first one waiting that reaches the picture's
+        // moment (the newest if none does)
+        std::shared_ptr<Prepared> ready;
+        if (take && newest) {
+            for (auto& w : waiting)
+                if (w->state->time >= shown_time) {
+                    ready = w;
+                    break;
+                }
+            if (!ready) ready = newest;
+            latest = ready->state;
+        }
         // The 2D layers of each vblank are kept in a few copies: while the 3D
         // frames are interpolated, those of the 3D frame drawn are shown (the
         // picture runs behind the game; the preparation thread composes them
@@ -1728,7 +1764,8 @@ int main(int argc, char** argv) {
             poll_snapshots();
             newest_2d = snaps[newest_snap].frame;
         }
-        bool follow = interpolating && latest && newest_2d != ~0ull && newest_2d <= latest->vblank + 4;
+        const R3DFrameState* game_newest = newest ? newest->state.get() : latest.get();
+        bool follow = interpolating && game_newest && newest_2d != ~0ull && newest_2d <= game_newest->vblank + 4;
         double scene_from = qpc_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
         const uint64_t shown_before = shown;
         // (shown = ~0: composed again here, as after a change of settings in the pause menu)
@@ -1747,7 +1784,8 @@ int main(int argc, char** argv) {
             scene_seconds += qpc_seconds() - scene_from;
         }
         if (take) {
-            if (built) frame_period = std::clamp(latest->time - built->time, 1.0 / 240, 0.1);
+            if (ready) frame_period = ready->period;   // its vertices move from the frame built before it
+            else if (built) frame_period = std::clamp(latest->time - built->time, 1.0 / 240, 0.1);
             built_from = built ? built->vblank : ~0ull;
             scene_from = qpc_seconds();
             if (ready) {   // made ready by the preparation thread, with the 2D layers of its vblank
