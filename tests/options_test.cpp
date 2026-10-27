@@ -47,6 +47,11 @@ int main() {
         CHECK(parse(q, {"--no-haze", "--haze", "--no-hdr", "--bloom", "0.5"}));
         CHECK(near(q.haze, 1) && !q.hdr && near(q.bloom, 0.5f));
     }
+    {   // players: free play and the idle crosshair
+        Options o;
+        CHECK(parse(o, {}) && !o.free_play && o.crosshair_hide == 0);
+        CHECK(parse(o, {"--free-play", "--crosshair-hide", "5"}) && o.free_play && o.crosshair_hide == 5);
+    }
     {   // custom values
         Options o;
         CHECK(parse(o, {"--aa", "dlaa", "--aspect", "21:9", "--subtitles", "jp", "--sky", "original", "--aim",

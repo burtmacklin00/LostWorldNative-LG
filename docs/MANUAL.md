@@ -26,7 +26,11 @@ time with 6 (coin) and 2 (start), and has their own crosshair (blue; player
 sees as a mouse), one click with it while player 1 is playing makes it
 player 2's gun and joins the game; from then on each mouse moves its own
 crosshair and the pointer stays inside the window. Disable it in Settings > Controls >
-Second mouse or with `--one-mouse`. In `--auto`, a 2 at the end of a button belongs to player
+Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (`--free-play`) makes 1 and 2
+insert the credit themselves, so a light gun's start button starts and continues without the
+coin key; Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
+crosshair after 3, 5 or 10 seconds without moving or firing, until the gun moves again (a
+player 2 who joined by mistake leaves no crosshair standing on the screen). In `--auto`, a 2 at the end of a button belongs to player
 2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun.
 F11 or Alt+Enter toggles fullscreen.
 
