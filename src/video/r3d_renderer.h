@@ -77,6 +77,9 @@ public:
         crosshair_x_[player] = x;
         crosshair_y_[player] = y;
     }
+    // A player's own crosshair picture (crosshair.png beside the exe), drawn
+    // centred on the gun instead of the built-in ring
+    void set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba);
 
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
     void set_max_aspect(float aspect) { max_aspect_ = aspect; }
@@ -340,4 +343,5 @@ private:
     void step_sky_sun(const WorldPose& pose, const float view[4], float view_w, float out[3]);
     float back_shift_ = 0.0f;
     float crosshair_x_[2] = {}, crosshair_y_[2] = {};
+    bool crosshair_picture_[2] = {};
 };

@@ -40,6 +40,7 @@
 #include "../ui/achievement_toast.h"
 #include "../ui/frontend.h"
 #include "../ui/survival_ui.h"
+#include "../video/image_io.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
 #include "../video/r3d_scene.h"
@@ -854,6 +855,16 @@ int main(int argc, char** argv) {
     uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
     TextHD text;   // menus, captions and score drawn from vector fonts
     if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
+    // crosshair.png beside LostWorld.exe replaces the drawn crosshairs, and
+    // crosshair_p2.png player 2's (who otherwise takes crosshair.png too)
+    for (int p = 0; p < 2; p++) {
+        int w, h;
+        std::vector<uint8_t> rgba;
+        std::string name = exe_folder() + (p ? "crosshair_p2.png" : "crosshair.png");
+        if (!png_load(name, w, h, rgba) && !(p && png_load(name = exe_folder() + "crosshair.png", w, h, rgba))) continue;
+        renderer.set_crosshair_picture(p, w, h, rgba);
+        printf("[video] player %d crosshair: %s (%dx%d)\n", p + 1, name.c_str(), w, h);
+    }
     std::atomic<bool> capture_2d{false};   // F12 / --shot: the next 2D composition is saved
     bool f12_was_down = false, f9_was_down = false;
     builder.set_vrom(g_vrom.data(), g_vrom.size());
