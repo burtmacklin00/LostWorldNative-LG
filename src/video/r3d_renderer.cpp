@@ -1607,7 +1607,9 @@ void R3DRenderer::record_world(const Frame& f) {
                     for (size_t k = i; k < j; k++)
                         if (vps[k].world) w = &vps[k];
                     vkCmdEndRendering(cmd);
+                    gpu_time_mark(cmd, 3);
                     record_world_depth(f, *w, msaa, ao_on);
+                    gpu_time_mark(cmd, 4);
                     // The 3D pass goes on where it was; the world depth stays
                     // readable (no resolve into it any more this frame)
                     VkRenderingAttachmentInfo again[3] = {cas[0], cas[1], cas[2]};
@@ -2090,52 +2092,72 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
     if (gpu_time && !gpu_times_) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        qi.queryCount = 4;
+        qi.queryCount = GPU_MARKS;
         vkCreateQueryPool(dev_, &qi, nullptr, &gpu_times_);
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(vk_->gpu(), &props);
         timestamp_period_ = props.limits.timestampPeriod;
     }
     if (gpu_times_ && gpu_pending_) {
-        uint64_t t[4];
-        if (vkGetQueryPoolResults(dev_, gpu_times_, 0, 4, sizeof(t), t, 8, VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
-            for (int i = 0; i < 3; i++) gpu_sum_[i] += double(t[i == 2 ? 3 : i + 1] - t[i == 2 ? 0 : i]) * timestamp_period_ * 1e-6;
+        // Each pass is the time from the previous mark written (a pass left out
+        // this frame wrote none, and counts 0)
+        uint64_t t[GPU_MARKS][2];   // timestamp, availability
+        VkResult r = vkGetQueryPoolResults(dev_, gpu_times_, 0, GPU_MARKS, sizeof(t), t, sizeof(t[0]),
+                                           VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+        if ((r == VK_SUCCESS || r == VK_NOT_READY) && t[0][1] && t[GPU_MARKS - 1][1]) {
+            uint64_t last = t[0][0];
+            for (int i = 1; i < GPU_MARKS; i++)
+                if (t[i][1]) {
+                    gpu_sum_[i] += double(t[i][0] - last) * timestamp_period_ * 1e-6;
+                    last = t[i][0];
+                }
+            gpu_sum_[0] += double(t[GPU_MARKS - 1][0] - t[0][0]) * timestamp_period_ * 1e-6;
             if (++gpu_frames_ == 300) {
-                printf("[gpu] ms/image: ray tracing build %.3f  3D pass %.3f  whole frame %.3f  (%zu traced triangles, %ux%u)\n",
-                       gpu_sum_[0] / 300, gpu_sum_[1] / 300, gpu_sum_[2] / 300, rt_frame_ ? rt_.triangles() : size_t(0),
-                       f.out_w, f.out_h);
-                gpu_sum_[0] = gpu_sum_[1] = gpu_sum_[2] = 0;
+                static const char* const names[GPU_MARKS] = {"whole frame", "ray tracing build", "shadow map",
+                                                             "3D opaque", "ambient occlusion", "3D rest", "DLAA",
+                                                             "bloom", "light shafts", "diffusion", "exposure",
+                                                             "composition"};
+                printf("[gpu] ms/image at %ux%u (msaa %d, %zu traced triangles):", f.out_w, f.out_h, int(samples_),
+                       rt_frame_ ? rt_.triangles() : size_t(0));
+                for (int i = 0; i < GPU_MARKS; i++) printf("%s %s %.3f", i ? "," : "", names[i], gpu_sum_[i] / 300);
+                printf("\n");
+                fflush(stdout);
+                for (double& v : gpu_sum_) v = 0;
                 gpu_frames_ = 0;
             }
         }
     }
     if (gpu_times_) {
-        vkCmdResetQueryPool(cmd, gpu_times_, 0, 4);
+        vkCmdResetQueryPool(cmd, gpu_times_, 0, GPU_MARKS);
         gpu_time_mark(cmd, 0);
     }
     record_ray_tracing(f);
-    if (gpu_times_) gpu_time_mark(cmd, 1);
+    gpu_time_mark(cmd, 1);
     record_shadows(f);
+    gpu_time_mark(cmd, 2);
     record_world(f);
-    if (gpu_times_) gpu_time_mark(cmd, 2);
+    gpu_time_mark(cmd, 5);
     record_dlaa(f);
+    gpu_time_mark(cmd, 6);
     ComposePush pc = compose_push(f);
     record_bloom(f, pc);
+    gpu_time_mark(cmd, 7);
     // Light shafts: the visible sky around the sun, then smeared towards it
     bool shafts = rays_strength_ > 0 && sun_light_ > 0;
     pc.effects[3] = shafts ? 1.0f : 0.0f;
     record_light_shafts(f, pc, shafts);
+    gpu_time_mark(cmd, 8);
     record_diffusion(f, pc);
+    gpu_time_mark(cmd, 9);
     record_exposure(f, pc);
+    gpu_time_mark(cmd, 10);
     record_compose(f, pc, target);
-    if (gpu_times_) {
-        gpu_time_mark(cmd, 3);
-        gpu_pending_ = true;
-    }
+    gpu_time_mark(cmd, GPU_MARKS - 1);
+    if (gpu_times_) gpu_pending_ = true;
 }
 
 void R3DRenderer::gpu_time_mark(VkCommandBuffer cmd, uint32_t index) {
-    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_times_, index);
+    if (gpu_times_) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu_times_, index);
 }
 
 void R3DRenderer::shutdown() {

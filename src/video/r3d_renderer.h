@@ -255,11 +255,12 @@ private:
     const R3DViewport* rt_world_ = nullptr;   // the world viewport they are traced in
     uint32_t rt_generation_ = 0;       // R3DRayTracer::generation() the descriptors point to
     void record_ray_tracing(const Frame& f);
-    // Debugging aid (LW_GPUTIME): GPU time of the ray tracing build, the 3D
-    // pass and the whole frame, averaged and printed now and then
+    // Debugging aid (LW_GPUTIME): GPU time of each pass and of the whole
+    // frame, averaged over 300 images and printed (names in record())
+    static constexpr int GPU_MARKS = 12;
     VkQueryPool gpu_times_ = VK_NULL_HANDLE;
     float timestamp_period_ = 1;
-    double gpu_sum_[3] = {};
+    double gpu_sum_[GPU_MARKS] = {};
     int gpu_frames_ = 0;
     bool gpu_pending_ = false;
     void gpu_time_mark(VkCommandBuffer cmd, uint32_t index);
