@@ -811,7 +811,12 @@ int main(int argc, char** argv) {
         CreateThread(nullptr, 512u << 20, game_thread, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
     }
 
-    if (first_start) {
+    // (not in test runs, nor over graphics options given on the command line)
+    for (int i = 1; i < argc && first_start; i++)
+        for (const char* o : {"--scale", "--half-rate", "--rt", "--no-rt", "--ao", "--no-ao", "--no-shadows", "--no-shafts",
+                              "--no-soft", "--sky", "--no-relief", "--bloom", "--no-bloom"})
+            if (strcmp(argv[i], o) == 0) first_start = false;
+    if (first_start && g_opt.menu) {
         int q = suggest_quality(presenter);
         static const char* const NAMES[4] = {"LOW", "MEDIUM", "HIGH", "ULTRA"};
         printf("[video] first start: quality %s for this graphics card (options menu, DISPLAY)\n", NAMES[q]);
