@@ -1220,6 +1220,7 @@ int Frontend::text(Family f, int px, const std::wstring& s, int x, int y, int al
 // centred LOGO_CENTER_X layout units from the left (above the menu's column).
 constexpr float POSTER_LOGO_TOP = 0.16f, POSTER_LOGO_END = 0.53f, POSTER_STONE_END = 0.88f;
 constexpr float LOGO_SCREEN_TOP = 0.08f, LOGO_SCREEN_H = 0.36f, LOGO_CENTER_X = 450;
+constexpr float LOGO_PICTURE_X = 350;   // logo.png's centre from the right edge: lined up with the menu's column
 
 void Frontend::poster_layout(float& scale, float& x0, float& y0) const {
     scale = LOGO_SCREEN_H * h_ / ((POSTER_LOGO_END - POSTER_LOGO_TOP) * poster_h_);   // window px per poster px
@@ -1367,7 +1368,7 @@ void Frontend::backdrop_background() {
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
     if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
         int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
-        int lx = int(w_ - LOGO_CENTER_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
+        int lx = int(w_ - LOGO_PICTURE_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
         float sx = float(logo_.w) / lw, sy = float(logo_.h) / lh;
         for (int y = std::max(0, ly); y < std::min(h_, ly + lh); y++)
             for (int x = std::max(0, lx); x < std::min(w_, lx + lw); x++) {
