@@ -129,10 +129,12 @@ struct QualityLevel {
     int bloom;
 };
 const QualityLevel QUALITY_LEVELS[4] = {
-    // LOW: laptops and older cards
-    {75, true, 0, false, false, false, false, false, false, 1},
+    // LOW: laptops and older cards. Measured on an RTX 5070 Ti at 1440p, the
+    // costly ones are the ambient occlusion, the 3D resolution, the procedural
+    // sky (its composition) and the sun shadows; the rest cost little
+    {75, true, 0, false, false, false, true, false, true, 1},
     // MEDIUM: mid-range cards (RTX 3060, RX 6600)
-    {100, true, 0, true, true, false, true, true, true, 1},
+    {100, true, 0, true, true, true, true, true, true, 1},
     // HIGH
     {100, false, 1, true, true, true, true, true, true, 2},
     // ULTRA: everything (the defaults)
@@ -362,8 +364,8 @@ std::vector<Frontend::Item> Frontend::items() const {
         std::wstring pads = gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads;
         static const wchar_t* const QUALITY[5] = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"};
         static const wchar_t* const QUALITY_HINTS[5] = {
-            L"Laptops and older cards: 75% resolution, half rate on fast monitors, no costly effects",
-            L"Mid-range cards (RTX 3060, RX 6600): no ray tracing or light shafts, half rate on fast monitors",
+            L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
+            L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
             L"Fast cards: ray traced sun shadows and every effect",
             L"Everything on: ray traced sun shadows and ambient occlusion",
             L"Your own mix of the options.  Pick a level to set the costly ones at once"};
