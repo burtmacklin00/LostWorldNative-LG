@@ -2,6 +2,7 @@
 
 #include "../runtime/bosses.h"
 #include "../runtime/survival.h"
+#include "crosshair_file.h"
 
 #include <algorithm>
 #include <cmath>
@@ -198,12 +199,12 @@ const Frontend::Picture& Frontend::preview(Id id) {
         {OPT_RT, L"ray_tracing"}, {OPT_SHAFTS, L"light_shafts"}, {OPT_SOFT, L"soft_particles"}, {OPT_HDR, L"hdr"},
         {OPT_RIM, L"rim_light"}, {OPT_RELIEF, L"surface_detail"}, {OPT_TORCH, L"flashlight"},
         {OPT_LIGHTNING, L"lightning"}, {OPT_RAIN, L"rain"}, {OPT_SAT, L"saturation"}, {OPT_SHARPEN, L"sharpen"},
-        {OPT_TEXT, L"hd_text"}, {OPT_CROSS, L"crosshair"}, {OPT_SUBS, L"subtitles"}};
+        {OPT_TEXT, L"hd_text"}, {OPT_CROSS, L"crosshair_backdrop"}, {OPT_SUBS, L"subtitles"}};
     Picture& p = previews_[int(id)];
     for (const auto& f : FILES)
         if (f.id == id)
             for (const wchar_t* ext : {L".jpg", L".png"})
-                if (load_image(L"third_party/menu/preview/" + std::wstring(f.name) + ext, p.px, p.w, p.h)) break;
+                if (load_image(L"res/preview/" + std::wstring(f.name) + ext, p.px, p.w, p.h)) break;
     return p;
 }
 
@@ -224,7 +225,8 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
     {OPT_VOLUME, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
-    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
+    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
+    {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
     {OPT_MICE, CONTROLS_TAB},
     {OPT_FREE_PLAY, GAME_TAB}, {OPT_SUBS, GAME_TAB},
 };
@@ -319,6 +321,12 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
             {OPT_TEXT, L"HD TEXT", on_off(s.hd_text),
              L"Sharp fonts for menus, captions and score instead of the original pixels"},
             {OPT_CROSS, L"CROSSHAIR", on_off(s.crosshair), L"Extra crosshair where the mouse points"},
+            {OPT_CROSS_STYLE, L"CROSSHAIR STYLE", s.crosshair_style ? L"CUSTOM" : L"DEFAULT",
+             L"The drawn rings, or your own pictures (crosshair.png and crosshair_p2.png beside the game)"},
+            {OPT_CROSS_P1, L"PLAYER 1 PICTURE", L"CHOOSE PNG...",
+             L"Pick a PNG for player 1's crosshair.  It is copied beside the game as crosshair.png, at its own size in pixels at 1080p"},
+            {OPT_CROSS_P2, L"PLAYER 2 PICTURE", L"CHOOSE PNG...",
+             L"Pick a PNG for player 2's crosshair (crosshair_p2.png).  Without one, player 2 uses player 1's picture"},
             {OPT_CROSS_HIDE, L"HIDE IDLE CROSSHAIR",
              s.crosshair_hide ? L"AFTER " + std::to_wstring(s.crosshair_hide) + L" S" : std::wstring(L"NEVER"),
              L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
@@ -381,6 +389,8 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
                4, false);
         break;
     case OPT_FREE_PLAY: toggle(s.free_play); break;
+    case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
+    case OPT_CROSS_P1: case OPT_CROSS_P2: it.kind = BUTTON; break;
     case OPT_MICE: choice(s.second_mouse ? 1 : 0, 2, false); break;
     case OPT_SUBS: choice(s.subtitles, 3, false); break;
     case OPT_SAT: slider(s.saturation, 0, 200); break;
@@ -422,6 +432,7 @@ void Frontend::reset_tab() {
         case OPT_TEXT: settings.hd_text = d.hd_text; break;
         case OPT_CROSS: settings.crosshair = d.crosshair; break;
         case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
+        case OPT_CROSS_STYLE: settings.crosshair_style = d.crosshair_style; break;
         case OPT_FREE_PLAY: settings.free_play = d.free_play; break;
         case OPT_MICE: settings.second_mouse = d.second_mouse; break;
         case OPT_SUBS: settings.subtitles = d.subtitles; break;
@@ -607,6 +618,18 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
+    case OPT_CROSS_STYLE: settings.crosshair_style = 1 - settings.crosshair_style; push(Action::SettingsChanged); break;
+    case OPT_CROSS_P1:
+    case OPT_CROSS_P2:   // the Windows file dialog; a picture picked is also shown from then on
+        if (crosshair_pick(it.id == OPT_CROSS_P2 ? 1 : 0)) {
+            crosshair_loaded_ = false;
+            push(Action::CrosshairChanged);
+            if (!settings.crosshair_style) {
+                settings.crosshair_style = 1;
+                push(Action::SettingsChanged);
+            }
+        }
+        break;
     case OPT_MICE: settings.second_mouse = !settings.second_mouse; push(Action::SettingsChanged); break;
     case OPT_SUBS: settings.subtitles = (settings.subtitles + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_PAD_SPEED:
@@ -682,11 +705,11 @@ bool Frontend::key(int vk) {
     case VK_DOWN: case 'S': select((selected_ + 1) % n); return true;
     case VK_LEFT: case 'A':
         if (tabs_row) set_tab(tab_ - 1);
-        else if (option_row) activate(list[selected_], -1);
+        else if (option_row && list[selected_].kind != BUTTON) activate(list[selected_], -1);
         return true;
     case VK_RIGHT: case 'D':
         if (tabs_row) set_tab(tab_ + 1);
-        else if (option_row) activate(list[selected_], +1);
+        else if (option_row && list[selected_].kind != BUTTON) activate(list[selected_], +1);
         return true;
     case VK_RETURN: case VK_SPACE:
         hovered_ = -1;
@@ -757,7 +780,8 @@ void Frontend::wheel(int x, int y, int delta) {
     bool on_value = hovered_ >= 0 && hovered_ < int(values_.size()) && values_[hovered_].left >= 0 &&
                     x >= values_[hovered_].left;
     bool scrolls = screen_ == Screen::Options && int(list.size()) - 2 > visible_opts_;
-    if (hovered_ >= 0 && hovered_ < int(list.size()) && list[hovered_].id >= OPT_DISPLAY && (on_value || !scrolls)) {
+    if (hovered_ >= 0 && hovered_ < int(list.size()) && list[hovered_].id >= OPT_DISPLAY && list[hovered_].kind != BUTTON &&
+        (on_value || !scrolls)) {
         int keep = hovered_;   // over a value: change it
         hovered_ = -1;   // no wrap-around from the wheel
         activate(list[keep], delta > 0 ? +1 : -1);
@@ -1591,7 +1615,14 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     std::wstring title = option ? cur->label : cur && cur->id == BACK ? cur->label : std::wstring(tab_name(tab_));
     text(TITLE, U(40), title, px0, y, 0, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
     y += U(70);
-    if (option) {
+    bool crosshair_row = option && (cur->id == OPT_CROSS || cur->id == OPT_CROSS_STYLE || cur->id == OPT_CROSS_P1 ||
+                                    cur->id == OPT_CROSS_P2);
+    if (crosshair_row) {
+        int ph = (px1 - px0) * 9 / 16;
+        crosshair_preview(px0, y, px1, y + ph);
+        frame(px0, y, px1, y + ph, std::max(1, U(1)), 0x3A3A34, 1);
+        y += ph + U(22);
+    } else if (option) {
         const Picture& pic = preview(cur->id);
         if (pic.w > 0) {
             int ph = (px1 - px0) * 9 / 16;
@@ -1634,6 +1665,56 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     hit_.back() = {back_rect_.left - U(8), back_rect_.top - U(8), back_rect_.right + U(8), back_rect_.bottom + U(8)};
     if (selected_ == int(list.size()) - 1) frame(hit_.back().left, hit_.back().top, hit_.back().right,
                                                  hit_.back().bottom, std::max(1, U(2)), AMBER, 0.9f);
+}
+
+// Both players' crosshairs at the size the game draws them (pictures at their
+// pixels at 1080p, or the rings), side by side over a stretch of the game
+void Frontend::crosshair_preview(int x0, int y0, int x1, int y1) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    if (!crosshair_loaded_) {
+        for (int p = 0; p < 2; p++) {
+            Picture& c = crosshair_[p];
+            std::vector<uint8_t> rgba;
+            c = Picture{};
+            if (!crosshair_load(p, c.w, c.h, rgba) || rgba.size() < size_t(c.w) * c.h * 4) {
+                c.w = c.h = 0;
+                continue;
+            }
+            c.px.resize(size_t(c.w) * c.h);
+            for (size_t i = 0; i < c.px.size(); i++)
+                c.px[i] = uint32_t(rgba[i * 4 + 3]) << 24 | uint32_t(rgba[i * 4]) << 16 | uint32_t(rgba[i * 4 + 1]) << 8 |
+                          rgba[i * 4 + 2];
+        }
+        crosshair_loaded_ = true;
+    }
+    const Picture& back = preview(OPT_CROSS);
+    if (back.w > 0) picture(back, x0, y0, x1, y1);
+    else fill(x0, y0, x1, y1, 0x1A2016, 1);
+    float k = h_ / 1080.0f;
+    for (int p = 0; p < 2; p++) {
+        int cx = x0 + (x1 - x0) * (p + 1) / 3, cy = (y0 + y1) / 2;
+        const Picture& c = crosshair_[p];
+        if (settings.crosshair_style && c.w > 0) {   // its own picture, centred, nearest pixel
+            int dw = std::max(1, int(c.w * k + 0.5f)), dh = std::max(1, int(c.h * k + 0.5f));
+            for (int j = 0; j < dh; j++)
+                for (int i = 0; i < dw; i++) {
+                    uint32_t q = c.px[size_t(j * c.h / dh) * c.w + size_t(i * c.w / dw)];
+                    int x = cx - dw / 2 + i, y = cy - dh / 2 + j;
+                    if (x >= x0 && x < x1 && y >= y0 && y < y1) blend(x, y, q & 0xFFFFFF, float(q >> 24) / 255.0f);
+                }
+        } else {   // the game's ring: yellow for player 1, cyan for player 2
+            float r = std::max(10.0f, h_ / 60.0f), t = std::max(2.0f, r / 5);
+            uint32_t col = p ? 0x33E6FF : 0xFFF233;
+            int b = int(r + t) + 2;
+            for (int y = cy - b; y <= cy + b; y++)
+                for (int x = cx - b; x <= cx + b; x++) {
+                    float d = std::sqrt(float((x - cx) * (x - cx) + (y - cy) * (y - cy)));
+                    float cov = std::clamp(t * 0.5f - std::abs(d - r) + 0.5f, 0.0f, 1.0f);
+                    if (cov > 0) blend(x, y, col, cov);
+                }
+        }
+        text(ITEM, U(20), p ? L"PLAYER 2" : L"PLAYER 1", cx, y1 - U(34), 1, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
+    }
 }
 
 bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {

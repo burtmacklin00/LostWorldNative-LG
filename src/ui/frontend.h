@@ -117,6 +117,7 @@ private:
         BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2,
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
@@ -238,12 +239,17 @@ private:
     std::vector<uint32_t> poster_;
     int poster_w_ = 0, poster_h_ = 0;
     bool load_poster(const std::wstring& path);
-    // Optional pictures of what an option does (third_party/menu/preview/<name>.jpg),
+    // Optional pictures of what an option does (res/preview/<name>.jpg),
     // loaded the first time their option is selected; w = 0: none
     struct Picture { std::vector<uint32_t> px; int w = 0, h = 0; };
     std::map<int, Picture> previews_;
     const Picture& preview(Id id);
     void picture(const Picture& p, int x0, int y0, int x1, int y1);   // scaled to fill the box, cropped
+    // The players' crosshairs as the game draws them (their pictures, or the
+    // rings), over a stretch of the game: the panel of the crosshair rows
+    Picture crosshair_[2];
+    bool crosshair_loaded_ = false;
+    void crosshair_preview(int x0, int y0, int x1, int y1);
     bool has_poster() const { return poster_w_ > 0; }
     void poster_background(bool stone_only, std::vector<uint32_t>& dst);
     void poster_layout(float& scale, float& x0, float& y0) const;   // the logo at the top left
