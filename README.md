@@ -29,7 +29,7 @@
 
 <table>
   <tr>
-    <td><img src="docs/img/menu.jpg" alt="Main menu"></td>
+    <td><img src="docs/img/main_menu.jpg" alt="Main menu"></td>
     <td><img src="docs/img/stage_select.jpg" alt="Stage select redrawn in HD"></td>
   </tr>
 </table>
