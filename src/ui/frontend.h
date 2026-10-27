@@ -178,6 +178,7 @@ private:
     void draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h);
     // Key help along the bottom: button (or key) and what it does; returns its rectangle
     RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
+    int prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);   // how far it moves x
     RECT back_rect_{}, reset_rect_{};   // the BACK and RESET prompts, clickable
 
     Screen screen_ = Screen::None;
@@ -254,6 +255,7 @@ private:
     // the menus go to the right, the poster's logo above them; blurred behind
     // the options
     Picture backdrop_;
+    Picture sega_;   // optional third_party/menu/sega.png: the credit at the bottom left of the menus
     bool has_backdrop() const { return backdrop_.w > 0; }
     void backdrop_background();
     bool has_poster() const { return poster_w_ > 0; }

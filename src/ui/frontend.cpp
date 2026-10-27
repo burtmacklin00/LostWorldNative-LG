@@ -150,6 +150,7 @@ bool Frontend::init(const std::string& font_dir) {
             printf("[menu] poster %ls (%dx%d)\n", p, poster_w_, poster_h_);
             break;
         }
+    load_image(L"third_party/menu/sega.png", sega_.px, sega_.w, sega_.h);
     for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
         if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
             printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
@@ -1431,6 +1432,15 @@ RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* k
     return {x0, y, right, y + h};
 }
 
+int Frontend::prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int h = U(38), wd = 0;
+    if (pad_prompts && pad_button) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
+    else if (key) wd = (std::wstring(key) == L"<>" ? U(70) : std::max(h, extent(MONO, U(18), key) + U(22))) + U(10);
+    if (what && *what) wd += measure(ITEM, U(22), what) + U(44);
+    return wd;
+}
+
 // The value side of an option row, between vx0 and vx1
 void Frontend::draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
@@ -1589,9 +1599,24 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         }
 
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
-    int x = U(80), py = h - U(64);
+    const wchar_t* back_what = screen_ == Screen::Main ? nullptr : screen_ == Screen::Pause ? L"RESUME" : L"BACK";
+    int py = h - U(64), x = U(80);
+    if (!over_game) {   // the key help at the bottom right; at the left, the credit to the makers of the game
+        x = w - U(80) + U(44) - prompt_width(L"A", L"ENTER", L"SELECT") - (back_what ? prompt_width(L"B", L"ESC", back_what) : 0);
+        if (sega_.w > 0) {   // their logo, its own transparency kept
+            int lh = U(52), lw = lh * sega_.w / sega_.h, lx = U(80), ly = h - U(46) - lh;
+            for (int j = 0; j < lh; j++)
+                for (int i = 0; i < lw; i++) {
+                    uint32_t q = sega_.px[size_t(j * sega_.h / lh) * sega_.w + size_t(i * sega_.w / lw)];
+                    blend(lx + i, ly + j, q & 0xFFFFFF, float(q >> 24) / 255.0f);
+                }
+            text(ITEM, U(18), L"\u00A9 1997 SEGA", lx + lw + U(16), ly + lh / 2 - U(10), 0, {FOOT, FOOT});
+        } else {
+            text(ITEM, U(22), L"ORIGINAL ARCADE GAME \u00A9 1997 SEGA", U(80), py + U(6), 0, {0xB8B09A, 0xA09884});
+        }
+    }
     prompt(x, py, L"A", L"ENTER", L"SELECT");
-    if (screen_ != Screen::Main) back_rect_ = prompt(x, py, L"B", L"ESC", screen_ == Screen::Pause ? L"RESUME" : L"BACK");
+    if (back_what) back_rect_ = prompt(x, py, L"B", L"ESC", back_what);
 }
 
 // Options and Records: the categories down the left, the rows in the middle and
