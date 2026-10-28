@@ -14,8 +14,8 @@ LostWorld.exe
 `LostWorld.exe` opens a Vulkan window and runs the game at its real speed
 (57.5 Hz). It starts in a PC-style main menu (Play, Options, Quit; with
 keyboard or mouse): Play > Classic Arcade launches the arcade game (5 = coin,
-1 = start). During play Esc pauses the game and the sound (Resume,
-Settings, Quit). Options are saved in save/settings.ini; command-line
+1 = start). During play Esc, or 1 while player 1 plays (a light gun's start button),
+pauses the game and the sound (Resume, Settings, Quit); 1 again resumes. Options are saved in save/settings.ini; command-line
 options take priority. `--no-menu` goes straight to the
 arcade game as before (Esc quits), and the tests (--replay, --auto, --shot,
 --aim, --frames, --headless) never show the menu.

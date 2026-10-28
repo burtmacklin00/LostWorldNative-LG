@@ -112,6 +112,8 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 // With free play, 1 / 2 insert the credit themselves (player_join)
 static bool g_menu_open = false;     // a menu has the controls
 static POINT g_menu_ptr{-1, -1};     // the menu pointer (client pixels), drawn as player 1's crosshair
+static bool g_key_pause = false;     // 1 (a gun's start button) pressed while player 1 plays: the pause menu
+static bool g_start_was[2] = {};     // 1 / 2 held at the last poll
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
 static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
@@ -181,6 +183,9 @@ static void poll_keyboard_mouse(HWND hwnd) {
     raw_mice::update(hwnd, join_allowed, !g_menu_open);
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     if (g_menu_open) {
+        // A start key held in the menu (the 1 that resumed) does not count as a
+        // press when the game comes back
+        g_start_was[0] = down('1'), g_start_was[1] = down('2');
         g_inputs.test = g_inputs.service = false;
         for (PlayerInputs& pl : g_inputs.p) pl.coin = pl.start = pl.trigger = pl.offscreen = false;
         return;
@@ -188,12 +193,15 @@ static void poll_keyboard_mouse(HWND hwnd) {
     PlayerInputs& p1 = g_inputs.p[0];
     p1.coin = down('5');
     g_inputs.p[1].coin = down('6');
-    static bool start_was[2] = {};
     for (int p = 0; p < 2; p++) {
         bool start = down(p ? '2' : '1');
+        bool pressed = start && !g_start_was[p];
+        // 1 (player 1's start, a gun's start button) while player 1 plays opens
+        // the pause menu, as START does on a gamepad; 1 in it resumes
+        if (p == 0 && pressed && g_inputs.p[0].playing && g_opt.menu) g_key_pause = true;
         if (!g_opt.free_play) g_inputs.p[p].start = start;
-        else if (start && !start_was[p] && !g_inputs.p[p].playing) player_join(p);   // also continues
-        start_was[p] = start;
+        else if (pressed && !g_inputs.p[p].playing) player_join(p);   // also continues
+        g_start_was[p] = start;
     }
     g_inputs.test = down(VK_F2);
     g_inputs.service = down(VK_F3);
@@ -766,6 +774,19 @@ static bool load_game_rom(std::vector<uint8_t>& sound_program, std::vector<uint8
 }
 
 int main(int argc, char** argv) {
+    // A Windows program, not a console one: no black console window behind the
+    // game (from Explorer, LaunchBox or a script). Started from a command
+    // prompt it still prints there; output sent to a file or pipe goes there
+    auto attach = [](DWORD which, FILE* stream, const char* mode) {
+        HANDLE h = GetStdHandle(which);
+        if (h && h != INVALID_HANDLE_VALUE && GetFileType(h) != FILE_TYPE_UNKNOWN) return;   // redirected
+        FILE* f = nullptr;
+        freopen_s(&f, "CONOUT$", mode, stream);
+    };
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        attach(STD_OUTPUT_HANDLE, stdout, "w");
+        attach(STD_ERROR_HANDLE, stderr, "w");
+    }
     setvbuf(stdout, nullptr, _IONBF, 0);   // keep logs even if the process dies
     // The menus (and the settings they save) are left out of test runs, so
     // those always start from the same defaults
@@ -1207,7 +1228,13 @@ int main(int argc, char** argv) {
             if (msg == WM_MOUSEMOVE) g_menu_ptr = {x, y};
             else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
             switch (msg) {
-            case WM_KEYDOWN: return frontend.key(int(wp));
+            case WM_KEYDOWN:
+                // 1 resumes from the pause menu it opened (not on its own repeat)
+                if (wp == '1' && frontend.screen() == Frontend::Screen::Pause) {
+                    if (!(lp & (1 << 30))) frontend.key(VK_ESCAPE);
+                    return true;
+                }
+                return frontend.key(int(wp));
             case WM_MOUSEMOVE: {
                 // Windows also sends it when nothing moved (a window or the
                 // pointer changing): those neither bring the pointer back nor
@@ -1944,6 +1971,13 @@ int main(int argc, char** argv) {
             frontend.open(Frontend::Screen::Pause);
             pad_in_menu = true;
             g_menu_open = g_hold = true;
+        }
+        if (g_key_pause) {   // 1 while player 1 plays
+            g_key_pause = false;
+            if (g_opt.menu && !frontend.active()) {
+                frontend.open(Frontend::Screen::Pause);
+                g_menu_open = g_hold = true;
+            }
         }
         join_update();
         bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
