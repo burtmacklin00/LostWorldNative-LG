@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <thread>
 
+#include <shellapi.h>
 #include <wincodec.h>
 
 namespace {
@@ -20,6 +21,10 @@ namespace {
 constexpr uint32_t GOLD_TOP = 0xFFEA5C, GOLD_BOTTOM = 0xFF8A00, EDGE = 0x1C0A00;
 constexpr uint32_t PALE_TOP = 0xE6DCC0, PALE_BOTTOM = 0xBFB294, DIM = 0x6A6559;
 constexpr uint32_t AMBER = 0xFFA032, HINT = 0xC9B88E, FOOT = 0x8A8070;
+
+// The donation link on the main menu, for whoever wants to support the port
+constexpr const wchar_t* COFFEE_URL = L"https://buymeacoffee.com/snicolast8u";
+constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
 
 float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
 
@@ -845,10 +850,17 @@ void Frontend::mouse_move(int x, int y) {
     }
     if (hit >= 0) select(hit);
     hovered_ = hit;
+    bool on_coffee = PtInRect(&coffee_rect_, POINT{x, y}) != 0;
+    if (on_coffee != coffee_hot_) dirty_ = true;
+    coffee_hot_ = on_coffee;
 }
 
 void Frontend::click(int x, int y) {
     POINT p{x, y};
+    if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {   // opens in the default browser
+        ShellExecuteW(nullptr, L"open", COFFEE_URL, nullptr, nullptr, SW_SHOWNORMAL);
+        return;
+    }
     if (screen_ == Screen::Options && PtInRect(&reset_rect_, p)) {
         reset_tab();
         return;
@@ -1703,8 +1715,9 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             {L"ACHIEVEMENTS", std::to_wstring(got) + L"/" + std::to_wstring(achievement_table().size())}};
         if (best > 0) chips.push_back({L"BEST SCORE", grouped(best)});
         int x1 = w - U(70), cy0 = U(56), ch = U(56);
+        int coffee_w = U(22) + extent(ITEM, U(21), COFFEE_LABEL) + U(22);   // the donation link, leftmost of the row
         if (right) {   // from the left edge: the total width first
-            x1 = U(70) - U(16);
+            x1 = U(70) - U(16) + coffee_w + U(16);
             for (const auto& c : chips)
                 x1 += U(22) + extent(ITEM, U(21), c.first) + U(12) + extent(ITEM, U(26), c.second) + U(22) + U(16);
         }
@@ -1717,6 +1730,11 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             text(ITEM, U(26), chips[i].second, x1 - U(22), cy0 + ch / 2 - U(15), 2, {GOLD_TOP, GOLD_BOTTOM});
             x1 = x0 - U(16);
         }
+        coffee_rect_ = {x1 - coffee_w, cy0, x1, cy0 + ch};   // brighter under the pointer, a click opens it
+        fill(x1 - coffee_w, cy0, x1, cy0 + ch, coffee_hot_ ? AMBER : PANEL, coffee_hot_ ? 0.3f : 0.8f);
+        frame(x1 - coffee_w, cy0, x1, cy0 + ch, std::max(1, U(1.5f)), AMBER, coffee_hot_ ? 0.9f : 0.3f);
+        text(ITEM, U(21), COFFEE_LABEL, x1 - coffee_w + U(22), cy0 + ch / 2 - U(12), 0,
+             coffee_hot_ ? Style{WHITE_TOP, WHITE_BOTTOM} : Style{PALE_TOP, PALE_BOTTOM});
     }
 
     // The entries share what is left of the height, the description under them
@@ -1997,7 +2015,7 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     px_ = out.data();
     hit_.clear();
     values_.clear();
-    more_up_ = more_down_ = back_rect_ = reset_rect_ = RECT{};
+    more_up_ = more_down_ = back_rect_ = reset_rect_ = coffee_rect_ = RECT{};
     auto list = items();
     if (page) draw_options(over_game, list);
     else draw_menu(over_game, list);

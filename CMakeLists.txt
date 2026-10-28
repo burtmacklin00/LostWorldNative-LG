@@ -153,7 +153,7 @@ target_include_directories(LostWorld PRIVATE
 )
 # volk loads vulkan-1.dll at runtime: the SDK is not needed
 target_compile_definitions(LostWorld PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
-target_link_libraries(LostWorld PRIVATE SDL3::SDL3-static winmm ole32 windowscodecs gdi32 dwmapi comdlg32
+target_link_libraries(LostWorld PRIVATE SDL3::SDL3-static winmm ole32 windowscodecs gdi32 dwmapi comdlg32 shell32
     ${CMAKE_SOURCE_DIR}/third_party/ngx/lib/nvsdk_ngx_d.lib)
 
 if(MSVC)
