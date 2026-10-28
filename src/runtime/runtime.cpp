@@ -20,6 +20,7 @@
 #include <mutex>
 
 #include "bosses.h"
+#include "wide_aim.h"
 #include "eeprom.h"
 #include "inputs.h"
 #include "fns.h"
@@ -1138,6 +1139,7 @@ void rt_event(Ctx& c) {
                 uint8_t state = rd8(0x1A3791 + 0x10 * p);
                 g_inputs.p[p].playing = state == 1 || state == 2;
             }
+            wide_aim::frame(g_frame);   // widescreen aim: the guns' calibration reaches the side areas
             if (g_frame % 60 == 0) {
                 static ULONGLONG last_ms = GetTickCount64();
                 ULONGLONG now = GetTickCount64();

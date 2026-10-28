@@ -1,4 +1,5 @@
 #include "inputs.h"
+#include "wide_aim.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,6 +38,7 @@ void set_gun_position(int player, float x, float y) {
         ax = P2_STAGE.zero_x + (ax - STAGE.zero_x) * STAGE.step_x / P2_STAGE.step_x;
         ay = P2_STAGE.zero_y + (ay - STAGE.zero_y) * STAGE.step_y / P2_STAGE.step_y;
     }
+    ax = wide_aim::remap_x(player, ax);   // widescreen aim: the widened calibration (wide_aim.h)
     g_inputs.p[player].gun_x = std::clamp(int(ax + 0.5f), 0, 255);
     g_inputs.p[player].gun_y = std::clamp(int(ay + 0.5f), 0, 255);
 }

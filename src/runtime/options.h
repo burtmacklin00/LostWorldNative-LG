@@ -62,6 +62,7 @@ struct Options {
     std::string wav_path;            // --wav: record the sound output
     bool several_mice = true;        // a second mouse is player 2's gun (--one-mouse: all move player 1's)
     bool free_play = true;           // --no-free-play: coins needed (free play: 1 / 2 insert the credit themselves)
+    bool wide_aim = true;            // --no-wide-aim / display.ini WideAim = 0: in widescreen, side-area shots stay at the 4:3 edge
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
     uint64_t shot_frame = 0;         // --shot N: screenshot of frame N, then exit

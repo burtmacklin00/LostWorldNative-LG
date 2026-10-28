@@ -28,9 +28,12 @@ player 2's gun and joins the game (if player 2 joined with start first, their
 first shot does it, unless a gamepad is player 2's); from then on each mouse moves its own
 crosshair and the pointer stays inside the window. A shot outside the 4:3 game screen or on
 its very edge (where a light gun parks an off-screen shot) reloads, as on the cabinet. In
-widescreen (16:9, 21:9) a shot in the side areas fires instead, at the nearest edge of the 4:3
-screen (the farthest the game sees), and only a shot at the window's edge reloads; the 4:3 mode
-keeps the cabinet's rule. Disable it in Settings > Controls >
+widescreen (16:9, 21:9) a shot in the side areas fires instead, and only a shot at the window's
+edge reloads; the 4:3 mode keeps the cabinet's rule. With the widescreen aim (on by default;
+`WideAim = 0` in display.ini or `--no-wide-aim` turns it off) the guns reach the side areas: the
+gun calibration in the game's RAM settings (not the EEPROM) is widened so the 0..255 gun range
+covers the whole wide picture, and the game sees a side-area shot where it is. Without it, such a
+shot fires at the nearest edge of the 4:3 screen. Disable it in Settings > Controls >
 Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (on by default; `--no-free-play`
 turns it off) makes 1 and 2
 insert the credit themselves, so a light gun's start button starts and continues without the

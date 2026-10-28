@@ -98,6 +98,7 @@ add_executable(LostWorld
     src/runtime/eeprom.cpp
     src/runtime/inputs.cpp
     src/runtime/raw_mice.cpp
+    src/runtime/wide_aim.cpp
     src/runtime/gamepad.cpp
     src/runtime/scsi53c810.cpp
     src/runtime/survival.cpp

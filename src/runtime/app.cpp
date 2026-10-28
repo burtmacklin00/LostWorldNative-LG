@@ -36,6 +36,7 @@
 #include "runtime.h"
 #include "stats.h"
 #include "survival.h"
+#include "wide_aim.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
@@ -145,7 +146,11 @@ static void shot_outside_reloads(int player, HWND hwnd, POINT pt) {
         GetClientRect(hwnd, &rc);
         bool window_edge = pt.x <= 1 || pt.y <= 1 || pt.x >= rc.right - 2 || pt.y >= rc.bottom - 2;
         if (!window_edge) {
-            set_gun_position(player, std::clamp(a.x, 0.003f, 0.997f), std::clamp(a.y, 0.003f, 0.997f));
+            // With the widescreen aim the game sees the shot where it is (the
+            // gun position already reaches the side areas); otherwise at the
+            // nearest edge of the 4:3 screen
+            if (!wide_aim::active())
+                set_gun_position(player, std::clamp(a.x, 0.003f, 0.997f), std::clamp(a.y, 0.003f, 0.997f));
             return;
         }
     }
@@ -655,6 +660,9 @@ static void load_display_ini() {
         if (a > 0.5f && a < 5.0f) g_opt.max_aspect = a;
         printf("[video] display.ini: aspect %s\n", v);
     }
+    // WideAim = 0: in widescreen, shots in the side areas fire at the 4:3 edge
+    // instead of reaching the side areas (wide_aim.h)
+    if (!GetPrivateProfileIntA("Display", "WideAim", 1, ini.c_str())) g_opt.wide_aim = false;
     GetPrivateProfileStringA("Display", "Bezel", "", v, sizeof(v), ini.c_str());
     std::string b = v;
     while (!b.empty() && isspace((unsigned char)b.back())) b.pop_back();
@@ -853,6 +861,8 @@ int main(int argc, char** argv) {
     int exit_code = 0;
     if (g_opt.menu) load_display_ini();   // before the command line, which wins
     if (!parse_options(g_opt, argc, argv, extra, exit_code)) return exit_code;
+    // Widescreen aim, in normal play only (the tests keep the factory calibration)
+    wide_aim::configure(g_opt.menu && g_opt.wide_aim, g_opt.max_aspect);
     // What the options set outside the struct: emulation globals and the gun
     g_data_dir = g_opt.data_dir;
     g_frame_limit = g_opt.frame_limit;
