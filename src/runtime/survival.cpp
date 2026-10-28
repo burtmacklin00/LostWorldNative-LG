@@ -90,6 +90,7 @@ constexpr uint32_t CAM_GAIT_SPEED = 0x1A3994, CAM_GAIT_HALT = 0x1A399C, CAM_GAIT
 // Free RAM (the game uses up to 0x200000) for the survival scripts
 constexpr uint32_t FREE_RAM = 0x700000;
 constexpr int32_t WAIT_FOREVER = 0x3FFFFFFF;
+constexpr uint32_t SKIP_SCRIPT = FREE_RAM + 0x40000;   // an encounter on the way in: just its end (-999)
 constexpr uint64_t CLEAR_FRAMES = 230;      // a stop cleared: the walk on starts after this (4 s), less every lap
 constexpr uint64_t WALK_LONGEST = 3600;     // a walk that never reaches a stop (1 min): the lap ends there
 constexpr uint64_t FADE_FRAMES = 40;        // the fade to black at the end of a lap, and back
@@ -153,6 +154,9 @@ int op_args(int32_t op) {
     }
 }
 
+// Calls that play a cutscene: those encounters are left to run on the way in
+bool is_cutscene_fn(uint32_t fn) { return fn == 0x389DC || fn == 0x386D8; }
+
 // Calls that bring in enemies counted by the machine (seen in the trace)
 bool is_enemy_fn(uint32_t fn) {
     switch (fn) {
@@ -209,6 +213,23 @@ int encounter_enemies(int id) {
         }
     }
     return n;
+}
+
+// Does the encounter whose header is at pc h play a cutscene?
+bool encounter_cutscene(uint32_t h) {
+    for (uint32_t i = h; i < SCRIPT_WORDS;) {
+        int32_t op = int32_t(rd32(script_addr(i)));
+        if ((op == -10 && i != h) || op == -998 || op == -999) break;
+        if (op < 0) {
+            int k = op_args(op);
+            if (k < 0) return true;   // not understood: left alone
+            i += 1 + uint32_t(k);
+        } else {
+            if (is_cutscene_fn(rd32(script_addr(i + 1)))) return true;
+            i += 3 + rd32(script_addr(i + 2));
+        }
+    }
+    return false;
 }
 
 // Best wave per stage and zone, with its score and lap (save/survival.ini:
@@ -1144,6 +1165,16 @@ void survival_enter(Ctx& c, uint32_t fn) {
     if (fn == FN_ENCOUNTER && g_surv.on) {
         Survival& s = g_surv;
         uint32_t pc = rd32(VM_PC);
+        // On the way in, an encounter before the arena ends as it starts (the
+        // camera walks on at once): nobody has to shoot its dinosaurs, and some
+        // never leave by themselves (stage 3's lobby). Cutscenes still play.
+        if (s.state == Survival::WAITING && s.mode == SurvivalMode::Loading && pc < SCRIPT_WORDS &&
+            int32_t(rd32(script_addr(pc))) == -10 && !encounter_cutscene(pc)) {
+            wr32(SKIP_SCRIPT, uint32_t(-999));
+            wr32(VM_PC, script_pc(SKIP_SCRIPT));
+            printf("[survival] on the way: encounter %d skipped\n", int32_t(rd32(script_addr(pc + 1))));
+            return;
+        }
         if (s.state == Survival::STARTING) {   // first run of the encounter: its header
             s.base_diff = rd8(SETTING_DIFF) >> 4;
             if (s.take_over(pc)) {
@@ -1228,6 +1259,7 @@ bool survival_frame(Ctx&) {
                 printf("[survival] did not reach zone %d of stage %d\n", s.zone, s.stage + 1);
                 s.on = false;
                 s.mode = SurvivalMode::Off;
+                s.publish();   // the window goes back to the menu
             }
             break;
         case SurvivalMode::Ready:   // the start screen: the game waits for the first shot

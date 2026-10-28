@@ -1499,6 +1499,8 @@ int main(int argc, char** argv) {
             if (survival_last == SurvivalMode::Loading && sv.mode != SurvivalMode::Loading)
                 printf("[survival] audio during the loading: %llu samples\n",
                        (unsigned long long)(g_sound.frames_out() - survival_audio_at));
+            if (survival_last == SurvivalMode::Loading && sv.mode == SurvivalMode::Off && g_opt.menu && !g_menu_open)
+                survival_to_menu();   // the game never got to the arena: not left running behind the loading screen
             survival_last = sv.mode;
             if (survival_cli_pending) {   // the boot screens: already the loading screen
                 sv.mode = SurvivalMode::Loading;
