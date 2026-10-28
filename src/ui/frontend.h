@@ -196,6 +196,8 @@ private:
     RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
     int prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);   // how far it moves x
     RECT back_rect_{}, reset_rect_{};   // the BACK and RESET prompts, clickable
+    RECT coffee_rect_{};   // the donation link on the main menu, clickable
+    bool coffee_hot_ = false;   // the pointer is over it
 
     Screen screen_ = Screen::None;
     bool options_from_pause_ = false;
