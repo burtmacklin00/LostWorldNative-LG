@@ -48,6 +48,7 @@ enum : uint32_t {
     R3D_WORLD = 1 << 16,       // part of the game world (the atmosphere applies)
     R3D_RAIN = 1 << 17,        // a drop of our rain (r3d_rain.h), not the game's
     R3D_ACTOR = 1 << 18,       // a model of the world turned its own way: dinosaurs, people, vehicles (rim light)
+    R3D_HUD_HALF = 1 << 19,    // with R3D_HUD_LEFT / RIGHT: a player's prompt, moved half as far (hud_split.h)
     R3D_FADE_IN_SHIFT = 24,    // 8 bits: scenery that just appeared in the distance, still
                                // dissolved into the backdrop (255 = fully; distance haze)
 };

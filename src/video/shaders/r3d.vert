@@ -51,6 +51,7 @@ void main() {
     vec4 before = vp.proj * vec4(mix(in_prev, in_pos, vp.params.w), 1.0);
     // HUD elements tagged by the scene builder go to the widescreen edges
     float shift = (in_flags & 0x4000u) != 0u ? -vp.quality.z : (in_flags & 0x8000u) != 0u ? vp.quality.z : 0.0;
+    if ((in_flags & 0x80000u) != 0u) shift *= 0.5;   // a player's prompt: to the middle of their half
     gl_Position.x += shift * gl_Position.w;
     before.x += shift * before.w;
     clip_now = gl_Position;

@@ -42,6 +42,7 @@
 #include "../ui/frontend.h"
 #include "../ui/menu_music.h"
 #include "../ui/survival_ui.h"
+#include "../video/hud_split.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
 #include "../video/r3d_scene.h"
@@ -1314,6 +1315,24 @@ int main(int argc, char** argv) {
                 middle += (out.front[y * SCREEN_W + x] >> 24) != 0 ||
                           out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
         out.hud_band = middle * 20 < 36 * 176;
+        // Widescreen: each player's prompts (RELOAD, lives, CONTINUE) go to the
+        // middle of that player's half of the wide picture (hud_split.h); the
+        // rows that move are handed to the shader in sky_coords' last row,
+        // after the back layers' per-row shift. Measured before the 2D
+        // replacements too, so a replaced RELOAD moves with its place
+        {
+            uint32_t* split_rows = &out.sky_coords[(SCREEN_H + 1) * TileGen::SKY_COORDS_W + SCREEN_H];
+            bool wide = !g_opt.hud_centre && g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
+            if (wide && (g_inputs.p[0].playing || g_inputs.p[1].playing))
+                hud_split::rows_2d(
+                    [&](int x, int y) {
+                        return (out.front[y * SCREEN_W + x] >> 24) != 0 ||
+                               out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
+                    },
+                    split_rows);
+            else
+                std::fill(split_rows, split_rows + SCREEN_H, 0u);
+        }
         int offset[3];
         TileGen::front_offset(out.vram.data(), offset);
         // Survival's start screen: the game stands still on its first frame
@@ -1854,10 +1873,23 @@ int main(int argc, char** argv) {
         }
         f9_was_down = f9;
         if (g_opt.shot_frame && shown != ~0ull && shown + 1 >= g_opt.shot_frame) capture_2d = true;
+        // In widescreen the crosshair follows the gun over the whole picture,
+        // side bands too (a shot there still reloads); only the very edge,
+        // where a light gun parks an off-screen shot, stays without one. In
+        // 4:3 it shows on the game screen only, as before
+        float side_band = 0;
+        {
+            RECT rc;
+            GetClientRect(presenter.hwnd(), &rc);
+            side_band = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect).game_x0 / SCREEN_W;
+        }
         for (int p = 0; p < 2; p++) {   // player 2's only while that gun is in use
             PlayerAim aim = player_aim(p);
             bool used = (p == 0 || g_inputs.p[1].playing) && !crosshair_idle(p, aim);
-            renderer.set_crosshair(p, g_opt.show_crosshair && used && aim.inside && !g_opt.fixed_aim, aim.x, aim.y);
+            const float EDGE = 0.004f;
+            bool on_picture = side_band > 0 ? aim.x > -side_band + EDGE && aim.x < 1 + side_band - EDGE && aim.y >= 0 && aim.y <= 1
+                                            : aim.inside;
+            renderer.set_crosshair(p, g_opt.show_crosshair && used && on_picture && !g_opt.fixed_aim, aim.x, aim.y);
         }
         // The 3D frame to draw. While interpolating, the picture shows the game
         // as it was at `shown_time`: a frame period plus the frames' lateness
