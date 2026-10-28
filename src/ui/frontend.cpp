@@ -78,6 +78,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "aa") aa = v == "dlaa" ? 1 : (v == "none" || v == "off") ? 2 : 0;
         else if (k == "resolution_3d") scale = std::clamp(atoi(value), SCALES[0], 100);
         else if (k == "half_rate") half_rate = on;
+        else if (k == "vsync") vsync = on;
         else if (k == "haze") haze = on;
         else if (k == "bloom") bloom = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : on ? 2 : 0;
         else if (k == "ao") ao = on;
@@ -126,11 +127,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\nvsync = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music, scale, half_rate);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music, scale, half_rate, vsync);
     fclose(f);
 }
 
@@ -307,6 +308,7 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"L
 // missing here goes at the end of GAME. Tabs past VISIBLE_OPTIONS rows scroll.
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_QUALITY, DISPLAY_TAB}, {OPT_DISPLAY, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_HALF_RATE, DISPLAY_TAB},
+    {OPT_VSYNC, DISPLAY_TAB},
     {OPT_MOTION, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB}, {OPT_TEXT, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
     {OPT_SUN, LIGHTING_TAB}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_RT, LIGHTING_TAB}, {OPT_SHAFTS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB},
@@ -377,6 +379,8 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
              L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
             {OPT_HALF_RATE, L"FRAME RATE", s.half_rate ? L"HALF" : L"FULL",
              L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
+            {OPT_VSYNC, L"VSYNC", on_off(s.vsync),
+             L"Off: each image goes out as soon as it is drawn, without waiting for the monitor (may tear)"},
             {OPT_MOTION, L"MOTION", s.smooth ? L"SMOOTH" : L"ORIGINAL",
              L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
             {OPT_VOLUME, L"VOLUME", std::to_wstring(s.volume), L"Sound volume"},
@@ -472,6 +476,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
     }
     case OPT_SCALE: slider(s.scale, FrontendSettings::SCALES[0], 100); break;
     case OPT_HALF_RATE: choice(s.half_rate ? 1 : 0, 2, false); break;
+    case OPT_VSYNC: toggle(s.vsync); break;
     case OPT_MOTION: choice(s.smooth ? 1 : 0, 2, false); break;
     case OPT_VOLUME: slider(s.volume, 0, 10); break;
     case OPT_SPEAKERS: choice(s.speakers, 3, false); break;
@@ -522,6 +527,7 @@ void Frontend::reset_tab() {
     for (const Item& it : items()) switch (it.id) {
         case OPT_SCALE: settings.scale = d.scale; break;
         case OPT_HALF_RATE: settings.half_rate = d.half_rate; break;
+        case OPT_VSYNC: settings.vsync = d.vsync; break;
         case OPT_MOTION: settings.smooth = d.smooth; break;
         case OPT_VOLUME: settings.volume = d.volume; break;
         case OPT_SPEAKERS: settings.speakers = d.speakers; break;
@@ -734,6 +740,7 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_HALF_RATE: settings.half_rate = !settings.half_rate; push(Action::SettingsChanged); break;
+    case OPT_VSYNC: settings.vsync = !settings.vsync; push(Action::SettingsChanged); break;
     case OPT_HAZE: settings.haze = !settings.haze; push(Action::SettingsChanged); break;
     case OPT_BLOOM: settings.bloom = (settings.bloom + dir + 4) % 4; push(Action::SettingsChanged); break;
     case OPT_AO: settings.ao = !settings.ao; push(Action::SettingsChanged); break;

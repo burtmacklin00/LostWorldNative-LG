@@ -358,6 +358,21 @@ bool VkPresenter::create_swapchain() {
     ci.preTransform = caps.currentTransform;
     ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     ci.presentMode = VK_PRESENT_MODE_FIFO_KHR;   // vsync at the monitor's refresh rate
+    if (!vsync_) {   // the first one the driver has: immediate (tearing), mailbox, or vsync after all
+        uint32_t mn = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(gpu_, surface_, &mn, nullptr);
+        std::vector<VkPresentModeKHR> modes(mn);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(gpu_, surface_, &mn, modes.data());
+        for (VkPresentModeKHR m : {VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR})
+            if (ci.presentMode == VK_PRESENT_MODE_FIFO_KHR && std::find(modes.begin(), modes.end(), m) != modes.end())
+                ci.presentMode = m;
+    }
+    if (ci.presentMode != present_mode_) {
+        present_mode_ = ci.presentMode;
+        printf("[video] vsync %s\n", present_mode_ == VK_PRESENT_MODE_FIFO_KHR ? "on"
+                                    : present_mode_ == VK_PRESENT_MODE_IMMEDIATE_KHR ? "off (immediate)"
+                                                                                     : "off (mailbox)");
+    }
     ci.clipped = VK_TRUE;
     std::unique_lock<std::shared_mutex> lock(swapchain_mutex_);
     swapchain_first_id_ = present_id_ + 1;

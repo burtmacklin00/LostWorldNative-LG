@@ -85,7 +85,8 @@ def main():
     if len(seq) > 2:
         sv = [(shown[int(b["id"])] - shown[int(a["id"])]) * 1000 for a, b in zip(seq, seq[1:])]
         describe("on-screen interval", sv)
-        period = statistics.median(sv)
+        # (above the refresh rate without vsync most images never get a whole refresh: at least 0.1 ms)
+        period = max(statistics.median(sv), 0.1)
         print(f"refresh ~{1000 / period:.1f} Hz; intervals > 1.5 refreshes: {sum(v > 1.5 * period for v in sv)}, "
               f"< 0.5 refreshes: {sum(v < 0.5 * period for v in sv)}")
         lat = [(shown[int(p["id"])] - p["display"]) * 1000 for p in seq]
