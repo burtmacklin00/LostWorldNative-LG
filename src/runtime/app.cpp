@@ -116,7 +116,6 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 static bool g_menu_open = false;     // a menu has the controls
 static POINT g_menu_ptr{-1, -1};     // the menu pointer (client pixels), drawn as player 1's crosshair
 static bool g_menu_gun = false;      // player 1's gun drives the menu pointer itself (raw_mice::menu_gun)
-static bool g_key_pause = false;     // 1 (a gun's start button) held a second while player 1 plays: the pause menu
 static bool g_start_was[2] = {};     // 1 / 2 held at the last poll
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
@@ -176,6 +175,9 @@ static void trigger_starts() {
         was_playing[p] = playing;
         bool pressed = down && !was_down[p];
         was_down[p] = down;
+        // During play the trigger is also that player's START: an event asks
+        // a player to keep pressing START, and they just keep shooting
+        if (playing && down) pl.start = true;
         if (!g_opt.trigger_start || playing || now - stopped_at[p] < 1500) continue;
         if (g_opt.free_play) {
             if (pressed) player_join(p);
@@ -213,27 +215,12 @@ static void poll_keyboard_mouse(HWND hwnd) {
     // Free play inserts the credits itself: the coin keys do nothing then
     p1.coin = !g_opt.free_play && down('5');
     g_inputs.p[1].coin = !g_opt.free_play && down('6');
-    static ULONGLONG start_down_at[2] = {};
-    static bool pause_sent = false;
     for (int p = 0; p < 2; p++) {
         PlayerInputs& pl = g_inputs.p[p];
         bool start = down(p ? '2' : '1');
         bool pressed = start && !g_start_was[p];
-        if (pressed) start_down_at[p] = GetTickCount64();
-        if (pl.playing) {
-            // During play start goes to the game as it is (an event asks a
-            // player to press it repeatedly). Held for a second, player 1's
-            // (1, a gun's start button) opens the pause menu; 1 in it resumes
-            pl.start = start;
-            if (p == 0 && g_opt.menu) {
-                if (!start) pause_sent = false;
-                else if (!pause_sent && GetTickCount64() - start_down_at[0] >= 1000) {
-                    g_key_pause = true;
-                    pause_sent = true;
-                }
-            }
-        } else if (!g_opt.free_play) {
-            pl.start = start;
+        if (pl.playing || !g_opt.free_play) {
+            pl.start = start;   // during play the game's own START (trigger_starts adds the gun's trigger)
         } else {
             pl.start = false;   // join_update presses it for a join (after this)
             if (pressed) player_join(p);   // also continues
@@ -1260,7 +1247,7 @@ int main(int argc, char** argv) {
                     survival_to_menu();
                     return true;
                 }
-                if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
+                if (msg == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_TAB)) {   // Tab as in MAME (Esc can quit, via the launcher)
                     frontend.open(Frontend::Screen::Pause);
                     g_menu_open = g_hold = true;
                     return true;
@@ -1275,8 +1262,8 @@ int main(int argc, char** argv) {
             else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
             switch (msg) {
             case WM_KEYDOWN:
-                // 1 resumes from the pause menu it opened (not on its own repeat)
-                if (wp == '1' && frontend.screen() == Frontend::Screen::Pause) {
+                // Tab closes the pause menu it opened (not on its own repeat)
+                if (wp == VK_TAB && frontend.screen() == Frontend::Screen::Pause) {
                     if (!(lp & (1 << 30))) frontend.key(VK_ESCAPE);
                     return true;
                 }
@@ -2049,13 +2036,6 @@ int main(int argc, char** argv) {
             frontend.open(Frontend::Screen::Pause);
             pad_in_menu = true;
             g_menu_open = g_hold = true;
-        }
-        if (g_key_pause) {   // 1 while player 1 plays
-            g_key_pause = false;
-            if (g_opt.menu && !frontend.active()) {
-                frontend.open(Frontend::Screen::Pause);
-                g_menu_open = g_hold = true;
-            }
         }
         join_update();
         bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);

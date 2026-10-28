@@ -49,17 +49,20 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Trigger (not playing) ... Start / continue (free play)
    Shoot off the screen .... Reload
    Right button ............ Reload
-   Start button (key 1) .... Start; during play: pause menu
-                             (press it again to resume)
+   Start button (key 1) .... Start
+   During play, the trigger is also your START: when the game says
+   to keep pressing START, just keep shooting.
 
  IN THE MENUS
    Player 1's gun moves the crosshair; the trigger selects and the
    right button goes back. Player 2's gun is ignored in the menus.
 
  KEYBOARD
+   Tab .............. Pause menu during play (Tab again resumes)
    1 / 2 ............ Player 1 / 2 start (free play: also inserts the
-                      credit). During play, 1 opens the pause menu.
-   5 / 6 ............ Coin for player 1 / 2 (only without free play)
+                      credit)
+   5 / 6 ............ Coin for player 1 / 2 (only without free play;
+                      with free play they do nothing)
    Esc .............. With the launcher: quits the game completely.
                       Without it: pause menu.
    F11, Alt+Enter ... Fullscreen on / off

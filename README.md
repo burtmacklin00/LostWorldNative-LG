@@ -55,6 +55,11 @@
   from the `4x3` or `16x9` folder into the game folder. The bezel is read straight from `4x3`:
   your own `4x3\bezel.png` if you add one, otherwise `bezel-default.png` (which comes with it);
   updates only replace the default, never your `bezel.png`.
+- **LaunchBox ready**: `Launch Lost World.ahk` (AutoHotkey 1.1) starts the game; Esc closes it
+  completely and Hook of the Reaper is closed (never started) when the game ends. In the game,
+  **Tab** opens and closes the pause menu (as in MAME). No console window opens behind the game.
+- **START by trigger**: during play the trigger also presses that player's START (an event asks a
+  player to keep pressing START: they just keep shooting). With free play the coin keys do nothing.
 - **Easy install and updates**: `setup-and-build.bat` installs what the build needs and builds;
   `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
 - **Hook of the Reaper outputs** (TCP port 8000, like MAME): recoil once per bullet fired, ammo,
