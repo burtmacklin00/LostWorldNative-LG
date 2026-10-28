@@ -1071,7 +1071,7 @@ struct Survival {
     // The arena kept the first time it was reached (save/survival/), made
     // with this LIFE and difficulty setting: the way there only once
     std::string cache;            // its file: being loaded or saved this run
-    bool cache_loading = false, cache_saving = false;
+    bool cache_loading = false, cache_saving = false, cache_tried = false;
     uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
     std::string cache_path() const { return arena_state_path(stage + 1, zone); }
     // Loaded: the arena's first encounter (where survival or the arcade game
@@ -1133,7 +1133,7 @@ struct Survival {
         loading_frames = travel_frames = 0;
         loading_lives = 0;
         cache.clear();
-        cache_loading = cache_saving = false;
+        cache_loading = cache_saving = cache_tried = false;
         shoot_in = false;
         for (const SurvivalZone& sz : SURVIVAL_ZONES)
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
@@ -1396,7 +1396,10 @@ bool survival_frame(Ctx&) {
         switch (s.mode) {
         case SurvivalMode::Loading:
             if (s.gate) break;
-            if (s.loading_frames == 0 && !getenv("LW_SURV_NO_CACHE")) {   // the arena kept from another time
+            // The arena kept from another time, once the game is in its main
+            // loop (a state loads only from there: without a window, past the boot)
+            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !getenv("LW_SURV_NO_CACHE")) {
+                s.cache_tried = true;
                 std::string path = s.cache_path();
                 s.keep_life = rd8(SETTING_LIFE), s.keep_diff = rd8(SETTING_DIFF);   // the settings as they are now
                 if (game_state_valid(path) && game_state_load(path)) s.cache = path, s.cache_loading = true;
@@ -1412,7 +1415,7 @@ bool survival_frame(Ctx&) {
                     break;
                 }
                 printf("[survival] %s did not load: the way there instead\n", s.cache.c_str());
-                DeleteFileA(s.cache.c_str());
+                if (r > 0) DeleteFileA(s.cache.c_str());   // (not when the game was just not ready for it)
                 s.cache.clear();
                 if (r > 0) {   // loaded but not understood: from the attract again
                     s.on = false;
