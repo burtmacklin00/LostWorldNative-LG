@@ -36,6 +36,7 @@
 #include "runtime.h"
 #include "stats.h"
 #include "survival.h"
+#include "outputs.h"
 #include "wide_aim.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
@@ -864,6 +865,8 @@ int main(int argc, char** argv) {
     if (!parse_options(g_opt, argc, argv, extra, exit_code)) return exit_code;
     // Widescreen aim, in normal play only (the tests keep the factory calibration)
     wide_aim::configure(g_opt.menu && g_opt.wide_aim, g_opt.max_aspect);
+    // Hook of the Reaper outputs, in normal play only (outputs.h)
+    if (g_opt.menu && g_opt.outputs) outputs::start();
     // What the options set outside the struct: emulation globals and the gun
     g_data_dir = g_opt.data_dir;
     g_frame_limit = g_opt.frame_limit;
@@ -2416,6 +2419,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 100 && !g_parked; i++) Sleep(10);   // a frame takes ~17 ms; 1 s is plenty
     music.close();
     g_audio.stop();
+    outputs::stop();   // mame_stop: Hook of the Reaper lets go of the guns
     stats_save();
     fflush(stdout);
     ui.shutdown();

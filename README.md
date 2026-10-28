@@ -57,7 +57,10 @@
   updates only replace the default, never your `bezel.png`.
 - **Easy install and updates**: `setup-and-build.bat` installs what the build needs and builds;
   `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
-- Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
+- **Hook of the Reaper outputs** (TCP port 8000, like MAME): recoil once per bullet fired, ammo,
+  lives, damage (not on the hit that ends a life) and death, the gun in hand and the start lamps.
+  Copy `hotr\jplostworldsa.txt` into Hook of the Reaper's DefaultLG folder. The special guns from the
+  pickups give a longer single kick (guns using Recoil_Value) and a shake when picked up.
 
 Updates from the original project are checked daily and merged here only after testing.
 
