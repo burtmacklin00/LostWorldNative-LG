@@ -22,6 +22,7 @@
 - **Arcade sound**, with surround and headphone modes.
 - **Mouse, gamepad (gyro too) or two mice** for 2 players.
 - **New modes**: Boss Fight, Survival, achievements and stats.
+- **NEW:** Ultra-widescreen support.
 
 <p align="center">
   <img src="docs/img/widescreen.jpg" alt="Arcade 4:3 next to native 16:9" width="100%">
