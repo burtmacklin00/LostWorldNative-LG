@@ -31,6 +31,7 @@ struct FrontendSettings {
     int scale = 100;   // 3D resolution in % of the window's (SCALES)
     bool half_rate = false;   // above 100 Hz the 3D is drawn every other refresh
     bool vsync = true;        // off: images go out without waiting for the monitor's refresh
+    int aspect = 1;    // widest 3D view: 0 4:3 (original), 1 16:9, 2 21:9 (ultrawide, up to 2.4:1)
     bool haze = true;  // distance haze
     int bloom = 2;     // glow around bright things: 0 off, 1 low, 2 medium, 3 high
     bool ao = true;    // ambient occlusion
@@ -136,7 +137,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_ASPECT,
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
