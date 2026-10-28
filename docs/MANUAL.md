@@ -262,11 +262,11 @@ STAGE:ZONE` (for example `--survival 3:0`).
 
 Arenas are locked until you reach them in the arcade game: when you get
 there, ARENA UNLOCKED rises from the bottom of the screen and the game keeps
-that moment in save/survival/ (one file per arena and LIFE / difficulty
-setting). Survival then starts the arena straight from it. An arena with a
+that moment in save/survival/. Survival then starts the arena straight
+from it. An arena with a
 record counts as unlocked, and `--survival` works on locked ones too.
 
-Without a kept state (another setting, or `--survival`), the game reaches the arena by itself, at full speed and silently, behind a
+Without a kept state (`--survival` on an arena not reached yet), the game reaches the arena by itself, at full speed and silently, behind a
 loading screen that explains the mode, shows the record and says what is happening
 (coin, route, trip to the arena) with a progress bar. The game
 waits at the shooting point until the first shot (or Enter). Then waves
