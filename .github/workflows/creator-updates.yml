@@ -1,0 +1,61 @@
+# Checks the original project (snicolast/LostWorldNative) once a day.
+# If the creator has posted new commits, it opens (or refreshes) a pull request
+# into this fork listing what changed. GitHub emails you about the new pull
+# request. Nothing changes in this fork until you review, test and click Merge.
+name: Check for creator updates
+
+on:
+  schedule:
+    - cron: '17 13 * * *'   # daily, about 8:17 AM Central
+  workflow_dispatch:        # "Run workflow" button on the Actions tab
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Look for new commits from the creator
+        id: check
+        run: |
+          git remote add upstream https://github.com/snicolast/LostWorldNative.git
+          git fetch --quiet upstream master
+          count=$(git rev-list --count HEAD..upstream/master)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "New commits from the creator: $count"
+
+      - name: Open or update the pull request
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COUNT: ${{ steps.check.outputs.count }}
+        run: |
+          # The creator's latest code goes on its own branch, never on master
+          git push --force origin upstream/master:refs/heads/creator-updates
+
+          {
+            echo "The creator posted $COUNT new commit(s) to snicolast/LostWorldNative."
+            echo
+            echo "**Nothing has changed in this fork yet.** To take the update:"
+            echo "1. Build and test it (with your controls and outputs) before merging."
+            echo "2. Click **Merge pull request** below. Then run update.bat on your PCs."
+            echo
+            echo "If GitHub says there are conflicts, the creator changed the same code as this fork; those have to be resolved by hand."
+            echo
+            echo "### New commits"
+            git log --no-merges --format='- %s (%h, %as)' HEAD..upstream/master
+          } > body.md
+
+          title="Creator update: $COUNT new commit(s)"
+          pr=$(gh pr list --head creator-updates --base master --state open --json number --jq '.[0].number')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "$title" --body-file body.md
+          else
+            gh pr create --head creator-updates --base master --title "$title" --body-file body.md
+          fi
