@@ -100,9 +100,10 @@ PNG); `cover.png`, a poster whose logo becomes the title otherwise; and `sega.pn
 
 ## Support
 
-If you enjoy the port and want to help with the time and tools behind it, you can
-[buy me a coffee](https://buymeacoffee.com/snicolast8u). Entirely optional: it supports the work
-on this project, not the game, which belongs to Sega.
+If you enjoy the port and want to help with the time and tools behind it, you can buy me a coffee.
+Entirely optional: it supports the work on this project, not the game, which belongs to Sega.
+
+<a href="https://buymeacoffee.com/snicolast8u"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50"></a>
 
 ## License
 

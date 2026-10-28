@@ -25,6 +25,7 @@ constexpr uint32_t AMBER = 0xFFA032, HINT = 0xC9B88E, FOOT = 0x8A8070;
 // The donation link on the main menu, for whoever wants to support the port
 constexpr const wchar_t* COFFEE_URL = L"https://buymeacoffee.com/snicolast8u";
 constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
+constexpr uint32_t COFFEE_INK = 0x0D0C22;   // their dark blue-black
 
 float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
 
@@ -1715,7 +1716,8 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             {L"ACHIEVEMENTS", std::to_wstring(got) + L"/" + std::to_wstring(achievement_table().size())}};
         if (best > 0) chips.push_back({L"BEST SCORE", grouped(best)});
         int x1 = w - U(70), cy0 = U(56), ch = U(56);
-        int coffee_w = U(22) + extent(ITEM, U(21), COFFEE_LABEL) + U(22);   // the donation link, leftmost of the row
+        int cup = U(28);   // the donation link, leftmost of the row: Buy Me a Coffee's yellow button and its cup
+        int coffee_w = U(24) + cup + U(12) + extent(ITEM, U(21), COFFEE_LABEL) + U(28);
         if (right) {   // from the left edge: the total width first
             x1 = U(70) - U(16) + coffee_w + U(16);
             for (const auto& c : chips)
@@ -1730,11 +1732,19 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             text(ITEM, U(26), chips[i].second, x1 - U(22), cy0 + ch / 2 - U(15), 2, {GOLD_TOP, GOLD_BOTTOM});
             x1 = x0 - U(16);
         }
-        coffee_rect_ = {x1 - coffee_w, cy0, x1, cy0 + ch};   // brighter under the pointer, a click opens it
-        fill(x1 - coffee_w, cy0, x1, cy0 + ch, coffee_hot_ ? AMBER : PANEL, coffee_hot_ ? 0.3f : 0.8f);
-        frame(x1 - coffee_w, cy0, x1, cy0 + ch, std::max(1, U(1.5f)), AMBER, coffee_hot_ ? 0.9f : 0.3f);
-        text(ITEM, U(21), COFFEE_LABEL, x1 - coffee_w + U(22), cy0 + ch / 2 - U(12), 0,
-             coffee_hot_ ? Style{WHITE_TOP, WHITE_BOTTOM} : Style{PALE_TOP, PALE_BOTTOM});
+        int x0 = x1 - coffee_w;
+        coffee_rect_ = {x0, cy0, x1, cy0 + ch};   // brighter under the pointer, a click opens it
+        pill(x0, cy0, x1, cy0 + ch, coffee_hot_ ? 0xFFE94D : 0xFFDD00, coffee_hot_ ? 1.0f : 0.9f);
+        // A takeaway cup: the lid, the body narrowing to the bottom, a yellow sleeve round its middle
+        int cx = x0 + U(24) + cup / 2, cy = cy0 + (ch - cup) / 2;
+        pill(cx - cup / 2, cy, cx + cup / 2, cy + cup * 22 / 100, COFFEE_INK, 1);
+        for (int y = cy + cup * 26 / 100; y < cy + cup; y++) {
+            int half = cup * 42 / 100 - (y - cy) * 12 / 100, edge = std::max(1, U(2));
+            fill(cx - half, y, cx + half, y + 1, COFFEE_INK, 1);
+            if (y >= cy + cup * 48 / 100 && y < cy + cup * 72 / 100)
+                fill(cx - half + edge, y, cx + half - edge, y + 1, 0xFFDD00, 1);
+        }
+        text(ITEM, U(21), COFFEE_LABEL, x0 + U(24) + cup + U(12), cy0 + ch / 2 - U(12), 0, {COFFEE_INK, COFFEE_INK});
     }
 
     // The entries share what is left of the height, the description under them
