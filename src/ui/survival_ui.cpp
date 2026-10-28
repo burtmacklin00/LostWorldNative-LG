@@ -219,6 +219,9 @@ void SurvivalUi::draw_intro(const SurvivalView& v, double now) {
         text(TITLE, U(46), L"PREPARING THE HUNT", cx, top + U(492), 1, GOLD_TOP, GOLD_BOTTOM);
         bar(cx - U(380), top + U(552), cx + U(380), top + U(568), v.progress);
         text(TEXT, U(30), what + dots, cx, top + U(582), 1, FOOT, FOOT);
+        if (v.step == SurvivalStep::Travelling)   // or it looks stuck
+            text(TEXT, U(26), L"The game is racing through the stage, muted, to reach the arena. This can take a moment.",
+                 cx, top + U(625), 1, FOOT, FOOT, 0.9f);
     } else {
         if (int(now * 2.5) % 2 == 0) text(TITLE, U(64), L"SHOOT TO START", cx, top + U(510), 1, GOLD_TOP, GOLD_BOTTOM);
         text(TEXT, U(28), L"ESC: PAUSE", cx, top + U(655), 1, FOOT, FOOT);
