@@ -1489,6 +1489,12 @@ int main(int argc, char** argv) {
     int queue_extra = 0;
     double went_out = 0, last_miss = -100;
     bool repeat_image = false;   // HALF FRAME RATE: this refresh shows the last image again
+    // VSYNC: OFF still draws no more images than the monitor's refreshes:
+    // without a limit the GPU draws thousands a second for nothing and the
+    // game thread falls behind (uneven game frames). Measured with
+    // LW_FRAMELOG on an RTX 5070 Ti at 120 Hz: ~1700 images a second
+    double next_image = 0;
+    HANDLE image_timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     for (;;) {
         {   // before the inputs are read
             int depth = queue_depth ? queue_depth + queue_extra : 0;
@@ -1505,6 +1511,20 @@ int main(int argc, char** argv) {
                 out = 0;   // the next wait skips a refresh: not a miss
             }
             went_out = out;
+        }
+        if (!g_opt.vsync) {   // the next image a refresh after the last (from now after a slow one)
+            double period = display_clock.period, now = qpc_seconds();
+            if (now - next_image > period) next_image = now;
+            if (image_timer && next_image - now > 0.001) {   // to ~0.5 ms before, then a spin
+                LARGE_INTEGER due;
+                due.QuadPart = -LONGLONG((next_image - now - 0.0005) * 1e7);
+                if (SetWaitableTimer(image_timer, &due, 0, nullptr, nullptr, FALSE))
+                    WaitForSingleObject(image_timer, 100);
+            } else if (!image_timer) {
+                while (next_image - now > 0.002) Sleep(1), now = qpc_seconds();
+            }
+            while (qpc_seconds() < next_image) YieldProcessor();
+            next_image += period;
         }
         if (!presenter.pump()) break;
         double loop_from = qpc_seconds();
