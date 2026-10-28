@@ -41,7 +41,7 @@ std::vector<int> classify(const std::vector<Box>& boxes) {
     std::vector<int> side(n, 0);
     for (int i = 0; i < n; i++) {
         const Box& g = group[find(parent, i)];
-        if (g.x1 - g.x0 + 1 < MIN_WIDTH) continue;
+        if (g.x1 - g.x0 + 1 < (g.y0 >= LIVES_ROW ? MIN_WIDTH_LIVES : MIN_WIDTH)) continue;
         side[i] = g.x1 < MIDDLE_X0 ? -1 : g.x0 >= MIDDLE_X1 ? 1 : 0;
     }
     return side;

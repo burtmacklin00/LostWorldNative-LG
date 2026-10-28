@@ -60,8 +60,11 @@ void r3d_anchor_hud(R3DScene& out) {
             for (uint32_t t = 0; t + 2 < count && tris.size() < 4096; t += 3) {
                 R3DVertex* tri = &out.vertices[first + t];
                 float b[4];
-                if (-tri[0].pos[2] < 10.0f || (tri[0].flags & (R3D_HUD_LEFT | R3D_HUD_RIGHT)) || !screen_bbox(v, tri, b))
-                    continue;
+                // Unlike the ammo counter above, near geometry counts too: the
+                // prompts (RELOAD, SHOOT OUTSIDE OF THE SCREEN!) are drawn at
+                // z = 1 like the gun sight, which is narrower than a prompt
+                // (MIN_WIDTH) and so stays where the game puts it
+                if ((tri[0].flags & (R3D_HUD_LEFT | R3D_HUD_RIGHT)) || !screen_bbox(v, tri, b)) continue;
                 float k = 496.0f / v.w;   // the 4:3 screen's 2D pixels
                 hud_split::Box box{int((b[0] - v.x) * k), int(b[1] - v.y), int((b[2] - v.x) * k), int(b[3] - v.y)};
                 if (box.x1 < 0 || box.x0 >= 496 || box.y1 < 0 || box.y0 >= 384) continue;
