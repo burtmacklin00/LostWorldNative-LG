@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <ctime>
 #include <initializer_list>
 #include <thread>
@@ -282,6 +283,16 @@ const Frontend::Picture& Frontend::preview(Id id) {
         if (f.id == id)
             for (const wchar_t* ext : {L".jpg", L".png"})
                 if (load_image(L"res/preview/" + std::wstring(f.name) + ext, p.px, p.w, p.h)) break;
+    return p;
+}
+
+const Frontend::Picture& Frontend::pad_icon(const std::wstring& button) {
+    auto it = pad_icons_.find(button);
+    if (it != pad_icons_.end()) return it->second;
+    std::wstring name = button;
+    for (wchar_t& c : name) c = towlower(c);
+    Picture& p = pad_icons_[button];
+    load_image(L"res/pad/" + name + L".png", p.px, p.w, p.h);
     return p;
 }
 
@@ -1179,6 +1190,29 @@ void Frontend::picture(const Picture& p, int x0, int y0, int x1, int y1) {
     }
 }
 
+// A picture with transparency, area-averaged down to w x h at x0, y0
+void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
+    if (p.w <= 0 || w <= 0 || h <= 0) return;
+    float sx = float(p.w) / w, sy = float(p.h) / h;
+    for (int y = std::max(0, y0); y < std::min(h_, y0 + h); y++)
+        for (int x = std::max(0, x0); x < std::min(w_, x0 + w); x++) {
+            int u0 = int((x - x0) * sx), u1 = std::max(u0 + 1, std::min(p.w, int((x - x0 + 1) * sx)));
+            int v0 = int((y - y0) * sy), v1 = std::max(v0 + 1, std::min(p.h, int((y - y0 + 1) * sy)));
+            float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
+            for (int v = v0; v < v1; v++)
+                for (int u = u0; u < u1; u++) {
+                    uint32_t c = p.px[size_t(v) * p.w + u];
+                    float ca = chan(c, 24);
+                    for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
+                    a += ca;
+                }
+            if (a <= 0) continue;
+            uint32_t c = 0;
+            for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+            blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
+        }
+}
+
 HFONT Frontend::font(Family f, int px) {
     auto key = std::make_pair(int(f), px);
     auto it = fonts_.find(key);
@@ -1471,25 +1505,7 @@ void Frontend::backdrop_background() {
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
     if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
         int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
-        int lx = int(w_ - LOGO_PICTURE_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
-        float sx = float(logo_.w) / lw, sy = float(logo_.h) / lh;
-        for (int y = std::max(0, ly); y < std::min(h_, ly + lh); y++)
-            for (int x = std::max(0, lx); x < std::min(w_, lx + lw); x++) {
-                int u0 = int((x - lx) * sx), u1 = std::max(u0 + 1, std::min(logo_.w, int((x - lx + 1) * sx)));
-                int v0 = int((y - ly) * sy), v1 = std::max(v0 + 1, std::min(logo_.h, int((y - ly + 1) * sy)));
-                float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
-                for (int v = v0; v < v1; v++)
-                    for (int u = u0; u < u1; u++) {
-                        uint32_t c = logo_.px[size_t(v) * logo_.w + u];
-                        float ca = chan(c, 24);
-                        for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
-                        a += ca;
-                    }
-                if (a <= 0) continue;
-                uint32_t c = 0;
-                for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
-                blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
-            }
+        sprite(logo_, int(w_ - LOGO_PICTURE_X * u_) - lw / 2, int(LOGO_SCREEN_TOP * h_), lw, lh);
     } else if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
         float s, x0, y0;
         poster_layout(s, x0, y0);
@@ -1561,13 +1577,18 @@ constexpr uint32_t WHITE_TOP = 0xFFF6E0, WHITE_BOTTOM = 0xFFE2A8, INK = 0x080806
 constexpr uint32_t PAD_A = 0x6FD17A, PAD_B = 0xE8655A, PAD_Y = 0xE8C85A, PAD_X = 0x5AA8E8, KEYCAP = 0xD8D2C0;
 }  // namespace
 
-// One entry of the key help: the gamepad's button (a coloured disc, or a grey
-// pill for the shoulders) or the key ("<>": the left / right arrows), then
+// One entry of the key help: the gamepad's button (its picture from res/pad,
+// else a coloured disc, or a grey pill for the shoulders) or the key ("<>": the left / right arrows), then
 // what it does. x moves past it; the rectangle is for clicks
 RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int h = U(38), x0 = x;
-    if (pad_prompts && pad_button) {
+    if (pad_prompts && pad_button && pad_icon(pad_button).w > 0) {
+        const Picture& icon = pad_icon(pad_button);
+        int iw = h * icon.w / icon.h;
+        sprite(icon, x, y, iw, h);
+        x += iw + U(10);
+    } else if (pad_prompts && pad_button) {
         std::wstring b = pad_button;
         uint32_t c = b == L"A" ? PAD_A : b == L"B" ? PAD_B : b == L"Y" ? PAD_Y : b == L"X" ? PAD_X : KEYCAP;
         int bw = std::max(h, extent(ITEM, U(20), b) + U(20));
@@ -1599,7 +1620,9 @@ RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* k
 int Frontend::prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int h = U(38), wd = 0;
-    if (pad_prompts && pad_button) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
+    const Picture* icon = pad_prompts && pad_button ? &pad_icon(pad_button) : nullptr;
+    if (icon && icon->w > 0) wd = h * icon->w / icon->h + U(10);
+    else if (icon) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
     else if (key) wd = (std::wstring(key) == L"<>" ? U(70) : std::max(h, extent(MONO, U(18), key) + U(22))) + U(10);
     if (what && *what) wd += measure(ITEM, U(22), what) + U(44);
     return wd;

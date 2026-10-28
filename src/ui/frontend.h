@@ -264,6 +264,11 @@ private:
     std::map<int, Picture> previews_;
     const Picture& preview(Id id);
     void picture(const Picture& p, int x0, int y0, int x1, int y1);   // scaled to fill the box, cropped
+    void sprite(const Picture& p, int x0, int y0, int w, int h);      // scaled to w x h, its own transparency kept
+    // The gamepad's buttons in the key help (res/pad/<button>.png, CC0); w = 0:
+    // none, the drawn disc or pill instead
+    std::map<std::wstring, Picture> pad_icons_;
+    const Picture& pad_icon(const std::wstring& button);
     // The players' crosshairs as the game draws them (their pictures, or the
     // rings), over a stretch of the game: the panel of the crosshair rows
     Picture crosshair_[2];

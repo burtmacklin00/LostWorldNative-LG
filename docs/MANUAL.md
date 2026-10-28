@@ -420,6 +420,7 @@ normal behaviour when unset):
 | LW_QUEUE=N | At most N images waiting for the screen (2 by default; 0 = the whole swapchain) |
 | LW_MENU_KEYS=40,13,27 | Presses those keys in the menu (one every 10 presents; `cX/Y` clicks pixel X,Y), saves out/menu.bmp and exits |
 | LW_MENU_SHOT=path.bmp | Saves the menu image each time it is redrawn |
+| LW_MENU_PAD=1 | The menus show the gamepad's buttons in the key help, as if a gamepad drove them |
 | LW_NOFOG | Removes fog from all viewports |
 | LW_NOLOD | Draws all levels of detail, including those the game would discard by distance |
 | LW_FOGDBG | Prints per frame the camera, the ground and the models matched by the world tracking |

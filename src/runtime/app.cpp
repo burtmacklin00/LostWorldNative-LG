@@ -1776,8 +1776,9 @@ int main(int argc, char** argv) {
             }
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
             presenter.set_cursor_visible(frontend.active() && !pad_in_menu);
-            if (frontend.pad_prompts != pad_in_menu) {   // the key help shows the gamepad's buttons or the keys
-                frontend.pad_prompts = pad_in_menu;
+            static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
+            if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
+                frontend.pad_prompts = pad_in_menu || menu_pad;
                 frontend.invalidate();
             }
             if (frontend.active()) {
