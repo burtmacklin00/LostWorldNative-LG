@@ -1,8 +1,10 @@
 @echo off
-rem Lost World Native LG: arcade 4:3 picture with the bezel (4x3 folder).
-rem Your own 4x3\bezel.png is used if there is one, else 4x3\bezel-default.png.
+rem Lost World Native LG: arcade 4:3 picture with the bezel.
+rem Only display.ini is copied: the bezel is read straight from the 4x3 folder
+rem (your 4x3\bezel.png if there is one, else 4x3\bezel-default.png).
 rem Takes effect the next time the game starts.
 cd /d "%~dp0"
 copy /y "4x3\display.ini" "display.ini" >nul
-if exist "4x3\bezel-default.png" copy /y "4x3\bezel-default.png" "bezel-default.png" >nul
-if exist "4x3\bezel.png" (copy /y "4x3\bezel.png" "bezel.png" >nul) else if exist "bezel.png" del /q "bezel.png"
+rem Bezel copies left in the game folder by older versions of this file
+if exist "4x3\bezel.png" if exist "bezel.png" del /q "bezel.png"
+if exist "4x3\bezel-default.png" if exist "bezel-default.png" del /q "bezel-default.png"

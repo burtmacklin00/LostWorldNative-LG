@@ -52,13 +52,9 @@
 - **Gun-friendly menus**: the menu pointer is player 1's crosshair, and player 2's gun is ignored
   in the menus so the two guns never fight over the pointer.
 - **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
-  from the `4x3` or `16x9` folder into the game folder, with the bezel for 4:3. The game uses
-  `bezel.png` if you add your own to `4x3`, otherwise `bezel-default.png` (which comes with it);
+  from the `4x3` or `16x9` folder into the game folder. The bezel is read straight from `4x3`:
+  your own `4x3\bezel.png` if you add one, otherwise `bezel-default.png` (which comes with it);
   updates only replace the default, never your `bezel.png`.
-- **LaunchBox ready**: `Launch Lost World.ahk` (AutoHotkey 1.1) starts the game; Esc closes it
-  completely and Hook of the Reaper is closed (never started) when the game ends. In the game,
-  **1** (a gun's start button) opens the pause menu while player 1 plays, and 1 again resumes.
-  No console window opens behind the game.
 - **Easy install and updates**: `setup-and-build.bat` installs what the build needs and builds;
   `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
 - Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
