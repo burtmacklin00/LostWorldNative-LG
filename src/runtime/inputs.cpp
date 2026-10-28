@@ -8,7 +8,10 @@
 Inputs g_inputs;
 std::atomic<bool> g_select_aim{false}, g_fixed_aim{false};
 
+std::atomic<float> g_aim_reach{0.0f};
+
 static std::atomic<float> g_aim_x[2] = {-1.0f, -1.0f}, g_aim_y[2] = {-1.0f, -1.0f};
+static std::atomic<int> g_aim_adc[2] = {-1, -1};   // gun_x | gun_y << 8 as set_player_aim left them
 
 void set_player_aim(int player, float x, float y) {
     g_aim_x[player] = x;
@@ -33,13 +36,32 @@ void set_player_aim(int player, float x, float y) {
         ax = P2_STAGE.zero_x + (ax - STAGE.zero_x) * STAGE.step_x / P2_STAGE.step_x;
         ay = P2_STAGE.zero_y + (ay - STAGE.zero_y) * STAGE.step_y / P2_STAGE.step_y;
     }
-    g_inputs.p[player].gun_x = std::clamp(int(ax + 0.5f), 0, 255);
-    g_inputs.p[player].gun_y = std::clamp(int(ay + 0.5f), 0, 255);
+    int gx = std::clamp(int(ax + 0.5f), 0, 255), gy = std::clamp(int(ay + 0.5f), 0, 255);
+    g_inputs.p[player].gun_x = gx;
+    g_inputs.p[player].gun_y = gy;
+    g_aim_adc[player] = gx | gy << 8;
 }
+
+bool gun_aim_exact(int player, float& out_x, float& out_y) {
+    if (gun_reach() <= 0 || g_fixed_aim || player < 0 || player > 1) return false;
+    // Only while the gun is where set_player_aim put it (not --auto's raw
+    // values, nor survival's scripted shots on its way in)
+    const PlayerInputs& pl = g_inputs.p[player];
+    if (g_aim_adc[player] != (pl.gun_x | pl.gun_y << 8)) return false;
+    // The game draws its X (and aims) at screen px = 248 + 0.9797 * x, 192 -
+    // 0.9957 * y, for both guns: measured with --auto point:X/Y over the whole
+    // 21:9 view (13 points, within 0.05 px of the X in out/scene.txt)
+    out_x = (g_aim_x[player] * 496 - 248) / 0.9797f;
+    out_y = (192 - g_aim_y[player] * 384) / 0.9957f;
+    return true;
+}
+
+float gun_reach() { return g_select_aim ? 0.0f : g_aim_reach.load(); }
 
 PlayerAim player_aim(int player) {
     float x = g_aim_x[player], y = g_aim_y[player];
-    return {x, y, x >= 0 && y >= 0 && x <= 1 && y <= 1};
+    float reach = gun_reach();
+    return {x, y, x >= -reach && y >= 0 && x <= 1 + reach && y <= 1};
 }
 
 int pad_player(int pad, uint32_t connected) {
@@ -92,10 +114,12 @@ void AutoInput::apply(uint64_t frame) {
     for (auto& e : events) {
         bool on = frame >= e.frame && frame < e.frame + 6;
         if (frame < e.frame || frame > e.frame + 6) continue;
-        // "aim2:X/Y" and a trailing 2 on a button are player 2's
-        bool aim = e.name.rfind("aim", 0) == 0;
-        int player = aim ? e.name.rfind("aim2:", 0) == 0 : e.name.size() > 1 && e.name.back() == '2';
-        std::string name = aim || !player ? e.name : e.name.substr(0, e.name.size() - 1);
+        // "aim2:X/Y", "point2:X/Y" and a trailing 2 on a button are player 2's
+        bool aim = e.name.rfind("aim", 0) == 0, point = e.name.rfind("point", 0) == 0;
+        int player = aim     ? e.name.rfind("aim2:", 0) == 0
+                     : point ? e.name.rfind("point2:", 0) == 0
+                             : e.name.size() > 1 && e.name.back() == '2';
+        std::string name = aim || point || !player ? e.name : e.name.substr(0, e.name.size() - 1);
         PlayerInputs& pl = g_inputs.p[player];
         if (name == "coin") pl.coin = on;
         else if (name == "start") pl.start = on;
@@ -106,6 +130,9 @@ void AutoInput::apply(uint64_t frame) {
         else if (aim && frame == e.frame) {   // aimX/Y: raw gun position from then on
             int x = 128, y = 128;
             if (sscanf(name.c_str() + (player ? 5 : 3), "%d/%d", &x, &y) == 2) pl.gun_x = x, pl.gun_y = y;
+        } else if (point && frame == e.frame) {   // pointX/Y: aimed there as the mouse would (fractions of the 4:3 screen)
+            float x = 0.5f, y = 0.5f;
+            if (sscanf(name.c_str() + (player ? 7 : 6), "%f/%f", &x, &y) == 2) set_player_aim(player, x, y);
         }
     }
 }

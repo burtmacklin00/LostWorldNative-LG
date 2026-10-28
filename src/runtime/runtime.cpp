@@ -1304,6 +1304,17 @@ void rt_projected(uint32_t lr, uint32_t vec, uint32_t px, uint32_t py) {
     g_marks_building.push_back({248 + sx, 192 - sy, k / d});
 }
 
+// The gun's aim in a stage, as fn_0000CBF0 made it from the ADC values (x, y
+// at `vec`, in units from the middle of the screen): in a wide 3D view it
+// goes where the gun points, also in the side bands beyond the 4:3 screen
+// (gun_aim_exact). The game aims its shots and draws its X from there
+void rt_gun_aimed(uint32_t vec, uint32_t player) {
+    float x, y;
+    if (player > 1 || !gun_aim_exact(int(player), x, y)) return;
+    wr32(vec, d2fbits(x));
+    wr32(vec + 4, d2fbits(y));
+}
+
 static void enemy_marks_frame() {   // start of a frame: the last one's list is complete
     std::lock_guard<std::mutex> lock(g_marks_mutex);
     g_marks.swap(g_marks_building);

@@ -78,6 +78,7 @@ void rt_sc(Ctx& c, uint32_t addr);            // sc
 uint32_t rt_text_region(uint32_t country);    // country seen by the text-language choice
 bool rt_subtitles_off();                      // subtitles of the voice lines hidden
 void rt_projected(uint32_t lr, uint32_t vec, uint32_t px, uint32_t py);   // fn_0003BE44 returned (aim assist)
+void rt_gun_aimed(uint32_t vec, uint32_t player);   // fn_0000CBF0 made the aim (wide 3D view: beyond 4:3)
 uint32_t rt_mfspr(Ctx& c, uint32_t spr);      // SPRs with side effects (DEC, TB)
 void rt_mtspr(Ctx& c, uint32_t spr, uint32_t v);
 void rt_mtmsr(Ctx& c, uint32_t v);

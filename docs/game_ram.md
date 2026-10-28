@@ -27,6 +27,9 @@ a real game with `--trace-survival`, not just in the disassembly.
 | 0x1A858C | 5 × int | Player 1 score per stage (0x80-byte block per player from 0x1A857C; +0x10 + 4 × stage) |
 | 0x1A377C | int | Player 2 lives (object 2 + 0x58; the routine at 0x2FDC reads it as 0x1A36C8 + 0xB4) |
 | fn_001180A8 | function | Reads the controls: 0xF0040008 player 1, 0xF004000C player 2, the system port (start 1 bit 4, start 2 bit 5) and the 8 ADC channels |
+| 0xE9C | 4 bytes × 8 | ADC channels as fn_001180A8 leaves them (+4 per channel: 0/1 player 1 X/Y, 2/3 player 2): current, previous, average, difference |
+| fn_0000CBF0 | function | The gun's aim in a stage from the ADC values (object +0x34 x, +0x38 y, units from the middle of the screen, X drawn at px 248 + 0.9797 x, 192 - 0.9957 y; player in byte +0xC of the object at +0). Piecewise linear about the calibration's centre, 232 (X) / 176 (Y) units to its edges, not clamped: the 8-bit ADC is what keeps it near the 4:3 screen. The runtime replaces it in a wide 3D view (rt_gun_aimed, at 0xD49C) |
+| 0x123C | 6 bytes × 2 | Gun calibration (settings copy of the EEPROM), player 2 at 0x1242: X centre, Y centre, X right edge, X left edge, Y edge (ADC above the centre), Y edge (below). Factory: 118 110 213 24 207 12 / 123 108 222 29 199 5 |
 
 ## Results screen counters
 
