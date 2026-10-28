@@ -408,11 +408,12 @@ static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
 // whole refreshes, and starts again after a stall (a window drag, a slow frame).
 // DWM's vblanks are those of one monitor (the main one): they are not used
 // when the window's monitor runs at another refresh rate (two monitors at 60
-// and 144 Hz). When the images do not go out one per refresh (vsync turned
-// off in the driver, G-Sync/FreeSync below the monitor's rate, refreshes
-// missed) they are not tied to vblanks either: each goes out about as soon
-// as it is ready, so its moment is when this thread prepares it (it waits
-// for the previous presents first, so its wake-ups follow theirs)
+// and 144 Hz). When the images do not go out one per refresh (VSYNC: OFF or
+// vsync turned off in the driver, G-Sync/FreeSync below the monitor's rate,
+// refreshes missed) they are not tied to vblanks either: each goes out about
+// as soon as it is ready, so its moment is about when this thread prepares
+// it (it waits for the previous presents first, so its wake-ups follow
+// theirs), evened out over the last ones
 struct DisplayClock {
     enum Mode { Vblanks, Refreshes, Presents };
     double at = 0, last = 0, period = 1.0 / 60;
@@ -468,7 +469,13 @@ struct DisplayClock {
         }
         if (mode == Presents) {
             if (dwm && !other_monitor) period = dwm_period;
-            at = last = now;
+            // The wake-ups are less even than the images going out (the
+            // thread is woken late now and then): the moment moves on by
+            // their average interval and follows them by a tenth of the
+            // difference, starting again when one is off by a whole interval
+            double next = at + interval;
+            at = at > 0 && interval > 0 && std::abs(now - next) < interval ? next + 0.1 * (now - next) : now;
+            last = now;
             return at;
         }
         if (mode == Vblanks) {
@@ -707,6 +714,7 @@ int main(int argc, char** argv) {
         if (ini.aa == 2) g_opt.msaa = 1;
         g_opt.supersample = ini.scale / 100.0f;
         g_opt.half_rate = ini.half_rate;
+        g_opt.vsync = ini.vsync;
         g_opt.haze = ini.haze ? 1.0f : 0.0f;
         g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
         g_opt.ao = ini.ao ? 1.0f : 0.0f;
@@ -826,6 +834,7 @@ int main(int argc, char** argv) {
     // Window: the game runs on its own thread at real speed; this thread draws
     // the latest image at the monitor's refresh rate (vsync)
     VkPresenter presenter;
+    presenter.set_vsync(g_opt.vsync);
     if (!presenter.init("Lost World Native", int(SCREEN_H * 2 * std::max(g_opt.max_aspect, 4.0f / 3.0f)), SCREEN_H * 2,
                         g_opt.dlaa)) {
         fprintf(stderr, "Could not start Vulkan; try --headless\n");
@@ -1073,6 +1082,7 @@ int main(int argc, char** argv) {
         for (int sc : FrontendSettings::SCALES)
             if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
         s.half_rate = g_opt.half_rate;
+        s.vsync = g_opt.vsync;
         s.haze = g_opt.haze > 0;
         s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
         s.ao = g_opt.ao > 0;
@@ -1629,6 +1639,7 @@ int main(int argc, char** argv) {
                     g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers = s.speakers));
                     renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
                     g_opt.half_rate = s.half_rate;
+                    presenter.set_vsync(g_opt.vsync = s.vsync);
                     renderer.set_distance_haze(s.haze ? haze_strength : 0);
                     renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
@@ -1875,7 +1886,8 @@ int main(int argc, char** argv) {
         double display = display_clock.tick(presenter.hwnd());
         // HALF FRAME RATE: above 100 Hz every other refresh shows the image
         // before again (only the crosshairs move), half the work of the GPU
-        bool half = g_opt.half_rate && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
+        // (with vsync: without it the images are not tied to refreshes)
+        bool half = g_opt.half_rate && g_opt.vsync && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
                     film.empty();
         repeat_image = half && !repeat_image;
         if (repeat_image) {

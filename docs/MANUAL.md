@@ -147,6 +147,12 @@ saved games and are not versioned.
   the 3D is drawn every other refresh (72 images per second at 144 Hz) and the
   refresh in between shows the same picture with only the crosshairs redrawn.
   About half the GPU work, with the motion still even.
+- --no-vsync (or VSYNC: OFF in the settings, DISPLAY tab): each image goes out
+  as soon as it is drawn instead of at the monitor's next refresh (Vulkan
+  immediate mode, or mailbox if the driver has no immediate mode). As many
+  images as the GPU can draw, less latency, and tearing on monitors without
+  G-Sync/FreeSync. FRAME RATE: HALF does nothing with vsync off. The console
+  prints `[video] vsync on/off` when it changes.
 - QUALITY (settings, DISPLAY tab): LOW, MEDIUM, HIGH and ULTRA set together the
   options that cost the most (render resolution, frame rate, ray tracing,
   ambient occlusion, sun shadows, light shafts, soft particles, sky, surface
