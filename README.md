@@ -80,7 +80,8 @@ and one *Windows 11 SDK* (it works on Windows 10 too).
 
 F11 or Alt+Enter toggles fullscreen. Everything else is in **Options**.
 
-Light guns that Windows sees as a mouse (Sinden, Gun4IR and the like) work as is. **Options >
+Light guns that Windows sees as a mouse (Sinden, Gun4IR and the like) work as is; for a Sinden, keep
+its software running for the white border. Shooting off the screen reloads. **Options >
 Game > Free play** lets 1 / 2 (a gun's start button) start and continue without a coin, and
 **Controls > Hide idle crosshair** clears a crosshair whose gun has not been used for a few seconds.
 

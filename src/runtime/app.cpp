@@ -112,6 +112,7 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 static bool g_menu_open = false;     // a menu has the controls
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
+static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
 
 // Window pixels -> fraction of the 4:3 game screen (accounting for the black bars)
 static void aim_at(int player, HWND hwnd, POINT pt) {
@@ -124,6 +125,18 @@ static void aim_at(int player, HWND hwnd, POINT pt) {
     set_player_aim(player, x, y);
 }
 
+// A shot outside the 4:3 game screen (the side bands of a wide window, or the
+// edge where a light gun puts a shot that misses the screen) reloads, as on
+// the cabinet, instead of firing at the edge
+static void shot_outside_reloads(int player) {
+    PlayerInputs& pl = g_inputs.p[player];
+    PlayerAim a = player_aim(player);   // the very edge too: where a gun can park an off-screen shot
+    if (pl.trigger && (a.x <= 0 || a.y <= 0 || a.x >= 1 || a.y >= 1)) {
+        pl.trigger = false;
+        pl.offscreen = true;
+    }
+}
+
 static void poll_keyboard_mouse(HWND hwnd) {
     // Scripted input (--auto) takes over the controls
     if (GetForegroundWindow() != hwnd || !g_auto.events.empty() || survival_owns_inputs()) {
@@ -132,8 +145,11 @@ static void poll_keyboard_mouse(HWND hwnd) {
         raw_mice::update(hwnd, false, false);
         return;
     }
-    // A second mouse becomes player 2's when it clicks while player 1 plays alone
-    bool join_allowed = g_opt.several_mice && !g_menu_open && g_inputs.p[0].playing && !g_inputs.p[1].playing;
+    // A second mouse becomes player 2's when it clicks during a game, also
+    // after player 2 joined with start (a light gun's button) before firing,
+    // unless a gamepad is player 2's
+    const PlayerInputs &in1 = g_inputs.p[0], &in2 = g_inputs.p[1];
+    bool join_allowed = g_opt.several_mice && !g_menu_open && (in1.playing || in2.playing) && !(in2.playing && g_p2_pad);
     raw_mice::update(hwnd, join_allowed, !g_menu_open);
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     if (g_menu_open) {
@@ -165,7 +181,10 @@ static void poll_keyboard_mouse(HWND hwnd) {
             if (p == 1 && g.clicked && !pl.playing && p1.playing) player_join(1);
             pl.trigger = g.trigger;
             pl.offscreen = g.reload;
-            if (p == 1 || g_p1_pad < 0) aim_at(p, hwnd, g.pos);
+            if (p == 1 || g_p1_pad < 0) {
+                aim_at(p, hwnd, g.pos);
+                shot_outside_reloads(p);
+            }
         }
     } else {
         p1.trigger = down(VK_LBUTTON);
@@ -174,7 +193,10 @@ static void poll_keyboard_mouse(HWND hwnd) {
         POINT pt;
         GetCursorPos(&pt);
         ScreenToClient(hwnd, &pt);
-        if (g_p1_pad < 0) aim_at(0, hwnd, pt);
+        if (g_p1_pad < 0) {
+            aim_at(0, hwnd, pt);
+            shot_outside_reloads(0);
+        }
     }
     if (g_block_buttons) {   // the click that closed the menu does not fire
         bool held = false;
@@ -252,6 +274,9 @@ static bool poll_gamepads(HWND hwnd) {
     for (int i = 0; i < Gamepads::MAX; i++)
         if (g_pads.pad(i).connected) connected |= 1u << i;
     if (g_p1_pad >= 0 && !(connected >> g_p1_pad & 1)) g_p1_pad = -1;   // unplugged: the mouse aims again
+    g_p2_pad = false;
+    for (int i = 0; i < Gamepads::MAX; i++)
+        if (connected >> i & 1 && pad_player(i, connected) == 1) g_p2_pad = true;
     if (g_menu_open) std::fill(std::begin(blocked), std::end(blocked), true);   // the button that closes it does not fire
     if (!focused || g_menu_open || !g_auto.events.empty() || survival_owns_inputs()) return false;
     bool pause = false;
