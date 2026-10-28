@@ -131,8 +131,10 @@ saved games and are not versioned.
 
 ## Video and sound options
 
-- --aspect 16:9 (default), 21:9 or 4:3: maximum width of the 3D view. The
-  sky (background 2D layers) is also drawn at the sides; the HUD stays in
+- --aspect 16:9 (default), 21:9 or 4:3 (or WIDESCREEN in the settings,
+  DISPLAY tab, applied at once): maximum width of the 3D view. WIDESCREEN
+  21:9 allows up to 2.4:1, so 2560x1080 and 3440x1440 monitors are filled
+  edge to edge. The sky (background 2D layers) is also drawn at the sides; the HUD stays in
   the central 4:3 with --hud-centre. The guns aim over the whole 3D view:
   the game's ADC values only reach a little beyond the 4:3 screen, so in a
   wider view the runtime gives the game the aim itself (rt_gun_aimed, in

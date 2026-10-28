@@ -103,6 +103,10 @@ static void dump_scene(const R3DScene& scene, const uint32_t* back, const uint32
     fclose(f);
 }
 
+// Menu WIDESCREEN 4:3, 16:9, 21:9. Ultrawide monitors are 2.37 (2560x1080) to
+// 2.39 (3440x1440), wider than 21/9 = 2.33, so 21:9 allows up to 2.4
+static const float MAX_ASPECT[3] = {4.0f / 3.0f, 16.0f / 9.0f, 2.4f};
+static int aspect_level(float max_aspect) { return max_aspect < 1.5f ? 0 : max_aspect < 2.0f ? 1 : 2; }
 static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu levels OFF, LOW, MEDIUM, HIGH
 
 // Keyboard and mouse (only while the window is active):
@@ -727,6 +731,7 @@ int main(int argc, char** argv) {
         g_opt.supersample = ini.scale / 100.0f;
         g_opt.half_rate = ini.half_rate;
         g_opt.vsync = ini.vsync;
+        g_opt.max_aspect = MAX_ASPECT[ini.aspect];
         g_opt.haze = ini.haze ? 1.0f : 0.0f;
         g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
         g_opt.ao = ini.ao ? 1.0f : 0.0f;
@@ -1095,6 +1100,7 @@ int main(int argc, char** argv) {
             if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
         s.half_rate = g_opt.half_rate;
         s.vsync = g_opt.vsync;
+        s.aspect = aspect_level(g_opt.max_aspect);   // --aspect 2.6 shows as 21:9 and is kept until changed
         s.haze = g_opt.haze > 0;
         s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
         s.ao = g_opt.ao > 0;
@@ -1672,6 +1678,8 @@ int main(int argc, char** argv) {
                     renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
                     g_opt.half_rate = s.half_rate;
                     presenter.set_vsync(g_opt.vsync = s.vsync);
+                    if (s.aspect != aspect_level(g_opt.max_aspect))
+                        renderer.set_max_aspect(g_opt.max_aspect = MAX_ASPECT[s.aspect]);
                     renderer.set_distance_haze(s.haze ? haze_strength : 0);
                     renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
