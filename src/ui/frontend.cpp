@@ -26,6 +26,7 @@ constexpr uint32_t AMBER = 0xFFA032, HINT = 0xC9B88E, FOOT = 0x8A8070;
 constexpr const wchar_t* COFFEE_URL = L"https://buymeacoffee.com/snicolast8u";
 constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
 constexpr uint32_t COFFEE_INK = 0x0D0C22;   // their dark blue-black
+constexpr const wchar_t* COFFEE_HINT = L"Support the port: opens buymeacoffee.com in your browser";
 
 float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
 
@@ -645,6 +646,7 @@ std::vector<Frontend::Item> Frontend::items() const {
 void Frontend::open(Screen s) {
     screen_ = s;
     selected_ = 0;
+    coffee_focus_ = false;
     scroll_ = 0;
     hovered_ = -1;
     hit_.clear();
@@ -821,8 +823,20 @@ bool Frontend::key(int vk) {
         case VK_TAB: set_tab(tab_ + ((GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1)); return true;
         case 'R': reset_tab(); return true;
         }
+    if (coffee_focus_) switch (vk) {   // the donation link at the top: Enter opens it, Up / Down go back to the list
+        case VK_RETURN: case VK_SPACE: open_coffee(); return true;
+        case VK_UP: case 'W': coffee_focus_ = false; dirty_ = true; select(n - 1); return true;
+        case VK_DOWN: case 'S': coffee_focus_ = false; dirty_ = true; select(0); return true;
+        case VK_LEFT: case 'A': case VK_RIGHT: case 'D': return true;
+        }
     switch (vk) {
-    case VK_UP: case 'W': select((selected_ + n - 1) % n); return true;
+    case VK_UP: case 'W':
+        if (screen_ == Screen::Main && !over_game() && selected_ == 0) {   // above the first entry: the donation link
+            coffee_focus_ = dirty_ = true;
+            return true;
+        }
+        select((selected_ + n - 1) % n);
+        return true;
     case VK_DOWN: case 'S': select((selected_ + 1) % n); return true;
     case VK_LEFT: case 'A':
         if (tabs_row) set_tab(tab_ - 1);
@@ -841,6 +855,10 @@ bool Frontend::key(int vk) {
     return false;
 }
 
+void Frontend::open_coffee() {   // in the default browser
+    ShellExecuteW(nullptr, L"open", COFFEE_URL, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 void Frontend::mouse_move(int x, int y) {
     mouse_x_ = x;
     mouse_y_ = y;
@@ -849,7 +867,11 @@ void Frontend::mouse_move(int x, int y) {
         POINT p{x, y};
         if (PtInRect(&hit_[i], p)) hit = int(i);
     }
-    if (hit >= 0) select(hit);
+    if (hit >= 0) {
+        if (coffee_focus_) dirty_ = true;
+        coffee_focus_ = false;
+        select(hit);
+    }
     hovered_ = hit;
     bool on_coffee = PtInRect(&coffee_rect_, POINT{x, y}) != 0;
     if (on_coffee != coffee_hot_) dirty_ = true;
@@ -858,8 +880,8 @@ void Frontend::mouse_move(int x, int y) {
 
 void Frontend::click(int x, int y) {
     POINT p{x, y};
-    if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {   // opens in the default browser
-        ShellExecuteW(nullptr, L"open", COFFEE_URL, nullptr, nullptr, SW_SHOWNORMAL);
+    if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {
+        open_coffee();
         return;
     }
     if (screen_ == Screen::Options && PtInRect(&reset_rect_, p)) {
@@ -1734,7 +1756,10 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         }
         int x0 = x1 - coffee_w;
         coffee_rect_ = {x0, cy0, x1, cy0 + ch};   // brighter under the pointer, a click opens it
-        pill(x0, cy0, x1, cy0 + ch, coffee_hot_ ? 0xFFE94D : 0xFFDD00, coffee_hot_ ? 1.0f : 0.9f);
+        bool lit = coffee_hot_ || coffee_focus_;
+        if (coffee_focus_)   // chosen with the keys or a pad: an amber ring round it, like a selected entry's bar
+            pill(x0 - U(5), cy0 - U(5), x1 + U(5), cy0 + ch + U(5), AMBER, 1);
+        pill(x0, cy0, x1, cy0 + ch, lit ? 0xFFE94D : 0xFFDD00, lit ? 1.0f : 0.9f);
         // A takeaway cup: the lid, the body narrowing to the bottom, a yellow sleeve round its middle
         int cx = x0 + U(24) + cup / 2, cy = cy0 + (ch - cup) / 2;
         pill(cx - cup / 2, cy, cx + cup / 2, cy + cup * 22 / 100, COFFEE_INK, 1);
@@ -1754,7 +1779,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
     int y = y0;
     for (int i = 0; i < n; i++) {
         const Item& it = list[i];
-        bool sel = i == selected_;
+        bool sel = i == selected_ && !coffee_focus_;
         if (sel) {
             float a = it.enabled ? 0.34f : 0.16f;
             hgrad(band0, y, band1, y + spacing, AMBER, right ? 0.0f : a, right ? a : 0.0f);
@@ -1774,7 +1799,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         y += spacing;
     }
     if (selected_ < n)
-        for (const std::wstring& line : wrap(BODY, U(23), list[selected_].hint, col_w - U(20))) {
+        for (const std::wstring& line : wrap(BODY, U(23), coffee_focus_ ? COFFEE_HINT : list[selected_].hint, col_w - U(20))) {
             y += U(32);
             text(BODY, U(23), line, tx, y - U(16), talign, {0xE8C890, 0xE8C890});
         }

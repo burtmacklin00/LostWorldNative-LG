@@ -198,6 +198,8 @@ private:
     RECT back_rect_{}, reset_rect_{};   // the BACK and RESET prompts, clickable
     RECT coffee_rect_{};   // the donation link on the main menu, clickable
     bool coffee_hot_ = false;   // the pointer is over it
+    bool coffee_focus_ = false;   // chosen with the keys or a pad (Up from the first entry)
+    void open_coffee();
 
     Screen screen_ = Screen::None;
     bool options_from_pause_ = false;
