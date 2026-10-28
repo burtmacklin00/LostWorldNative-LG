@@ -129,16 +129,27 @@ static void aim_at(int player, HWND hwnd, POINT pt) {
     set_player_aim(player, x, y);
 }
 
-// A shot outside the 4:3 game screen (the side bands of a wide window, or the
-// edge where a light gun puts a shot that misses the screen) reloads, as on
-// the cabinet, instead of firing at the edge
-static void shot_outside_reloads(int player) {
+// A shot outside the 4:3 game screen reloads, as on the cabinet, instead of
+// firing at the edge: on its very edge too (where a light gun parks a shot that
+// misses the screen). In widescreen (16:9, 21:9) only a shot at the window's
+// edge (the gun pointed away from the screen) reloads: one in the side areas
+// fires, at the nearest point of the 4:3 screen, the farthest the game sees.
+// The 4:3 mode (with or without a bezel) keeps the cabinet's rule.
+static void shot_outside_reloads(int player, HWND hwnd, POINT pt) {
     PlayerInputs& pl = g_inputs.p[player];
     PlayerAim a = player_aim(player);   // the very edge too: where a gun can park an off-screen shot
-    if (pl.trigger && (a.x <= 0 || a.y <= 0 || a.x >= 1 || a.y >= 1)) {
-        pl.trigger = false;
-        pl.offscreen = true;
+    if (!pl.trigger || (a.x > 0 && a.y > 0 && a.x < 1 && a.y < 1)) return;
+    if (g_opt.max_aspect > 4.0f / 3.0f + 0.01f) {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        bool window_edge = pt.x <= 1 || pt.y <= 1 || pt.x >= rc.right - 2 || pt.y >= rc.bottom - 2;
+        if (!window_edge) {
+            set_gun_position(player, std::clamp(a.x, 0.003f, 0.997f), std::clamp(a.y, 0.003f, 0.997f));
+            return;
+        }
     }
+    pl.trigger = false;
+    pl.offscreen = true;
 }
 
 // Settings > Game > TRIGGER STARTS: a player who is not playing starts (or
@@ -219,7 +230,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
             pl.offscreen = g.reload;
             if (p == 1 || g_p1_pad < 0) {
                 aim_at(p, hwnd, g.pos);
-                shot_outside_reloads(p);
+                shot_outside_reloads(p, hwnd, g.pos);
             }
         }
     } else {
@@ -231,7 +242,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
         ScreenToClient(hwnd, &pt);
         if (g_p1_pad < 0) {
             aim_at(0, hwnd, pt);
-            shot_outside_reloads(0);
+            shot_outside_reloads(0, hwnd, pt);
         }
     }
     if (g_block_buttons) {   // the click that closed the menu does not fire

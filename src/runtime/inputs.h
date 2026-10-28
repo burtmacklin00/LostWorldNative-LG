@@ -55,6 +55,9 @@ extern Inputs g_inputs;
 void set_player_aim(int player, float x, float y);
 struct PlayerAim { float x, y; bool inside; };
 PlayerAim player_aim(int player);
+// Only the gun's ADC values (what the game reads), not the aim kept for the
+// crosshair: a widescreen side shot is fired at the nearest edge of the 4:3 screen
+void set_gun_position(int player, float x, float y);
 extern std::atomic<bool> g_select_aim;   // the stage select screen is up (its gun mapping differs)
 extern std::atomic<bool> g_fixed_aim;    // --aim: the ADC values stay fixed
 

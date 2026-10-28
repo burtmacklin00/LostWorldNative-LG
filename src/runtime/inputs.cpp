@@ -13,6 +13,10 @@ static std::atomic<float> g_aim_x[2] = {-1.0f, -1.0f}, g_aim_y[2] = {-1.0f, -1.0
 void set_player_aim(int player, float x, float y) {
     g_aim_x[player] = x;
     g_aim_y[player] = y;
+    set_gun_position(player, x, y);
+}
+
+void set_gun_position(int player, float x, float y) {
     if (g_fixed_aim) return;
     // Measured with --aim against the game's own marker, with the factory gun
     // calibration (screen px = step * (adc - zero), all points within 1 px).

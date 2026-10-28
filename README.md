@@ -45,6 +45,9 @@
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,
   `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
+- **Widescreen side shots**: in 16:9 a shot in the side areas fires (at the nearest edge of the
+  original 4:3 screen) instead of reloading; pointing away from the screen still reloads. 4:3 mode
+  keeps the arcade's rule.
 - **Gun-friendly menus**: the menu pointer is player 1's crosshair, and player 2's gun is ignored
   in the menus so the two guns never fight over the pointer.
 - **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
