@@ -70,18 +70,11 @@ for %%d in (src tools tests docs .github third_party\glslang third_party\musashi
         if errorlevel 8 ( echo Copy failed for %%d & goto fail )
     )
 )
-rem These folders also hold files you add yourself, so only add/replace, never delete
-for %%d in (res third_party\fonts) do (
+rem These folders also hold files you add yourself (your own 4x3\bezel.png...),
+rem so only add/replace, never delete
+for %%d in (res third_party\fonts 4x3 16x9) do (
     if exist "%NEW%\%%d" (
         robocopy "%NEW%\%%d" "%%d" /E /NFL /NDL /NJH /NJS /NP >nul
-        if errorlevel 8 ( echo Copy failed for %%d & goto fail )
-    )
-)
-rem The display modes are yours to customise (your own bezel, display.ini):
-rem only files you do not have yet are added, yours are never replaced
-for %%d in (4x3 16x9) do (
-    if exist "%NEW%\%%d" (
-        robocopy "%NEW%\%%d" "%%d" /E /XC /XN /XO /NFL /NDL /NJH /NJS /NP >nul
         if errorlevel 8 ( echo Copy failed for %%d & goto fail )
     )
 )

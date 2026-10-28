@@ -619,7 +619,8 @@ static std::string full_path(const std::string& path) {
 // "Display - 16x9.bat" copy them in. Command-line options still win.
 //   [Display]
 //   Aspect = 4:3          (4:3 the arcade picture, 16:9 native widescreen, 21:9)
-//   Bezel = bezel.png     (drawn over the screen; its transparent hole shows the game)
+//   Bezel = bezel.png     (drawn over the screen; its transparent hole shows the game;
+//                          without that file, bezel-default.png beside it is used)
 static std::string g_bezel_path;
 
 static void load_display_ini() {
@@ -641,14 +642,22 @@ static void load_display_ini() {
 
 static void load_bezel(R3DRenderer& renderer) {
     if (g_bezel_path.empty()) return;
-    int w = 0, h = 0;
-    std::vector<uint8_t> rgba;
-    if (png_load(g_bezel_path, w, h, rgba) && w > 0 && h > 0) {
-        renderer.set_bezel(w, h, rgba);
-        printf("[video] bezel: %s (%dx%d)\n", g_bezel_path.c_str(), w, h);
-    } else {
-        printf("[video] bezel not loaded: %s\n", g_bezel_path.c_str());
+    // Your own bezel.png first; the one that comes with the game, bezel-default.png
+    // (the same name with -default), when there is none. Updates replace only the default
+    std::string fallback = g_bezel_path;
+    size_t dot = fallback.find_last_of('.'), slash = fallback.find_last_of("\\/");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) dot = fallback.size();
+    fallback.insert(dot, "-default");
+    for (const std::string& path : {g_bezel_path, fallback}) {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+        if (file_exists(path) && png_load(path, w, h, rgba) && w > 0 && h > 0) {
+            renderer.set_bezel(w, h, rgba);
+            printf("[video] bezel: %s (%dx%d)\n", path.c_str(), w, h);
+            return;
+        }
     }
+    printf("[video] no bezel: %s\n", g_bezel_path.c_str());
 }
 
 
