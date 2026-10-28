@@ -1811,7 +1811,8 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                            extend_back ? 1.0f : 0.0f},
                    .sky = {seconds, 0, sun_ ? 1.0f : 0.0f, 0},
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
-                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ ? 4.0f : 0.0f), 0, 0},
+                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ ? 4.0f : 0.0f),
+                              hud_edges_ ? lay.game_x0 : 0.0f, 0},
                    .crosshair2 = {-1, -1, sharpen_, 0}};
     place_crosshairs(lay, pc);
     return pc;

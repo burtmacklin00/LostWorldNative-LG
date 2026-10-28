@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
+
+#include "hud_split.h"
 
 // The cutscene letterbox is two flat black quads drawn in an overlay viewport
 // (higher priority than the scene) across the top and bottom of the screen.
@@ -43,6 +46,34 @@ void r3d_anchor_hud(R3DScene& out) {
                 uint32_t flag = b[2] < v.x + band ? R3D_HUD_LEFT : b[0] > v.x + v.w - band ? R3D_HUD_RIGHT : 0;
                 for (int k = 0; k < 3; k++) tri[k].flags |= flag;
             }
+        }
+    }
+    // The players' prompts drawn in 3D (hud_split.h): a group wholly on one
+    // side of the middle and wider than a hit's points goes out by half the
+    // side band, to the middle of that player's half of the wide picture
+    for (const R3DViewport& v : out.viewports) {
+        if (v.priority == scene_priority || v.w <= 0) continue;
+        std::vector<hud_split::Box> boxes;
+        std::vector<R3DVertex*> tris;
+        for (int pass = 0; pass < 2; pass++) {
+            uint32_t first = pass ? v.trans_first : v.opaque_first, count = pass ? v.trans_count : v.opaque_count;
+            for (uint32_t t = 0; t + 2 < count && tris.size() < 4096; t += 3) {
+                R3DVertex* tri = &out.vertices[first + t];
+                float b[4];
+                if (-tri[0].pos[2] < 10.0f || (tri[0].flags & (R3D_HUD_LEFT | R3D_HUD_RIGHT)) || !screen_bbox(v, tri, b))
+                    continue;
+                float k = 496.0f / v.w;   // the 4:3 screen's 2D pixels
+                hud_split::Box box{int((b[0] - v.x) * k), int(b[1] - v.y), int((b[2] - v.x) * k), int(b[3] - v.y)};
+                if (box.x1 < 0 || box.x0 >= 496 || box.y1 < 0 || box.y0 >= 384) continue;
+                boxes.push_back(box);
+                tris.push_back(tri);
+            }
+        }
+        std::vector<int> side = hud_split::classify(boxes);
+        for (size_t i = 0; i < tris.size(); i++) {
+            if (!side[i]) continue;
+            uint32_t flag = R3D_HUD_HALF | (side[i] < 0 ? R3D_HUD_LEFT : R3D_HUD_RIGHT);
+            for (int k = 0; k < 3; k++) tris[i][k].flags |= flag;
         }
     }
 }

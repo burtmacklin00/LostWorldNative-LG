@@ -138,8 +138,10 @@ saved games and are not versioned.
 ## Video and sound options
 
 - --aspect 16:9 (default), 21:9 or 4:3: maximum width of the 3D view. The
-  sky (background 2D layers) is also drawn at the sides; the HUD and the
-  gun area stay in the central 4:3.
+  sky (background 2D layers) is also drawn at the sides; the gun area stays in
+  the central 4:3 (a shot in the side bands reloads), but the crosshair follows
+  the gun over the whole picture (only the very edge, where a light gun parks an
+  off-screen shot, has none). The HUD follows --hud-centre.
 - --msaa N (default 4; 1 = off): edge antialiasing, including the
   cut-out edges of plants.
 - --aa dlaa: NVIDIA DLAA (DLSS at native resolution) instead of MSAA. The 3D is
@@ -178,7 +180,11 @@ saved games and are not versioned.
   version, which the ROM also contains, and in Japanese the originals of this
   board. The CONTINUE hints appear in Japanese only with jp.
 - --hud-centre: keeps the score and the ammo in the central 4:3 (by default they go
-  to the edges of the widescreen).
+  to the edges of the widescreen, and each player's prompts, such as RELOAD with
+  SHOOT OUTSIDE OF THE SCREEN!, the lives, CONTINUE and INSERT COIN, move out to
+  the middle of that player's half of the wide picture). The points won at a hit and
+  anything across the middle of the screen (CREDITS, STAGE CLEAR) stay where the game
+  puts them. With --aspect 4:3 nothing moves.
 - --no-interp (or MOTION: ORIGINAL in the settings, DISPLAY tab): shows
   the game's frames as they are. By default (MOTION: SMOOTH) the 3D is also drawn
   between game frames, at the monitor's refresh rate (60, 120, 144

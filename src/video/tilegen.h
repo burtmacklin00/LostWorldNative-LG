@@ -69,8 +69,11 @@ public:
     // each procedural sky (SkyPack::Picture::bands, 64 texels per slot). The
     // second one is not written here: the window thread puts there how far
     // the back layers scrolled on each row since the previous game frame
-    // (texel y: R, G = x, y pixels + 128, B = 255 where known), for the interpolation
+    // (texel y: R, G = x, y pixels + 128, B = 255 where known), for the interpolation,
+    // and from texel SCREEN_H on which columns of each row hold a player's prompt that
+    // moves out in widescreen (texel SCREEN_H + y, hud_split.h)
     static constexpr int SKY_COORDS_W = BACK_W, SKY_COORDS_H = SCREEN_H + 2;
+    static_assert(SKY_COORDS_W >= 2 * SCREEN_H, "room for the prompts' rows after the scroll's");
     // The whole 512x512 picture of a layer, without scroll or fade offsets
     static void layer_plane(const uint8_t* vram, int layer, bool four_bpp, std::vector<uint32_t>& out);
     // Hash of the data a layer is drawn from (names, patterns, palettes)

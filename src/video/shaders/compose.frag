@@ -44,7 +44,8 @@ layout(push_constant) uniform Compose {
     vec4 motion;      // x: interpolation of the back layers: the fraction of each row's scroll
                       // since the previous game frame (in sky_coords) to draw them back by
                       // (negative: on ahead by);
-                      // y: which players have their own crosshair picture (1 = player 1, 2 = player 2)
+                      // y: which players have their own crosshair picture (1 = player 1, 2 = player 2);
+                      // z: the side band in 2D pixels when the players' prompts move out (0 = they stay)
     vec4 crosshair2;  // xy: player 2's crosshair, like crosshair; z: sharpening (0 = off); w unused
 } pc;
 
@@ -478,8 +479,9 @@ void main() {
         if (inside_43) back = replacement_pictures(back, q * vec2(SIZE_2D), true);
         vec4 front;
         float shift = pc.hud.x;
+        float front_x = (p.x - pc.layer2d.x) / pc.layer2d.y * 496.0;   // where the foreground pictures are read
         if (shift > 0.0 && q.y * 384.0 < HUD_TOP_ROWS) {
-            float x = (p.x - pc.layer2d.x) / pc.layer2d.y * 496.0;
+            float x = front_x;
             float from_left = x + shift, from_right = x - shift;
             if (from_left < 248.0)
                 front = front_layer(vec2(max(from_left, 0.5) / 496.0, q.y));
@@ -487,6 +489,19 @@ void main() {
                 front = front_layer(vec2(min(from_right, 495.5) / 496.0, q.y));
             else
                 front = vec4(0.0);
+        } else if (pc.motion.z > 0.0 && q.y * 384.0 >= HUD_TOP_ROWS) {
+            // The players' prompts (hud_split.h): the columns of this row that
+            // move, read from sky_coords' last row (texel 384 + row), go out
+            // by half the side band, to the middle of each player's half
+            int row = clamp(int(q.y * 384.0), 0, 383);
+            vec4 split = round(texelFetch(sky_coords, ivec2(384 + row, SIZE_BACK.y + 1), 0) * 255.0) * 2.0;
+            float x = front_x, half_band = pc.motion.z * 0.5;
+            float from_left = x + half_band, from_right = x - half_band;
+            bool moved_away = (x >= split.r && x < split.g) || (x >= split.b && x < split.a);
+            if (from_left >= split.r && from_left < split.g) front_x = from_left;
+            else if (from_right >= split.b && from_right < split.a) front_x = from_right;
+            else if (moved_away) front_x = -1000.0;   // what was here moved out: nothing left behind
+            front = front_x < -999.0 ? vec4(0.0) : front_layer(vec2(clamp(front_x, 0.5, 495.5) / 496.0, q.y));
         } else {
             front = front_layer(q);
         }
@@ -543,7 +558,7 @@ void main() {
         if (pc.effects.w > 0.0) c += texture(light_shafts, p).r * vec3(1.0, 0.9, 0.72);
         // 2D replacement pictures of the foreground: above the 3D image, below
         // what changed in the 2D layer
-        vec2 pos = vec2((p.x - pc.layer2d.x) / pc.layer2d.y * 496.0, p.y * 384.0);
+        vec2 pos = vec2(front_x, p.y * 384.0);   // moved with the players' prompts, like the layer
         vec4 pictures = replacement_pictures(vec4(c, 1.0), pos, false);
         c = pictures.rgb;
         c = c * (1.0 - front.a) + front.rgb;
