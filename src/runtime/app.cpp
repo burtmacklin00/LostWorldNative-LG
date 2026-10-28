@@ -500,6 +500,9 @@ struct DisplayClock {
 // method (frames dated when the game finished them and placed at the moment
 // the image is recorded, no delay for late frames)
 static const bool g_pacing_log = getenv("LW_PACING") != nullptr;
+// LW_SKYLOG=path: the sky's scroll and the world camera, frame by frame (tools/sky_log.py)
+static FILE* g_sky_log = getenv("LW_SKYLOG") ? fopen(getenv("LW_SKYLOG"), "w") : nullptr;
+static std::mutex g_sky_log_mutex;   // 2D frames are logged on the preparation thread
 
 // Debugging aid: LW_FRAMELOG=path writes one line per present to that file
 // (when the image was prepared, which game frames it shows, where the time
@@ -1278,6 +1281,15 @@ int main(int argc, char** argv) {
                 bool known = now_row[0] >= 0 && now_row[0] == was[0] && std::abs(dx) < 100 && std::abs(dy) < 100;
                 shift_row[y] = known ? 0xFF000000u | 0xFFu | uint32_t(dx + 128) << 16 | uint32_t(dy + 128) << 8 : 0;
             }
+            // Debugging aid: LW_SKYLOG=path writes the back layers' scroll of each 2D
+            // frame and the world camera of each 3D frame (tools/sky_log.py)
+            if (g_sky_log) {
+                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+                fprintf(g_sky_log, "2d %llu", (unsigned long long)out.frame);
+                for (int y = 0; y < SCREEN_H; y += 8)
+                    fprintf(g_sky_log, " %d,%d,%d", back_rows[3 * y], back_rows[3 * y + 1], back_rows[3 * y + 2]);
+                fprintf(g_sky_log, "\n");
+            }
             out.shift_from = back_rows_frame;
             out.shift_to = back_rows_frame = out.frame;
             back_rows_prev.swap(back_rows);
@@ -1939,7 +1951,9 @@ int main(int argc, char** argv) {
             poll_snapshots();
             newest_2d = snaps[newest_snap].frame;
         }
-        const R3DFrameState* game_newest = newest ? newest->state.get() : latest.get();
+        // (on a refresh with no new frame, the one built: the 2D layers must
+        // not run ahead of it in the meantime)
+        const R3DFrameState* game_newest = newest ? newest->state.get() : latest ? latest.get() : built.get();
         bool follow = interpolating && game_newest && newest_2d != ~0ull && newest_2d <= game_newest->vblank + 4;
         double scene_from = qpc_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
         const uint64_t shown_before = shown;
@@ -1985,6 +1999,20 @@ int main(int argc, char** argv) {
             g_select_aim = select_dot_on_screen(*scene);
             built = latest;
             renderer.set_scene(scene);
+            if (g_sky_log) {
+                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+                fprintf(g_sky_log, "3d %llu", (unsigned long long)latest->vblank);
+                for (const R3DViewport& v : scene->viewports)
+                    if (v.world) {
+                        fprintf(g_sky_log, " axes");
+                        for (float f : v.world_axes) fprintf(g_sky_log, " %.5f", f);
+                        fprintf(g_sky_log, " cam %.3f %.3f %.3f proj %.5f %.5f %.5f %.5f vp %.1f %.1f %.1f %.1f",
+                                v.camera[0], v.camera[1], v.camera[2], v.proj[0], v.proj[5], v.proj[8], v.proj[9],
+                                v.x, v.y, v.w, v.h);
+                        break;
+                    }
+                fprintf(g_sky_log, "\n");
+            }
             // Debugging aid: LW_SPOTLOG=path writes the world viewport's spotlight every game frame
             static FILE* spot_log = getenv("LW_SPOTLOG") ? fopen(getenv("LW_SPOTLOG"), "w") : nullptr;
             if (spot_log) {
@@ -2073,9 +2101,19 @@ int main(int argc, char** argv) {
             if (fixed_interp) t = std::clamp(atof(fixed_interp), 0.0, 1.0);
             renderer.set_interpolation(float(t));
             // The back layers move with the 3D when their 2D frames are those
-            // of the two 3D frames it goes between
+            // of the two 3D frames it goes between. The 2D layers of a vblank
+            // are what the game wrote in the frame before it: their sky
+            // scroll is that of the previous 3D frame's camera, so the sky
+            // goes on by its last scroll, as far as the 3D has gone towards
+            // the frame built (set_back_shift)
             bool paired = shift_to == built->vblank && shift_from == built_from;
-            renderer.set_back_shift(paired ? float(1 - t) : 0.0f);
+            renderer.set_back_shift(paired ? float(-t) : 0.0f);
+            if (g_sky_log) {
+                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+                fprintf(g_sky_log, "p %llu %llu %llu %llu %.3f %d\n", (unsigned long long)built->vblank,
+                        (unsigned long long)built_from, (unsigned long long)shift_from, (unsigned long long)shift_to, t,
+                        int(paired));
+            }
             if (g_pacing_log) pacing_sample(now, display, built->time - frame_period * (1 - t), *built);
         }
         static int film_presents = 0;

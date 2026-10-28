@@ -1099,7 +1099,7 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
         memcpy(out, L, sizeof(float) * 3);
         return;
     }
-    // Between 2D frames part of the way back, like the sky (set_back_shift)
+    // Between 2D frames moved on like the sky (set_back_shift)
     float x = (sky_sun_uv_[0] - sky_sun_step_[0] * back_shift_) * 2.0f - 1.0f;
     float y = (sky_sun_uv_[1] - sky_sun_step_[1] * back_shift_) * 2.0f - 1.0f;
     float d[3] = {(x + view[2]) / view[0], (y + view[3]) / view[1], -1.0f};
