@@ -72,10 +72,10 @@ for %%d in (src tools tests docs .github third_party\glslang third_party\musashi
 )
 rem These folders also hold files you add yourself (your own 4x3\bezel.png...),
 rem so only add/replace, never delete
-for %%d in (res third_party\fonts 4x3 16x9) do (
-    if exist "%NEW%\%%d" (
-        robocopy "%NEW%\%%d" "%%d" /E /NFL /NDL /NJH /NJS /NP >nul
-        if errorlevel 8 ( echo Copy failed for %%d & goto fail )
+for %%d in (res third_party\fonts 4x3 16x9 "Hook Of The Reaper") do (
+    if exist "%NEW%\%%~d" (
+        robocopy "%NEW%\%%~d" "%%~d" /E /NFL /NDL /NJH /NJS /NP >nul
+        if errorlevel 8 ( echo Copy failed for %%~d & goto fail )
     )
 )
 rem Top-level files (build.bat, CMakeLists.txt, README.md...), not subfolders

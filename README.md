@@ -59,7 +59,7 @@
   `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
 - **Hook of the Reaper outputs** (TCP port 8000, like MAME): recoil once per bullet fired, ammo,
   lives, damage (not on the hit that ends a life) and death, the gun in hand and the start lamps.
-  Copy `hotr\jplostworldsa.txt` into Hook of the Reaper's DefaultLG folder. The special guns from the
+  Copy `Hook Of The Reaper\defaultLG\jplostworldsa.txt` into Hook of the Reaper's defaultLG folder. The special guns from the
   pickups give a longer single kick (guns using Recoil_Value) and a shake when picked up.
 
 Updates from the original project are checked daily and merged here only after testing.

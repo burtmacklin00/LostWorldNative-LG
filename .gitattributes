@@ -5,4 +5,4 @@ third_party/musashi/m68k_in.c -text
 *.ps1 text eol=crlf
 *.ini text eol=crlf
 *.ahk text eol=crlf
-hotr/*.txt text eol=crlf
+Hook?Of?The?Reaper/**/*.txt text eol=crlf
