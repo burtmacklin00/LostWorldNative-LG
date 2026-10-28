@@ -69,6 +69,30 @@ int gun_player(HANDLE device) {
     return -1;
 }
 
+// LightgunHID.ini's guns that are plugged in now (mice whose device name holds
+// their VID&PID). None of them: the ini is ignored and the mice work as usual
+// (a PC without its light guns, a laptop), until the game starts again
+void check_guns_present() {
+    if (!g_fixed) return;
+    UINT n = 0;
+    GetRawInputDeviceList(nullptr, &n, sizeof(RAWINPUTDEVICELIST));
+    std::vector<RAWINPUTDEVICELIST> list(n);
+    if (n == 0 || GetRawInputDeviceList(list.data(), &n, sizeof(RAWINPUTDEVICELIST)) == UINT(-1)) n = 0;
+    bool found[2] = {};
+    for (UINT i = 0; i < n; i++)
+        if (list[i].dwType == RIM_TYPEMOUSE) {
+            int p = gun_player(list[i].hDevice);
+            if (p >= 0) found[p] = true;
+        }
+    for (int p = 0; p < 2; p++)
+        if (!g_gun_id[p].empty())
+            printf("[mouse] player %d gun %ls: %s\n", p + 1, g_gun_id[p].c_str(), found[p] ? "connected" : "not connected");
+    if (!found[0] && !found[1]) {
+        g_fixed = false;
+        printf("[mouse] no light gun from LightgunHID.ini is connected: normal mouse mode\n");
+    }
+}
+
 std::vector<Mouse> g_mice;
 int g_owner[2] = {-1, -1};    // index in g_mice of each player's mouse
 int g_last_clicked = -1;      // player 1's mouse until a second one joins
@@ -96,6 +120,7 @@ void keep_inside(Mouse& m) {
 
 void init(HWND hwnd) {
     load_gun_ids();
+    check_guns_present();
     RAWINPUTDEVICE rid{};
     rid.usUsagePage = 0x01;   // generic desktop
     rid.usUsage = 0x02;       // mouse

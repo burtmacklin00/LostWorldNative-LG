@@ -43,8 +43,9 @@ after they stop playing, so firing as the last life goes does not continue by ac
 A `LightgunHID.ini` beside LostWorld.exe pins each light gun to its player by its VID&PID
 (`[Lightguns]`, `P1_Lightgun_HID = VID_1209&PID_0001`, `P2_Lightgun_HID = VID_1209&PID_0002`;
 `1 - Light Gun Setup.exe` in the same folder writes it): each gun is its player's from the
-first shot, whichever fires first, and other mice only move the menu pointer. `NoGuns = 1` or
-no file keeps the usual first-mouse / second-mouse behaviour. Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
+first shot, whichever fires first, and other mice only move the menu pointer. `NoGuns = 1`, no
+file, or none of its guns plugged in when the game starts keeps the usual first-mouse /
+second-mouse behaviour. Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
 crosshair after 3, 5 or 10 seconds without moving or firing, until the gun moves again (a
 player 2 who joined by mistake leaves no crosshair standing on the screen). A `crosshair.png`
 next to LostWorld.exe replaces the drawn crosshairs with that picture, centred on the gun and sized
