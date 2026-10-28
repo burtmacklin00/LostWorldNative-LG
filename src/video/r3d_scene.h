@@ -3,6 +3,7 @@
 // down -Z, Y up), grouped by viewport and pass. See docs/real3d_spec.md
 // sections 2-5.
 #pragma once
+#include <functional>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -101,6 +102,8 @@ public:
     // Marks the 3D HUD elements at the sides of the screen (ammo) so the
     // renderer can move them to the edges of a widescreen window
     void set_hud_edges(bool edges) { hud_edges_ = edges; }
+    // Asked at each frame: whether the players' prompts move (someone plays)
+    void set_split_prompts(std::function<bool()> f) { split_prompts_ = std::move(f); }
     // Replacement textures (nullptr = none)
     void set_texture_pack(TexturePack* pack, R3DTextureRam* ram) {
         pack_ = pack;
@@ -172,6 +175,7 @@ private:
     std::unordered_map<uint32_t, uint32_t> instance_count_;
     uint32_t node_key_ = 0, viewport_key_ = 0;
     bool hud_edges_ = true;
+    std::function<bool()> split_prompts_;
     TexturePack* pack_ = nullptr;
     R3DTextureRam* texture_ram_ = nullptr;
     std::unordered_map<uint32_t, uint32_t> frame_slots_;   // texture word -> slot, this frame

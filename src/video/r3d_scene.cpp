@@ -96,7 +96,7 @@ void R3DSceneBuilder::build(const R3DFrameState& state, R3DScene& out) {
     std::stable_sort(out.viewports.begin(), out.viewports.end(),
                      [](const R3DViewport& a, const R3DViewport& b) { return a.priority < b.priority; });
     if (remove_letterbox_) r3d_strip_letterbox(out);
-    if (hud_edges_) r3d_anchor_hud(out);
+    if (hud_edges_) r3d_anchor_hud(out, split_prompts_ && split_prompts_());
     if (pack_ && texture_ram_ && pack_->active()) apply_texture_pack(out);
     link_previous(out);
 }

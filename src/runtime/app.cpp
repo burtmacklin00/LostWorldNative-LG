@@ -1063,6 +1063,8 @@ int main(int argc, char** argv) {
     R3DSceneBuilder builder;
     builder.set_remove_letterbox(!g_opt.letterbox);
     builder.set_hud_edges(!g_opt.hud_centre);
+    // The players' prompts move only during play, like the 2D ones (hud_split.h)
+    builder.set_split_prompts([] { return g_inputs.p[0].playing || g_inputs.p[1].playing; });
     TexturePack pack;
     pack.init("textures", g_opt.dump_textures ? "out/textures" : "");
     builder.set_texture_pack(&pack, &g_texture_ram);

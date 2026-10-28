@@ -31,7 +31,7 @@ static bool screen_bbox(const R3DViewport& v, const R3DVertex* tri, float* b) {
 // vertex shader moves them out to the edges of a widescreen view. The gun
 // sight lives in the same viewport but much closer to the camera (z = 1), and
 // must stay where the gun points, so near geometry is left alone.
-void r3d_anchor_hud(R3DScene& out) {
+void r3d_anchor_hud(R3DScene& out, bool split_prompts) {
     if (out.viewports.empty()) return;
     int scene_priority = out.viewports.front().priority;
     const float band = 72.0f;   // native pixels from each side of the 4:3 screen
@@ -52,6 +52,7 @@ void r3d_anchor_hud(R3DScene& out) {
     // side of the middle and wider than a hit's points goes out by half the
     // side band, to the middle of that player's half of the wide picture
     for (const R3DViewport& v : out.viewports) {
+        if (!split_prompts) break;
         if (v.priority == scene_priority || v.w <= 0) continue;
         std::vector<hud_split::Box> boxes;
         std::vector<R3DVertex*> tris;
