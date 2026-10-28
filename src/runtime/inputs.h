@@ -50,11 +50,23 @@ struct Inputs {
 extern Inputs g_inputs;
 
 // Aim of a player as a fraction of the 4:3 game screen (outside 0..1 = off
-// the screen): sets that gun's ADC values and keeps it for the crosshair.
-// The mouse, the second mouse and the pads all aim through here.
+// it, or in the side bands of a wide 3D view): sets that gun's ADC values and
+// keeps it for the crosshair. The mouse, the second mouse and the pads all
+// aim through here.
 void set_player_aim(int player, float x, float y);
-struct PlayerAim { float x, y; bool inside; };
+struct PlayerAim { float x, y; bool inside; };   // inside: in the 3D view
 PlayerAim player_aim(int player);
+// How far the 3D view reaches beyond each side of the 4:3 screen, as a
+// fraction of its width (0 = the original 4:3 picture). Set by the window
+extern std::atomic<float> g_aim_reach;
+// The reach the gun has now: none on the stage select screen, whose dot the
+// game keeps on its 4:3 picture
+float gun_reach();
+// In a wide 3D view, the aim in a stage in the game's own units (what
+// fn_0000CBF0 makes of the ADC values) for where the gun points, also beyond
+// the 4:3 screen, which the 8-bit ADC values cannot reach. False: the game's
+// own stays (4:3, --aim, or a gun moved by something else)
+bool gun_aim_exact(int player, float& out_x, float& out_y);
 extern std::atomic<bool> g_select_aim;   // the stage select screen is up (its gun mapping differs)
 extern std::atomic<bool> g_fixed_aim;    // --aim: the ADC values stay fixed
 
@@ -70,7 +82,8 @@ void player_join(int player);
 void join_update();
 
 // --auto "coin@1500,start@1600": scheduled presses (6 frames each); a "2"
-// suffix is player 2's (coin2, start2, trigger2, reload2) and so is aim2:X/Y
+// suffix is player 2's (coin2, start2, trigger2, reload2) and so are aim2:X/Y
+// (raw ADC values) and point2:X/Y (fractions of the 4:3 screen, as the mouse)
 struct AutoInput {
     struct Event { std::string name; uint64_t frame; };
     std::vector<Event> events;

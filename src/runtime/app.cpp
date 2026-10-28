@@ -114,24 +114,36 @@ static bool g_block_buttons = false; // after a menu closes: buttons ignored unt
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
 static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
 
-// Window pixels -> fraction of the 4:3 game screen (accounting for the black bars)
+// Window pixels -> fraction of the 4:3 game screen (accounting for the black
+// bars; beyond 0..1 in the side bands of a wider 3D view)
 static void aim_at(int player, HWND hwnd, POINT pt) {
     RECT rc;
     GetClientRect(hwnd, &rc);
-    // The gun covers the original 4:3 area, centred in the (possibly wider) 3D view
     ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
     float x = (pt.x - lay.ox - lay.game_x0 * lay.scale) / (SCREEN_W * lay.scale);
     float y = (pt.y - lay.oy) / (SCREEN_H * lay.scale);
     set_player_aim(player, x, y);
 }
 
-// A shot outside the 4:3 game screen (the side bands of a wide window, or the
-// edge where a light gun puts a shot that misses the screen) reloads, as on
-// the cabinet, instead of firing at the edge
+// The gun covers the whole 3D view, also the side bands of a wide one: how
+// far it reaches beyond the 4:3 screen (each new picture, as the window may
+// change)
+static void update_aim_reach(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    if (rc.right <= 0 || rc.bottom <= 0) return;
+    ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
+    g_aim_reach = lay.game_x0 / SCREEN_W;
+}
+
+// A shot outside the 3D view (the black bars of a window wider than it) or on
+// its very edge (where a light gun puts a shot that misses the screen)
+// reloads, as on the cabinet, instead of firing at the edge
 static void shot_outside_reloads(int player) {
     PlayerInputs& pl = g_inputs.p[player];
     PlayerAim a = player_aim(player);   // the very edge too: where a gun can park an off-screen shot
-    if (pl.trigger && (a.x <= 0 || a.y <= 0 || a.x >= 1 || a.y >= 1)) {
+    float reach = gun_reach();
+    if (pl.trigger && (a.x <= -reach || a.y <= 0 || a.x >= 1 + reach || a.y >= 1)) {
         pl.trigger = false;
         pl.offscreen = true;
     }
@@ -1842,6 +1854,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        update_aim_reach(presenter.hwnd());
         poll_keyboard_mouse(presenter.hwnd());
         bool pad_pause = poll_gamepads(presenter.hwnd());
         if (g_pads.changed()) {   // the CONTROLS tab names the pads

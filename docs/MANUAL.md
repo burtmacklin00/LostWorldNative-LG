@@ -26,9 +26,11 @@ time with 6 (coin) and 2 (start), and has their own crosshair (blue; player
 sees as a mouse), one click with it while player 1 is playing makes it
 player 2's gun and joins the game (if player 2 joined with start first, their
 first shot does it, unless a gamepad is player 2's); from then on each mouse moves its own
-crosshair and the pointer stays inside the window. A shot outside the 4:3 game screen or on
-its very edge (the side bands of a wide window, or where a light gun parks an off-screen shot)
-reloads, as on the cabinet. Disable it in Settings > Controls >
+crosshair and the pointer stays inside the window. The guns (mouse, light gun or gamepad) aim
+over the whole 3D view, also the side bands of a 16:9 or 21:9 picture, and the enemies drawn
+there can be shot (except on the stage select screen, which stays 4:3). A shot outside the 3D
+view (the black bars of a window wider than it) or on its very edge (where a light gun parks an
+off-screen shot) reloads, as on the cabinet. Disable it in Settings > Controls >
 Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (`--free-play`) makes 1 and 2
 insert the credit themselves, so a light gun's start button starts and continues without the
 coin key; Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
@@ -37,7 +39,9 @@ player 2 who joined by mistake leaves no crosshair standing on the screen). A `c
 next to LostWorld.exe replaces the drawn crosshairs with that picture, centred on the gun and sized
 as pixels of a 1080-line screen; `crosshair_p2.png` gives player 2 their own (otherwise they use
 `crosshair.png` too). In `--auto`, a 2 at the end of a button belongs to player
-2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun.
+2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun's raw ADC values;
+`point:X/Y@F` (`point2:` for player 2) aims as the mouse would, X and Y as fractions of the
+4:3 screen (below 0 or above 1 in the side bands).
 F11 or Alt+Enter toggles fullscreen.
 
 With a gamepad (Xbox, DualSense, DualShock 4, Switch Pro and the others SDL3
@@ -128,8 +132,11 @@ saved games and are not versioned.
 ## Video and sound options
 
 - --aspect 16:9 (default), 21:9 or 4:3: maximum width of the 3D view. The
-  sky (background 2D layers) is also drawn at the sides; the HUD and the
-  gun area stay in the central 4:3.
+  sky (background 2D layers) is also drawn at the sides; the HUD stays in
+  the central 4:3 with --hud-centre. The guns aim over the whole 3D view:
+  the game's ADC values only reach a little beyond the 4:3 screen, so in a
+  wider view the runtime gives the game the aim itself (rt_gun_aimed, in
+  fn_0000CBF0), where its X is drawn and its shots land.
 - --msaa N (default 4; 1 = off): edge antialiasing, including the
   cut-out edges of plants.
 - --aa dlaa: NVIDIA DLAA (DLSS at native resolution) instead of MSAA. The 3D is

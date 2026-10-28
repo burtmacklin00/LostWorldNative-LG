@@ -1,4 +1,5 @@
 #include "gamepad.h"
+#include "inputs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -252,7 +253,8 @@ void Gamepads::poll(const GamepadSettings& set, bool focused, bool menu) {
             assist(s, st, set, dt, tilt, dx, dy, gdx, gdy, pull_x, pull_y);
             dx += gdx + pull_x, dy += gdy + pull_y;
             if (dx != 0 || dy != 0) {
-                st.aim_x = std::clamp(st.aim_x + dx, 0.0f, 1.0f);
+                float reach = gun_reach();   // the whole 3D view, also the side bands of a wide one
+                st.aim_x = std::clamp(st.aim_x + dx, -reach, 1 + reach);
                 st.aim_y = std::clamp(st.aim_y + dy, 0.0f, 1.0f);
                 if (moved) st.aimed = true;
             }
@@ -305,7 +307,8 @@ void Gamepads::assist(Slot& s, const PadState& st, const GamepadSettings& set, f
 }
 
 void Gamepads::set_aim(int i, float x, float y) {
-    state_[i].aim_x = std::clamp(x, 0.0f, 1.0f);
+    float reach = gun_reach();
+    state_[i].aim_x = std::clamp(x, -reach, 1 + reach);
     state_[i].aim_y = std::clamp(y, 0.0f, 1.0f);
 }
 

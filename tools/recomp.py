@@ -41,6 +41,12 @@ SUBTITLE_FUNCS = {0x00048B44}
 # enemies call it every frame with where they stand. Wrapped so the runtime
 # sees the result (rt_projected) for the gamepads' aim assist
 PROJECT_FUNCS = {0x0003BE44}
+# fn_0000CBF0 turns a gun's ADC values into its aim in a stage (the object's
+# +0x34 / +0x38; the player in byte +0xC of the object at +0): where both
+# players' paths meet, before the game keeps that aim, the runtime can put it
+# where the gun points, also beyond the 4:3 screen that the 8-bit ADC values
+# reach, in a wide 3D view (rt_gun_aimed)
+GUN_AIM_POINTS = {0x0000D49C}
 
 
 def mask(mb, me):
@@ -126,6 +132,8 @@ class FuncGen:
             if a in TEXT_REGION_LOADS:
                 rd = (self.body[a].word >> 21) & 31
                 code[a] = code[a] + [f"c.r[{rd}] = rt_text_region(c.r[{rd}]);"]
+            if a in GUN_AIM_POINTS:
+                code[a] = ["{ uint32_t obj = rd32(c.r[31] + 8); rt_gun_aimed(obj + 0x34, rd8(rd32(obj) + 0xC)); }"] + code[a]
         # The labels in use are now known
         if self.entry in PROJECT_FUNCS:
             e = self.entry
