@@ -41,6 +41,9 @@
 - **Free play** on by default, and **the trigger starts and continues** each player's game.
 - **Fixed guns per player**: put `LightgunHID.ini` (made by `1 - Light Gun Setup.exe`) next to
   `LostWorld.exe` and each gun always belongs to its player.
+- **Fullscreen** by default (F11 or Alt+Enter still toggles it).
+- **Quick setting files** (close the game first; they take effect on the next start):
+  `Graphics - Low.bat`, `Graphics - High.bat`, `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
 - Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
 
 Updates from the original project are checked daily and merged here only after testing.

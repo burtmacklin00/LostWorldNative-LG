@@ -22,7 +22,7 @@
 #include "../runtime/stats.h"
 
 struct FrontendSettings {
-    bool fullscreen = false;
+    bool fullscreen = true;   // light gun edition: fullscreen unless set otherwise
     int volume = 5;    // 0..10 (output gain)
     int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
     int rear_boost = 0;  // dB on the rear pair: 0, 3, 6, 9, 12
