@@ -116,7 +116,7 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 static bool g_menu_open = false;     // a menu has the controls
 static POINT g_menu_ptr{-1, -1};     // the menu pointer (client pixels), drawn as player 1's crosshair
 static bool g_menu_gun = false;      // player 1's gun drives the menu pointer itself (raw_mice::menu_gun)
-static bool g_key_pause = false;     // 1 (a gun's start button) pressed while player 1 plays: the pause menu
+static bool g_key_pause = false;     // 1 (a gun's start button) held a second while player 1 plays: the pause menu
 static bool g_start_was[2] = {};     // 1 / 2 held at the last poll
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
@@ -210,16 +210,34 @@ static void poll_keyboard_mouse(HWND hwnd) {
         return;
     }
     PlayerInputs& p1 = g_inputs.p[0];
-    p1.coin = down('5');
-    g_inputs.p[1].coin = down('6');
+    // Free play inserts the credits itself: the coin keys do nothing then
+    p1.coin = !g_opt.free_play && down('5');
+    g_inputs.p[1].coin = !g_opt.free_play && down('6');
+    static ULONGLONG start_down_at[2] = {};
+    static bool pause_sent = false;
     for (int p = 0; p < 2; p++) {
+        PlayerInputs& pl = g_inputs.p[p];
         bool start = down(p ? '2' : '1');
         bool pressed = start && !g_start_was[p];
-        // 1 (player 1's start, a gun's start button) while player 1 plays opens
-        // the pause menu, as START does on a gamepad; 1 in it resumes
-        if (p == 0 && pressed && g_inputs.p[0].playing && g_opt.menu) g_key_pause = true;
-        if (!g_opt.free_play) g_inputs.p[p].start = start;
-        else if (pressed && !g_inputs.p[p].playing) player_join(p);   // also continues
+        if (pressed) start_down_at[p] = GetTickCount64();
+        if (pl.playing) {
+            // During play start goes to the game as it is (an event asks a
+            // player to press it repeatedly). Held for a second, player 1's
+            // (1, a gun's start button) opens the pause menu; 1 in it resumes
+            pl.start = start;
+            if (p == 0 && g_opt.menu) {
+                if (!start) pause_sent = false;
+                else if (!pause_sent && GetTickCount64() - start_down_at[0] >= 1000) {
+                    g_key_pause = true;
+                    pause_sent = true;
+                }
+            }
+        } else if (!g_opt.free_play) {
+            pl.start = start;
+        } else {
+            pl.start = false;   // join_update presses it for a join (after this)
+            if (pressed) player_join(p);   // also continues
+        }
         g_start_was[p] = start;
     }
     g_inputs.test = down(VK_F2);
