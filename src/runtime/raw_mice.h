@@ -22,6 +22,17 @@ bool guns_pinned();                // LightgunHID.ini gives each player's gun by
 // whether the latest mouse event was that gun's, for the window's messages
 // that follow it; take_p2_moved() whether it moved the pointer since last asked
 void block_player2(bool block);
+
+// The menus, once player 1's gun is known (LightgunHID.ini, or two mice in
+// play): its own position and button presses since the last call drive the
+// menu pointer, so no other mouse or gun moves or clicks it. Takes the presses
+// of both guns, so none of them counts as a shot when the game resumes.
+struct MenuGun {
+    bool known;
+    POINT pos;              // client pixels
+    int left_presses, right_presses;
+};
+MenuGun menu_gun(HWND hwnd);
 bool from_player2();
 bool take_p2_moved();
 void reset();                      // back to one mouse for player 1 (the option turned off)

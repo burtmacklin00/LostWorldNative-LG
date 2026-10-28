@@ -15,6 +15,7 @@ struct Mouse {
     bool have_pos = false;
     bool left = false, right = false;
     bool clicked = false;
+    int left_presses = 0, right_presses = 0;   // for the menus (menu_gun)
     int fixed_player = -2;    // LightgunHID.ini: 0 / 1 that player's gun, -1 neither, -2 not looked up yet
 };
 
@@ -136,7 +137,8 @@ void on_input(HRAWINPUT input) {
     int owner = g_fixed ? m.fixed_player : i == g_owner[1] ? 1 : i == g_owner[0] ? 0 : -1;
     g_last_from_p2 = g_block_p2 && owner == 1;
     if (g_last_from_p2 && ((rm.usFlags & MOUSE_MOVE_ABSOLUTE) || rm.lLastX || rm.lLastY)) g_p2_moved = true;
-    if (b & RI_MOUSE_LEFT_BUTTON_DOWN) m.left = m.clicked = true;
+    if (b & RI_MOUSE_LEFT_BUTTON_DOWN) m.left = m.clicked = true, m.left_presses++;
+    if (b & RI_MOUSE_RIGHT_BUTTON_DOWN) m.right_presses++;
     if (b & RI_MOUSE_LEFT_BUTTON_UP) m.left = false;
     if (b & RI_MOUSE_RIGHT_BUTTON_DOWN) m.right = true;
     if (b & RI_MOUSE_RIGHT_BUTTON_UP) m.right = false;
@@ -182,6 +184,29 @@ void update(HWND hwnd, bool join_allowed, bool in_game) {
 bool two_mice() { return g_fixed ? g_owner[0] >= 0 || g_owner[1] >= 0 : g_owner[1] >= 0; }
 
 bool guns_pinned() { return g_fixed; }
+
+MenuGun menu_gun(HWND hwnd) {
+    MenuGun out{};
+    for (int p = 1; p >= 0; p--) {   // what the guns did meanwhile is no shot in the game afterwards
+        if (g_owner[p] < 0) continue;
+        Mouse& m = g_mice[g_owner[p]];
+        if (p == 0) {
+            out.known = true;
+            if (!m.have_pos) {
+                POINT c;
+                GetCursorPos(&c);
+                m.x = c.x, m.y = c.y;
+                m.have_pos = true;
+            }
+            out.pos = {m.x, m.y};
+            ScreenToClient(hwnd, &out.pos);
+            out.left_presses = m.left_presses, out.right_presses = m.right_presses;
+        }
+        m.left_presses = m.right_presses = 0;
+        m.clicked = false;
+    }
+    return out;
+}
 
 void block_player2(bool block) {
     g_block_p2 = block;

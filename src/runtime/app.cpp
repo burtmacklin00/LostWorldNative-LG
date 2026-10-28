@@ -114,6 +114,7 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 // With free play, 1 / 2 insert the credit themselves (player_join)
 static bool g_menu_open = false;     // a menu has the controls
 static POINT g_menu_ptr{-1, -1};     // the menu pointer (client pixels), drawn as player 1's crosshair
+static bool g_menu_gun = false;      // player 1's gun drives the menu pointer itself (raw_mice::menu_gun)
 static bool g_key_pause = false;     // 1 (a gun's start button) pressed while player 1 plays: the pause menu
 static bool g_start_was[2] = {};     // 1 / 2 held at the last poll
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
@@ -1246,7 +1247,7 @@ int main(int argc, char** argv) {
             // Player 2's gun does not drive the menus (raw_mice marks its events),
             // so the two guns never fight over the pointer
             bool pointer = msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN;
-            if (pointer && raw_mice::from_player2()) return true;
+            if (pointer && (g_menu_gun || raw_mice::from_player2())) return true;   // the gun's own input does it
             if (msg == WM_MOUSEMOVE) g_menu_ptr = {x, y};
             else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
             switch (msg) {
@@ -1951,15 +1952,29 @@ int main(int argc, char** argv) {
             // moved the (hidden) Windows pointer, it goes back to player 1's spot
             raw_mice::block_player2(frontend.active());
             presenter.set_cursor_visible(false);
+            g_menu_gun = false;
             if (frontend.active()) {
                 HWND hwnd = presenter.hwnd();
+                // Player 1's gun known: the pointer follows it, straight from
+                // its own input at every refresh, and its buttons click
+                raw_mice::MenuGun mg = raw_mice::menu_gun(hwnd);
+                if (mg.known && GetForegroundWindow() == hwnd) {
+                    g_menu_gun = true;
+                    if (mg.pos.x != g_menu_ptr.x || mg.pos.y != g_menu_ptr.y) {
+                        g_menu_ptr = mg.pos;
+                        pad_in_menu = false;
+                        frontend.mouse_move(mg.pos.x, mg.pos.y);
+                    }
+                    for (int i = 0; i < mg.left_presses && frontend.active(); i++) frontend.click(g_menu_ptr.x, g_menu_ptr.y);
+                    for (int i = 0; i < mg.right_presses && frontend.active(); i++) frontend.key(VK_ESCAPE);
+                }
                 if (g_menu_ptr.x < 0) {
                     POINT p;
                     GetCursorPos(&p);
                     ScreenToClient(hwnd, &p);
                     g_menu_ptr = p;
                 }
-                if (raw_mice::take_p2_moved() && GetForegroundWindow() == hwnd) {
+                if (raw_mice::take_p2_moved() && !g_menu_gun && GetForegroundWindow() == hwnd) {
                     POINT p = g_menu_ptr;
                     ClientToScreen(hwnd, &p);
                     SetCursorPos(p.x, p.y);
