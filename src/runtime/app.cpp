@@ -2054,7 +2054,7 @@ int main(int argc, char** argv) {
         // In widescreen the crosshair follows the gun over the whole picture,
         // side bands too (a shot there still reloads); only the very edge,
         // where a light gun parks an off-screen shot, stays without one. In
-        // 4:3 it shows on the game screen only, as before
+        // 4:3 it stops at the picture's edge
         float side_band = 0;
         {
             RECT rc;
@@ -2065,9 +2065,19 @@ int main(int argc, char** argv) {
             PlayerAim aim = player_aim(p);
             bool used = (p == 0 || g_inputs.p[1].playing) && !crosshair_idle(p, aim);
             const float EDGE = 0.004f;
-            bool on_picture = side_band > 0 ? aim.x > -side_band + EDGE && aim.x < 1 + side_band - EDGE && aim.y >= 0 && aim.y <= 1
-                                            : aim.inside;
-            renderer.set_crosshair(p, g_opt.show_crosshair && used && on_picture && !g_opt.fixed_aim, aim.x, aim.y);
+            bool wide = g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
+            float x = aim.x, y = aim.y;
+            bool on_picture;
+            if (wide) {
+                on_picture = side_band > 0 ? x > -side_band + EDGE && x < 1 + side_band - EDGE && y >= 0 && y <= 1 : aim.inside;
+            } else {
+                // 4:3 (with a bezel): aimed past the picture, the crosshair stops
+                // at its edge (a shot there still reloads, as on the cabinet)
+                x = std::clamp(x, -side_band, 1 + side_band);
+                y = std::clamp(y, 0.0f, 1.0f);
+                on_picture = true;
+            }
+            renderer.set_crosshair(p, g_opt.show_crosshair && used && on_picture && !g_opt.fixed_aim, x, y);
         }
         // The 3D frame to draw. While interpolating, the picture shows the game
         // as it was at `shown_time`: a frame period plus the frames' lateness
