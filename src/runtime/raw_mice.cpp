@@ -72,6 +72,9 @@ std::vector<Mouse> g_mice;
 int g_owner[2] = {-1, -1};    // index in g_mice of each player's mouse
 int g_last_clicked = -1;      // player 1's mouse until a second one joins
 bool g_join_allowed = false;
+bool g_block_p2 = false;      // the menus are open: player 2's gun does not drive the pointer
+bool g_last_from_p2 = false;  // the latest mouse event came from player 2's gun (while blocked)
+bool g_p2_moved = false;      // ... and it moved the pointer since take_p2_moved()
 RECT g_area{};                // the window's client area, screen pixels
 bool g_have_area = false, g_clipped = false;
 
@@ -127,6 +130,12 @@ void on_input(HRAWINPUT input) {
         keep_inside(m);
     }
     USHORT b = rm.usButtonFlags;
+    // Player 2's gun in the menus: its events are marked so the window's
+    // pointer messages that follow are ignored (raw input arrives first)
+    if (g_fixed && m.fixed_player == -2) m.fixed_player = gun_player(ri.header.hDevice);
+    int owner = g_fixed ? m.fixed_player : i == g_owner[1] ? 1 : i == g_owner[0] ? 0 : -1;
+    g_last_from_p2 = g_block_p2 && owner == 1;
+    if (g_last_from_p2 && ((rm.usFlags & MOUSE_MOVE_ABSOLUTE) || rm.lLastX || rm.lLastY)) g_p2_moved = true;
     if (b & RI_MOUSE_LEFT_BUTTON_DOWN) m.left = m.clicked = true;
     if (b & RI_MOUSE_LEFT_BUTTON_UP) m.left = false;
     if (b & RI_MOUSE_RIGHT_BUTTON_DOWN) m.right = true;
@@ -173,6 +182,17 @@ void update(HWND hwnd, bool join_allowed, bool in_game) {
 bool two_mice() { return g_fixed ? g_owner[0] >= 0 || g_owner[1] >= 0 : g_owner[1] >= 0; }
 
 bool guns_pinned() { return g_fixed; }
+
+void block_player2(bool block) {
+    g_block_p2 = block;
+    if (!block) g_last_from_p2 = g_p2_moved = false;
+}
+bool from_player2() { return g_last_from_p2; }
+bool take_p2_moved() {
+    bool moved = g_p2_moved;
+    g_p2_moved = false;
+    return moved;
+}
 
 void reset() {
     g_owner[0] = g_owner[1] = -1;

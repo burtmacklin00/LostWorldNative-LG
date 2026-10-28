@@ -43,7 +43,10 @@
   `LostWorld.exe` and each gun always belongs to its player.
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
-  `Graphics - Low.bat`, `Graphics - High.bat`, `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
+  `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,
+  `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
+- **Gun-friendly menus**: the menu pointer is player 1's crosshair, and player 2's gun is ignored
+  in the menus so the two guns never fight over the pointer.
 - **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
   from the `4x3` or `16x9` folder into the game folder, with the bezel for 4:3. The game uses
   `bezel.png` if you add your own to `4x3`, otherwise `bezel-default.png` (which comes with it);

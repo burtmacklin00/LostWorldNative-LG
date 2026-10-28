@@ -16,6 +16,14 @@ void on_input(HRAWINPUT input);    // WM_INPUT
 void update(HWND hwnd, bool join_allowed, bool in_game);
 bool two_mice();                   // a second mouse is player 2's gun (or LightgunHID.ini pins the guns)
 bool guns_pinned();                // LightgunHID.ini gives each player's gun by its VID&PID
+
+// The menus: player 2's gun (once known: LightgunHID.ini, or it joined as the
+// second mouse) does not move or click the menu pointer. from_player2() says
+// whether the latest mouse event was that gun's, for the window's messages
+// that follow it; take_p2_moved() whether it moved the pointer since last asked
+void block_player2(bool block);
+bool from_player2();
+bool take_p2_moved();
 void reset();                      // back to one mouse for player 1 (the option turned off)
 
 struct Gun {

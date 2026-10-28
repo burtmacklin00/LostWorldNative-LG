@@ -111,6 +111,7 @@ static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu level
 //   6 / 2 = player 2's coin and start, F2 = test, F3 = service.
 // With free play, 1 / 2 insert the credit themselves (player_join)
 static bool g_menu_open = false;     // a menu has the controls
+static POINT g_menu_ptr{-1, -1};     // the menu pointer (client pixels), drawn as player 1's crosshair
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
 static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
@@ -1199,6 +1200,12 @@ int main(int argc, char** argv) {
                 }
                 return false;
             }
+            // Player 2's gun does not drive the menus (raw_mice marks its events),
+            // so the two guns never fight over the pointer
+            bool pointer = msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN;
+            if (pointer && raw_mice::from_player2()) return true;
+            if (msg == WM_MOUSEMOVE) g_menu_ptr = {x, y};
+            else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
             switch (msg) {
             case WM_KEYDOWN: return frontend.key(int(wp));
             case WM_MOUSEMOVE: {
@@ -1872,7 +1879,26 @@ int main(int argc, char** argv) {
                 music_time = t;
             }
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
-            presenter.set_cursor_visible(frontend.active() && !pad_in_menu);
+            // The menu pointer is player 1's crosshair, drawn over the menus
+            // instead of the Windows arrow. Player 2's gun is left out: if it
+            // moved the (hidden) Windows pointer, it goes back to player 1's spot
+            raw_mice::block_player2(frontend.active());
+            presenter.set_cursor_visible(false);
+            if (frontend.active()) {
+                HWND hwnd = presenter.hwnd();
+                if (g_menu_ptr.x < 0) {
+                    POINT p;
+                    GetCursorPos(&p);
+                    ScreenToClient(hwnd, &p);
+                    g_menu_ptr = p;
+                }
+                if (raw_mice::take_p2_moved() && GetForegroundWindow() == hwnd) {
+                    POINT p = g_menu_ptr;
+                    ClientToScreen(hwnd, &p);
+                    SetCursorPos(p.x, p.y);
+                }
+            }
+            ui.set_cursor(frontend.active() && !pad_in_menu, float(g_menu_ptr.x), float(g_menu_ptr.y));
             static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
             if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
                 frontend.pad_prompts = pad_in_menu || menu_pad;

@@ -45,6 +45,9 @@ bool UiOverlay::init(VkPresenter& vk) {
     VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     pli.setLayoutCount = 1;
     pli.pSetLayouts = &set_layout_;
+    VkPushConstantRange pcr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4};   // ui.frag's cursor
+    pli.pushConstantRangeCount = 1;
+    pli.pPushConstantRanges = &pcr;
     vkCreatePipelineLayout(dev_, &pli, nullptr, &layout_);
 
     VkShaderModule vs = make_module(dev_, spv_compose_vert, sizeof(spv_compose_vert));
@@ -202,6 +205,8 @@ void UiOverlay::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D exten
     vkCmdBeginRendering(cmd, &ri);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set_, 0, nullptr);
+    float cursor[4] = {cursor_visible_ ? cursor_x_ : -1.0f, cursor_visible_ ? cursor_y_ : -1.0f, float(extent.height), 0};
+    vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(cursor), cursor);
     VkViewport full{0, 0, float(extent.width), float(extent.height), 0, 1};
     vkCmdSetViewport(cmd, 0, 1, &full);
     VkRect2D all{{0, 0}, extent};

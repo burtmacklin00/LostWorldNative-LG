@@ -14,6 +14,11 @@ public:
     // New picture (w x h BGRA, premultiplied); uploaded with the next record
     void set_image(const uint32_t* bgra, uint32_t w, uint32_t h);
     void hide() { visible_ = false; }
+    // The menu pointer, drawn as player 1's crosshair over the picture (window pixels)
+    void set_cursor(bool visible, float x, float y) {
+        cursor_visible_ = visible;
+        cursor_x_ = x, cursor_y_ = y;
+    }
     bool visible() const { return visible_; }
 
     // After the main renderer: blends the picture over the swapchain image
@@ -35,6 +40,8 @@ private:
     std::vector<uint32_t> pending_;
     uint32_t pending_w_ = 0, pending_h_ = 0;
     bool dirty_ = false, visible_ = false;
+    bool cursor_visible_ = false;
+    float cursor_x_ = 0, cursor_y_ = 0;
 
     VkSampler sampler_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
