@@ -1,5 +1,6 @@
 #include "outputs.h"
 
+#define NOMINMAX   // windows.h (through winsock2.h) would make min / max macros
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
