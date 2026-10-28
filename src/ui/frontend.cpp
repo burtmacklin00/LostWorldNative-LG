@@ -577,11 +577,17 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPTIONS, L"OPTIONS", L"", L"Display, sound and graphics"},
                 {RECORDS, L"RECORDS", L"", L"Achievements and your statistics"},
                 {QUIT, L"QUIT", L"", L"Close the game"}};
-    case Screen::Play:
-        return {{ARCADE, L"CLASSIC ARCADE", L"", L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad"},
+    case Screen::Play: {
+        // How to start: free play (no coin) and the gun's trigger, as set
+        std::wstring how = settings.free_play
+                               ? (settings.trigger_start ? L"The original arcade game.  Free play: pull the trigger or press 1 to start, or START on a gamepad"
+                                                         : L"The original arcade game.  Free play: press 1 to start, or START on a gamepad")
+                               : L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad";
+        return {{ARCADE, L"CLASSIC ARCADE", L"", how},
                 {BOSS, L"BOSS FIGHT", L"", L"Pick a boss and go straight to the fight"},
                 {SURVIVAL, L"SURVIVAL", L"", L"Hold one spot against endless waves of dinosaurs"},
                 {BACK, L"BACK", L"", L"Return to the main menu"}};
+    }
     case Screen::Pause:
         if (boss_mode)
             return {{RESUME, L"RESUME", L"", L"Back to the fight"},
