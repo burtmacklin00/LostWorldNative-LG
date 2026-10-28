@@ -29,9 +29,17 @@ first shot does it, unless a gamepad is player 2's); from then on each mouse mov
 crosshair and the pointer stays inside the window. A shot outside the 4:3 game screen or on
 its very edge (the side bands of a wide window, or where a light gun parks an off-screen shot)
 reloads, as on the cabinet. Disable it in Settings > Controls >
-Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (`--free-play`) makes 1 and 2
+Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (on by default; `--no-free-play`
+turns it off) makes 1 and 2
 insert the credit themselves, so a light gun's start button starts and continues without the
-coin key; Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
+coin key. Settings > Game > TRIGGER STARTS (on by default; `--no-trigger-start`) lets a player
+who is not playing start or continue by pulling their gun's trigger (ignored for 1.5 seconds
+after they stop playing, so firing as the last life goes does not continue by accident).
+A `LightgunHID.ini` beside LostWorld.exe pins each light gun to its player by its VID&PID
+(`[Lightguns]`, `P1_Lightgun_HID = VID_1209&PID_0001`, `P2_Lightgun_HID = VID_1209&PID_0002`;
+`1 - Light Gun Setup.exe` in the same folder writes it): each gun is its player's from the
+first shot, whichever fires first, and other mice only move the menu pointer. `NoGuns = 1` or
+no file keeps the usual first-mouse / second-mouse behaviour. Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's
 crosshair after 3, 5 or 10 seconds without moving or firing, until the gun moves again (a
 player 2 who joined by mistake leaves no crosshair standing on the screen). A `crosshair.png`
 next to LostWorld.exe replaces the drawn crosshairs with that picture, centred on the gun and sized

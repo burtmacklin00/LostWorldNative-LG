@@ -137,6 +137,31 @@ static void shot_outside_reloads(int player) {
     }
 }
 
+// Settings > Game > TRIGGER STARTS: a player who is not playing starts (or
+// continues) by pulling their gun's trigger, aimed on or off the screen, as
+// with their start button. Not in the 1.5 s after they stop playing, so a
+// player still firing when their last life goes does not continue by
+// accident. With free play the trigger also inserts the credit.
+static void trigger_starts() {
+    static bool was_down[2] = {}, was_playing[2] = {};
+    static ULONGLONG stopped_at[2] = {};
+    ULONGLONG now = GetTickCount64();
+    for (int p = 0; p < 2; p++) {
+        PlayerInputs& pl = g_inputs.p[p];
+        bool playing = pl.playing, down = pl.trigger || pl.offscreen;
+        if (was_playing[p] && !playing) stopped_at[p] = now;
+        was_playing[p] = playing;
+        bool pressed = down && !was_down[p];
+        was_down[p] = down;
+        if (!g_opt.trigger_start || playing || now - stopped_at[p] < 1500) continue;
+        if (g_opt.free_play) {
+            if (pressed) player_join(p);
+        } else if (down) {
+            pl.start = true;   // a credit inserted with 5 / 6 is used, as with 1 / 2
+        }
+    }
+}
+
 static void poll_keyboard_mouse(HWND hwnd) {
     // Scripted input (--auto) takes over the controls
     if (GetForegroundWindow() != hwnd || !g_auto.events.empty() || survival_owns_inputs()) {
@@ -150,6 +175,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
     // unless a gamepad is player 2's
     const PlayerInputs &in1 = g_inputs.p[0], &in2 = g_inputs.p[1];
     bool join_allowed = g_opt.several_mice && !g_menu_open && (in1.playing || in2.playing) && !(in2.playing && g_p2_pad);
+    // (with LightgunHID.ini each gun is already its player's: raw_mice ignores this)
     raw_mice::update(hwnd, join_allowed, !g_menu_open);
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     if (g_menu_open) {
@@ -204,6 +230,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
         if (held) for (PlayerInputs& pl : g_inputs.p) pl.trigger = pl.offscreen = false;
         else g_block_buttons = false;
     }
+    trigger_starts();
     static bool c_was_down = false;   // C toggles the extra crosshair
     bool c_down = down('C');
     if (c_down && !c_was_down) g_opt.show_crosshair = !g_opt.show_crosshair;
@@ -729,6 +756,7 @@ int main(int argc, char** argv) {
         g_opt.custom_crosshair = ini.crosshair_style == 1;
         g_opt.crosshair_hide = ini.crosshair_hide;
         g_opt.free_play = ini.free_play;
+        g_opt.trigger_start = ini.trigger_start;
         g_opt.interp = ini.smooth;
         g_opt.several_mice = ini.second_mouse;
         g_opt.saturation = ini.saturation / 100.0f;
@@ -1095,6 +1123,7 @@ int main(int argc, char** argv) {
         s.crosshair_style = g_opt.custom_crosshair ? 1 : 0;
         s.crosshair_hide = g_opt.crosshair_hide;
         s.free_play = g_opt.free_play;
+        s.trigger_start = g_opt.trigger_start;
         s.smooth = g_opt.interp;
         s.second_mouse = g_opt.several_mice;
         s.saturation = std::clamp(int(g_opt.saturation * 100 + 0.5f), 0, 200);
@@ -1664,6 +1693,7 @@ int main(int argc, char** argv) {
                         load_crosshairs(renderer);
                     }
                     g_opt.free_play = s.free_play;
+                    g_opt.trigger_start = s.trigger_start;
                     if (g_opt.interp != s.smooth) {
                         g_opt.interp = s.smooth;
                         renderer.set_interpolation(1.0f);   // the latest game frame as it is

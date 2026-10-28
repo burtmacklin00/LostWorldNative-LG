@@ -100,6 +100,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
         else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
         else if (k == "free_play") free_play = on;
+        else if (k == "trigger_start") trigger_start = on;
         else if (k == "motion") smooth = v != "original";
         else if (k == "second_mouse") second_mouse = on;
         else if (k == "subtitles") subtitles = v == "japanese" ? 2 : v == "english" ? 1 : 0;
@@ -126,11 +127,11 @@ void FrontendSettings::save(const char* path) const {
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\ntrigger_start = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music, scale, half_rate);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, trigger_start, menu_music, scale, half_rate);
     fclose(f);
 }
 
@@ -318,7 +319,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
     {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
     {OPT_MICE, CONTROLS_TAB},
-    {OPT_FREE_PLAY, GAME_TAB}, {OPT_SUBS, GAME_TAB},
+    {OPT_FREE_PLAY, GAME_TAB}, {OPT_TRIGGER_START, GAME_TAB}, {OPT_SUBS, GAME_TAB},
 };
 
 const wchar_t* const Frontend::RECORD_TAB_NAMES[Frontend::RECORD_TAB_COUNT] = {L"ACHIEVEMENTS", L"STATS"};
@@ -437,6 +438,8 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
              L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
             {OPT_FREE_PLAY, L"FREE PLAY", on_off(s.free_play),
              L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
+            {OPT_TRIGGER_START, L"TRIGGER STARTS", on_off(s.trigger_start),
+             L"Pulling a gun's trigger starts or continues that player's game, like their start button"},
             {OPT_MICE, L"SECOND MOUSE", s.second_mouse ? L"PLAYER 2" : L"OFF",
              L"A second mouse joins as player 2 with a click while player 1 plays"},
             {OPT_SUBS, L"SUBTITLES", SUBS[s.subtitles], L"Captions of what the characters say"},
@@ -501,6 +504,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
                4, false);
         break;
     case OPT_FREE_PLAY: toggle(s.free_play); break;
+    case OPT_TRIGGER_START: toggle(s.trigger_start); break;
     case OPT_MUSIC: toggle(s.menu_music); break;
     case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
     case OPT_CROSS_P1: case OPT_CROSS_P2: it.kind = BUTTON; break;
@@ -549,6 +553,7 @@ void Frontend::reset_tab() {
         case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
         case OPT_CROSS_STYLE: settings.crosshair_style = d.crosshair_style; break;
         case OPT_FREE_PLAY: settings.free_play = d.free_play; break;
+        case OPT_TRIGGER_START: settings.trigger_start = d.trigger_start; break;
         case OPT_MUSIC: settings.menu_music = d.menu_music; break;
         case OPT_MICE: settings.second_mouse = d.second_mouse; break;
         case OPT_SUBS: settings.subtitles = d.subtitles; break;
@@ -761,6 +766,7 @@ void Frontend::activate(const Item& it, int dir) {
         break;
     }
     case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
+    case OPT_TRIGGER_START: settings.trigger_start = !settings.trigger_start; push(Action::SettingsChanged); break;
     case OPT_MUSIC: settings.menu_music = !settings.menu_music; push(Action::SettingsChanged); break;
     case OPT_CROSS_STYLE: settings.crosshair_style = 1 - settings.crosshair_style; push(Action::SettingsChanged); break;
     case OPT_CROSS_P1:

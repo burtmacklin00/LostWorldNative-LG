@@ -34,6 +34,17 @@
   </tr>
 </table>
 
+## Light gun edition (this fork)
+
+**Lost World Native LG** adds light gun cabinet features on top of the original port:
+
+- **Free play** on by default, and **the trigger starts and continues** each player's game.
+- **Fixed guns per player**: put `LightgunHID.ini` (made by `1 - Light Gun Setup.exe`) next to
+  `LostWorld.exe` and each gun always belongs to its player.
+- Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
+
+Updates from the original project are checked daily and merged here only after testing.
+
 ## ⚠️ ROM not included
 
 You need your own copy of the arcade ROM. Nothing from it is in this repository.

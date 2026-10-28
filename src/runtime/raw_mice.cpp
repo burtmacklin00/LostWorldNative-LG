@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cwctype>
+#include <string>
 #include <vector>
 
 namespace raw_mice {
@@ -13,7 +15,58 @@ struct Mouse {
     bool have_pos = false;
     bool left = false, right = false;
     bool clicked = false;
+    int fixed_player = -2;    // LightgunHID.ini: 0 / 1 that player's gun, -1 neither, -2 not looked up yet
 };
+
+// LightgunHID.ini beside LostWorld.exe (written by "1 - Light Gun Setup.exe"):
+//   [Lightguns]
+//   P1_Lightgun_HID = VID_1209&PID_0001
+//   P2_Lightgun_HID = VID_1209&PID_0002
+// pins each gun to its player from the start, whichever fires first. Other
+// mice then move only the menu pointer. NoGuns = 1 (or no file) keeps the
+// usual behaviour: the first mouse is player 1's, a second one joins as 2.
+std::wstring g_gun_id[2];     // upper case, e.g. VID_1209&PID_0001; empty: not set
+bool g_fixed = false;         // at least one gun is pinned
+
+std::wstring upper(std::wstring s) {
+    for (wchar_t& c : s) c = wchar_t(std::towupper(c));
+    return s;
+}
+
+void load_gun_ids() {
+    wchar_t path[MAX_PATH];
+    DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring ini(path, n);
+    ini = ini.substr(0, ini.find_last_of(L"\\/") + 1) + L"LightgunHID.ini";
+    if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    if (GetPrivateProfileIntW(L"Lightguns", L"NoGuns", 0, ini.c_str())) {
+        printf("[mouse] LightgunHID.ini: no light guns (mouse play)\n");
+        return;
+    }
+    for (int p = 0; p < 2; p++) {
+        wchar_t v[128] = {};
+        GetPrivateProfileStringW(L"Lightguns", p ? L"P2_Lightgun_HID" : L"P1_Lightgun_HID", L"", v, 128, ini.c_str());
+        std::wstring id = upper(v);
+        while (!id.empty() && iswspace(id.back())) id.pop_back();
+        while (!id.empty() && iswspace(id.front())) id.erase(id.begin());
+        g_gun_id[p] = id;
+        if (!id.empty()) {
+            g_fixed = true;
+            printf("[mouse] player %d gun: %ls\n", p + 1, id.c_str());
+        }
+    }
+}
+
+// Which player's gun a device is, from its name (\\?\HID#VID_1209&PID_0001&MI_02#...)
+int gun_player(HANDLE device) {
+    wchar_t name[512] = {};
+    UINT size = 512;
+    if (GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, name, &size) == UINT(-1)) return -1;
+    std::wstring dev = upper(name);
+    for (int p = 0; p < 2; p++)
+        if (!g_gun_id[p].empty() && dev.find(g_gun_id[p]) != std::wstring::npos) return p;
+    return -1;
+}
 
 std::vector<Mouse> g_mice;
 int g_owner[2] = {-1, -1};    // index in g_mice of each player's mouse
@@ -38,6 +91,7 @@ void keep_inside(Mouse& m) {
 }  // namespace
 
 void init(HWND hwnd) {
+    load_gun_ids();
     RAWINPUTDEVICE rid{};
     rid.usUsagePage = 0x01;   // generic desktop
     rid.usUsage = 0x02;       // mouse
@@ -77,6 +131,17 @@ void on_input(HRAWINPUT input) {
     if (b & RI_MOUSE_LEFT_BUTTON_UP) m.left = false;
     if (b & RI_MOUSE_RIGHT_BUTTON_DOWN) m.right = true;
     if (b & RI_MOUSE_RIGHT_BUTTON_UP) m.right = false;
+    if (g_fixed) {
+        // Pinned guns: the device is its player's gun as soon as it reports
+        // anything. A gun can show up as more than one mouse (interfaces):
+        // the one used last is the one that counts
+        if (m.fixed_player == -2) m.fixed_player = gun_player(ri.header.hDevice);
+        if (m.fixed_player >= 0 && g_owner[m.fixed_player] != i) {
+            if (g_owner[m.fixed_player] < 0) printf("[mouse] player %d gun found\n", m.fixed_player + 1);
+            g_owner[m.fixed_player] = i;
+        }
+        return;
+    }
     if (!(b & RI_MOUSE_LEFT_BUTTON_DOWN)) return;
     if (g_owner[1] < 0 && g_join_allowed && g_last_clicked >= 0 && i != g_last_clicked) {
         g_owner[0] = g_last_clicked;   // player 1 keeps the mouse it was playing with
@@ -103,7 +168,11 @@ void update(HWND hwnd, bool join_allowed, bool in_game) {
     g_clipped = clip;
 }
 
-bool two_mice() { return g_owner[1] >= 0; }
+// With pinned guns each player has their own from the start (one that has not
+// reported yet simply does nothing)
+bool two_mice() { return g_fixed ? g_owner[0] >= 0 || g_owner[1] >= 0 : g_owner[1] >= 0; }
+
+bool guns_pinned() { return g_fixed; }
 
 void reset() {
     g_owner[0] = g_owner[1] = -1;

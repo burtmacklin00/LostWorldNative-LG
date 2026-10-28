@@ -14,7 +14,8 @@ void on_input(HRAWINPUT input);    // WM_INPUT
 // player 2's (player 1 plays and player 2 does not), and the window's client
 // area, which keeps the mice inside it and confines the pointer while two play
 void update(HWND hwnd, bool join_allowed, bool in_game);
-bool two_mice();                   // a second mouse is player 2's gun
+bool two_mice();                   // a second mouse is player 2's gun (or LightgunHID.ini pins the guns)
+bool guns_pinned();                // LightgunHID.ini gives each player's gun by its VID&PID
 void reset();                      // back to one mouse for player 1 (the option turned off)
 
 struct Gun {
