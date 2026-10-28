@@ -19,6 +19,8 @@ public:
     bool init(const std::string& font_dir);
     void shutdown();
     void push(const std::wstring& name, const std::wstring& text);
+    // Another kind of notice: its own label, and it rises from the bottom middle
+    void push_rising(const std::wstring& label, const std::wstring& name, const std::wstring& text);
     void set_volume(float v) { volume_ = v; }   // the game's gain, 0..10 (5 default); 0 = no chime
     // Redraws into `out` when the picture changes; true if it did. `now` in seconds
     bool draw(int w, int h, double now, std::vector<uint32_t>& out);
@@ -37,7 +39,11 @@ private:
     void shine(int x0, int y0, int x1, int y1, float pos);
     void chime();
 
-    struct Notice { std::wstring name, text; };
+    struct Notice {
+        std::wstring name, text;
+        std::wstring label = L"ACHIEVEMENT UNLOCKED";
+        bool rising = false;
+    };
     std::deque<Notice> queue_;
     double shown_at_ = -1;   // when the front notice appeared
     bool drawn_ = false;     // the last picture has a panel

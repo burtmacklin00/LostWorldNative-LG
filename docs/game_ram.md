@@ -201,10 +201,17 @@ screens in src/ui/survival_ui.cpp, startup in app.cpp):
 - Arena cache: the first time an arena is reached, the whole game state is
   saved to `save/survival/STAGE_ZONE_lLIFE_dDIFF.state` (LIFE and difficulty
   settings in the name: other settings make their own). Later runs load it
-  right after the home state, find the encounter it stands at (the copy at
-  0x700000 starts with `-10 id`) and take it over again from its start, so
+  right after the home state and take the arena's first encounter over
+  again from its header (the stage and zone must match), so
   the way there is skipped. A state that does not load is deleted and the
   way there is played again; LW_SURV_NO_CACHE=1 ignores the cache.
+- Unlocks: when the arcade game (0x1C2AD8 = 0xC, not --make-boss-state)
+  calls fn_00039428 with an arena's first encounter (SurvivalZone::encounter)
+  in its stage and zone, the arena is unlocked (save/survival/unlocked.ini,
+  `stage:zone lives`, the most lives the player had in that game) with a
+  notice, and the state is kept there if there is none for these settings.
+  Loading it, the encounter is taken over from its header and the lives are
+  set to that number. Reaching an arena in survival mode also unlocks it.
 - Hold: on the first encounter with enemies in that zone it copies its script to
   0x700000 (free RAM: the game never goes past 0x200000) replacing the end with
   `-21 0x3FFFFFFF` (endless wait), and the game stops on the start

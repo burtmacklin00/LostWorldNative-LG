@@ -1552,6 +1552,9 @@ int main(int argc, char** argv) {
         if (toast_shown) {
             for (int i : stats_take_new_achievements())
                 toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
+            for (int i : survival_take_unlocked())
+                toast.push_rising(L"ARENA UNLOCKED  \u00B7  SURVIVAL!", SURVIVAL_ZONES[i].name,
+                                  L"Play it from PLAY > SURVIVAL");
             RECT rc;
             GetClientRect(presenter.hwnd(), &rc);
             if (toast.draw(rc.right, rc.bottom, qpc_seconds(), toast_pixels))
