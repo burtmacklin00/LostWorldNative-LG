@@ -619,11 +619,13 @@ std::vector<Frontend::Item> Frontend::items() const {
             std::wstring where = L"Stage " + std::to_wstring(z.stage) + L", zone " + std::to_wstring(z.zone);
             int wave = 0, score = 0;
             bool rec = survival_record(z.stage, z.zone, wave, score);
-            std::wstring value = rec ? L"WAVE " + std::to_wstring(wave) : L"NEW";
-            std::wstring hint = where + (rec ? L".  Your record: wave " + std::to_wstring(wave) + L", " +
-                                                   std::to_wstring(score) + L" points"
-                                             : L".  No record yet");
-            list.push_back({SURVIVAL_ENTRY, z.name, value, hint, true, i});
+            bool open = survival_unlocked(z.stage, z.zone);
+            std::wstring value = !open ? L"LOCKED" : rec ? L"WAVE " + std::to_wstring(wave) : L"NEW";
+            std::wstring hint = where + (!open ? L".  Reach it in CLASSIC ARCADE to unlock it"
+                                         : rec ? L".  Your record: wave " + std::to_wstring(wave) + L", " +
+                                                     std::to_wstring(score) + L" points"
+                                               : L".  No record yet");
+            list.push_back({SURVIVAL_ENTRY, z.name, value, hint, open, i});
         }
         list.push_back({BACK, L"BACK", L"", L"Return to the mode select"});
         return list;
@@ -655,6 +657,7 @@ std::vector<Frontend::Item> Frontend::items() const {
 }
 
 void Frontend::open(Screen s) {
+    locked_notice_ = false;
     screen_ = s;
     selected_ = 0;
     coffee_focus_ = false;
@@ -689,7 +692,14 @@ void Frontend::activate(const Item& it, int dir) {
     case QUIT_TO_MENU: push(Action::QuitToMenu); break;
     case ARCADE: push(Action::StartArcade); break;
     case BOSS: open_boss_list(false); break;
-    case SURVIVAL: open(Screen::Survival); selected_ = survival_choice; break;
+    case SURVIVAL: {
+        open(Screen::Survival);
+        selected_ = survival_choice;
+        bool any = false;   // none unlocked yet: the notice says how
+        for (int i = 0; i < SURVIVAL_ZONE_COUNT; i++) any |= survival_unlocked(SURVIVAL_ZONES[i].stage, SURVIVAL_ZONES[i].zone);
+        locked_notice_ = !any;
+        break;
+    }
     case SURVIVAL_ENTRY: survival_choice = it.index; push(Action::StartSurvival); break;
     case BOSS_ENTRY: boss_choice = it.index; push(Action::StartBoss); break;
     case PREPARE: push(Action::PrepareBosses); break;
@@ -816,6 +826,12 @@ void Frontend::back() {
 
 bool Frontend::key(int vk) {
     if (!active()) return false;
+    if (locked_notice_) {   // any of these closes it
+        if (vk != VK_RETURN && vk != VK_SPACE && vk != VK_ESCAPE && vk != VK_BACK) return true;
+        locked_notice_ = false;
+        dirty_ = true;
+        return true;
+    }
     auto list = items();
     int n = int(list.size());
     bool option_row = selected_ < n && list[selected_].id >= OPT_DISPLAY;
@@ -891,6 +907,11 @@ void Frontend::mouse_move(int x, int y) {
 
 void Frontend::click(int x, int y) {
     POINT p{x, y};
+    if (locked_notice_) {
+        locked_notice_ = false;
+        dirty_ = true;
+        return;
+    }
     if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {
         open_coffee();
         return;
@@ -2077,6 +2098,25 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     auto list = items();
     if (page) draw_options(over_game, list);
     else draw_menu(over_game, list);
+    if (locked_notice_ && screen_ == Screen::Survival) draw_locked_notice();
     dirty_ = false;
     return true;
+}
+
+// SURVIVAL with every arena locked: how they unlock, over the list
+void Frontend::draw_locked_notice() {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    fill(0, 0, w_, h_, 0x000000, 0.55f);
+    int pw = U(900), ph = U(400), x0 = (w_ - pw) / 2, y0 = (h_ - ph) / 2, cx = w_ / 2;
+    fill(x0, y0, x0 + pw, y0 + ph, PANEL, 0.96f);
+    frame(x0, y0, x0 + pw, y0 + ph, std::max(1, U(2)), AMBER, 0.9f);
+    text(display(), U(64), L"ARENAS LOCKED", cx, y0 + U(36), 1, {GOLD_TOP, GOLD_BOTTOM, EDGE, U(3), 1, U(4)});
+    int y = y0 + U(140);
+    for (const std::wstring& line : wrap(BODY, U(26),
+             L"Each survival arena opens when you reach it in the arcade game. Play CLASSIC ARCADE: "
+             L"when you get to one, ARENA UNLOCKED shows up and it is ready here.", pw - U(100))) {
+        text(BODY, U(26), line, cx, y, 1, {0xE8C890, 0xE8C890});
+        y += U(38);
+    }
+    text(ITEM, U(22), L"PRESS ENTER OR CLICK", cx, y0 + ph - U(56), 1, {HINT, HINT});
 }

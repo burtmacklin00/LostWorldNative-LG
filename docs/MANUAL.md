@@ -263,7 +263,13 @@ and the service corridor; stage 4: the control room) with the record
 for each. Also from the command line: `LostWorld.exe --survival
 STAGE:ZONE` (for example `--survival 3:0`).
 
-The game reaches the arena by itself, at full speed and silently, behind a
+Arenas are locked until you reach them in the arcade game: when you get
+there, ARENA UNLOCKED rises from the bottom of the screen and the game keeps
+that moment in save/survival/. Survival then starts the arena straight
+from it. An arena with a
+record counts as unlocked, and `--survival` works on locked ones too.
+
+Without a kept state (`--survival` on an arena not reached yet), the game reaches the arena by itself, at full speed and silently, behind a
 loading screen that explains the mode, shows the record and says what is happening
 (coin, route, trip to the arena) with a progress bar. The game
 waits at the shooting point until the first shot (or Enter). Then waves

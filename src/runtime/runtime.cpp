@@ -1152,7 +1152,7 @@ void rt_event(Ctx& c) {
             if (g_boss_maker >= 0) boss_maker_frame();
             video_snapshot();
             // Survival mode: on to the chosen stage at full speed, behind its loading screen
-            bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 60000
+            bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 200000   // (survival gives up first)
                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
             if (g_boot_skip && boot_done) {
                 g_boot_skip = g_fast_idle = false;

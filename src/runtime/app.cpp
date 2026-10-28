@@ -1511,6 +1511,8 @@ int main(int argc, char** argv) {
             if (survival_last == SurvivalMode::Loading && sv.mode != SurvivalMode::Loading)
                 printf("[survival] audio during the loading: %llu samples\n",
                        (unsigned long long)(g_sound.frames_out() - survival_audio_at));
+            if (survival_last == SurvivalMode::Loading && sv.mode == SurvivalMode::Off && g_opt.menu && !g_menu_open)
+                survival_to_menu();   // the game never got to the arena: not left running behind the loading screen
             survival_last = sv.mode;
             if (survival_cli_pending) {   // the boot screens: already the loading screen
                 sv.mode = SurvivalMode::Loading;
@@ -1562,6 +1564,9 @@ int main(int argc, char** argv) {
         if (toast_shown) {
             for (int i : stats_take_new_achievements())
                 toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
+            for (int i : survival_take_unlocked())
+                toast.push_rising(L"ARENA UNLOCKED  \u00B7  SURVIVAL!", SURVIVAL_ZONES[i].name,
+                                  L"Play it from PLAY > SURVIVAL");
             RECT rc;
             GetClientRect(presenter.hwnd(), &rc);
             if (toast.draw(rc.right, rc.bottom, qpc_seconds(), toast_pixels))

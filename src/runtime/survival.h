@@ -3,6 +3,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct Ctx;
 
@@ -18,12 +19,17 @@ struct SurvivalZone {
     int stage, zone;          // as the player counts them (stage from 1)
     const wchar_t* name;
     bool shoot_in;            // the way there waits for shots (the loading shoots, lives kept)
+    int encounter;            // its first encounter (the start of the arena)
 };
 extern const SurvivalZone SURVIVAL_ZONES[];
 extern const int SURVIVAL_ZONE_COUNT;
 const wchar_t* survival_zone_name(int stage, int zone);   // nullptr if not in the list
 // From save/survival.ini: the best wave, its score and (if asked) its lap
 bool survival_record(int stage, int zone, int& wave, int& score, int* lap = nullptr);
+// Arenas are unlocked by reaching them in the arcade game (or having a record
+// there); the arcade game keeps the arena's state on the way (save/survival/)
+bool survival_unlocked(int stage, int zone);
+std::vector<int> survival_take_unlocked();   // indices in SURVIVAL_ZONES unlocked since the last call (the notice)
 
 // What the window shows and does
 enum class SurvivalMode { Off, Loading, Ready, Playing, Results };

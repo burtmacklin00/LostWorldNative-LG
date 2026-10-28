@@ -28,6 +28,10 @@
 // every call of the zone trigger task. The addresses are in docs/game_ram.md.
 #include "survival.h"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -105,7 +109,7 @@ constexpr int MAX_LIVES = 9;                // the hearts count shows one digit:
 constexpr int GOLD_POINTS = 5000;
 constexpr uint64_t DYING_FRAMES = 80;       // the killing attack and its flash play out (1.4 s), controls locked
 constexpr uint32_t COURSE_SELECT = 0x1C2AD8;   // 0 attract, 1-2 choosing a course, 0xC playing
-constexpr uint64_t LOADING_GIVE_UP = 100000;   // game frames (at full speed, a few minutes)
+constexpr uint64_t LOADING_GIVE_UP = 40000;    // game frames (at full speed, ~50 s; the slowest arena takes ~9000)
 constexpr const char* RECORDS = "save/survival.ini";
 
 bool g_trace = false;
@@ -169,13 +173,106 @@ bool is_enemy_fn(uint32_t fn) {
 // the encounter machine; stage 1 zone 7 is the T-Rex chase, where the game
 // loops the camera and loads the zone again and again
 const SurvivalZone SURVIVAL_ZONES[] = {
-    {1, 1, L"Jungle shack", false},
-    {1, 5, L"Dark forest", false},
-    {3, 0, L"Visitor center hall", false},
-    {3, 1, L"Service corridor", false},
-    {4, 1, L"Control room", true},
+    {1, 1, L"Jungle shack", false, 3},
+    {1, 5, L"Dark forest", false, 8},
+    {3, 0, L"Visitor center hall", false, 19},
+    {3, 1, L"Service corridor", false, 30},
+    {4, 1, L"Control room", true, 43},
 };
 const int SURVIVAL_ZONE_COUNT = int(sizeof(SURVIVAL_ZONES) / sizeof(SURVIVAL_ZONES[0]));
+
+namespace {
+// The state kept of an arena
+std::string arena_state_path(int stage, int zone) {
+    return "save/survival/" + std::to_string(stage) + "_" + std::to_string(zone) + ".state";
+}
+
+// Unlocked arenas (save/survival/unlocked.ini: "stage:zone lives life", the
+// lives a new game started with and the LIFE setting then: when the kept
+// state is loaded the player gets those, more or fewer as the setting is
+// now). Read by the window, written by the game thread
+struct Unlock {
+    int lives = 0, life = -1;
+};
+std::mutex g_unlock_mutex;
+std::map<std::pair<int, int>, Unlock> g_unlocks;
+bool g_unlocks_read = false;
+std::vector<int> g_new_unlocks;
+constexpr const char* UNLOCKS = "save/survival/unlocked.ini";
+
+void read_unlocks() {   // (mutex held)
+    if (g_unlocks_read) return;
+    g_unlocks_read = true;
+    if (FILE* f = fopen(UNLOCKS, "r")) {
+        char line[64];
+        int st, z;
+        Unlock u;
+        while (fgets(line, sizeof(line), f)) {
+            u.life = -1;
+            if (sscanf(line, "%d:%d %d %d", &st, &z, &u.lives, &u.life) >= 3) g_unlocks[{st, z}] = u;
+        }
+        fclose(f);
+    }
+}
+
+void write_unlocks() {   // (mutex held)
+    CreateDirectoryA("save", nullptr);
+    CreateDirectoryA("save/survival", nullptr);
+    if (FILE* f = fopen(UNLOCKS, "w")) {
+        for (auto& [k, v] : g_unlocks) fprintf(f, "%d:%d %d %d\n", k.first, k.second, v.lives, v.life);
+        fclose(f);
+    }
+}
+
+// The lives to start the kept state with, at LIFE setting `life` (0: unknown)
+int unlock_lives(int stage, int zone, int life) {
+    std::lock_guard<std::mutex> lock(g_unlock_mutex);
+    read_unlocks();
+    auto it = g_unlocks.find({stage, zone});
+    if (it == g_unlocks.end() || it->second.lives <= 0) return 0;
+    int lives = it->second.lives + (it->second.life >= 0 ? life - it->second.life : 0);
+    return std::clamp(lives, 1, 9);
+}
+
+// True if it was locked
+bool unlock(int stage, int zone, int lives, bool notice) {
+    std::lock_guard<std::mutex> lock(g_unlock_mutex);
+    read_unlocks();
+    auto it = g_unlocks.find({stage, zone});
+    if (it != g_unlocks.end() && it->second.lives > 0) return false;
+    g_unlocks[{stage, zone}] = {lives, int(rd8(SETTING_LIFE))};
+    write_unlocks();
+    for (int i = 0; i < SURVIVAL_ZONE_COUNT; i++)
+        if (notice && SURVIVAL_ZONES[i].stage == stage && SURVIVAL_ZONES[i].zone == zone) g_new_unlocks.push_back(i);
+    printf("[survival] arena %d:%d unlocked\n", stage, zone);
+    return true;
+}
+}  // namespace
+
+namespace {
+// Its kept state is gone and the way there did not reach it: to be reached
+// in the arcade game again
+void relock(int stage, int zone) {
+    std::lock_guard<std::mutex> lock(g_unlock_mutex);
+    read_unlocks();
+    if (g_unlocks.erase({stage, zone})) write_unlocks();
+}
+}  // namespace
+
+bool survival_unlocked(int stage, int zone) {
+    int w, sc;
+    if (survival_record(stage, zone, w, sc)) return true;
+    std::lock_guard<std::mutex> lock(g_unlock_mutex);
+    read_unlocks();
+    return g_unlocks.count({stage, zone}) != 0;
+}
+
+std::vector<int> survival_take_unlocked() {
+    std::lock_guard<std::mutex> lock(g_unlock_mutex);
+    std::vector<int> v;
+    v.swap(g_new_unlocks);
+    return v;
+}
 
 const wchar_t* survival_zone_name(int stage, int zone) {
     for (const SurvivalZone& z : SURVIVAL_ZONES)
@@ -463,10 +560,10 @@ struct Survival {
             if (id == encounter) continue;
             for (const Section& sc : sections_of(id)) {
                 if (sc.look.empty()) continue;
-                bool near = false;
+                bool close = false;
                 for (auto& l : own)
-                    near |= std::hypot(float(l[1] - sc.look[1]), float(l[3] - sc.look[3])) < NEAR_LOOK;
-                if (near) pool.push_back(sc);
+                    close |= std::hypot(float(l[1] - sc.look[1]), float(l[3] - sc.look[3])) < NEAR_LOOK;
+                if (close) pool.push_back(sc);
             }
         }
         if (pool.empty() && !enemies.empty()) {   // (no sections found: everything as one)
@@ -956,6 +1053,52 @@ struct Survival {
     uint32_t loading_lives = 0;   // the player's lives as the stage began (kept on the way in)
     bool shoot_in = false;        // SurvivalZone::shoot_in of this arena
 
+    // The arena's first encounter is ours (take_over): the start screen
+    void at_arena() {
+        base_diff = rd8(SETTING_DIFF) >> 4;
+        state = HOLDING;
+        wave = 0;
+        first_encounter = encounter;   // each lap starts again here
+        first_enemies = enemies, first_looks = looks, first_setup = setup;
+        first_count = enemies.size();
+        find_zone_encounters();
+        start_lives = lives = std::max(1, int(rd32(PLAYER_LIFE)));
+        wave_started = now_seconds();
+        if (mode == SurvivalMode::Loading) mode = SurvivalMode::Ready, step = SurvivalStep::Arrived;
+        unlock(stage + 1, zone, start_lives, false);
+    }
+
+    // The arena kept the first time it was reached (save/survival/), made
+    // with this LIFE and difficulty setting: the way there only once
+    std::string cache;            // its file: being loaded or saved this run
+    bool cache_loading = false, cache_saving = false, cache_tried = false;
+    uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
+    std::string cache_path() const { return arena_state_path(stage + 1, zone); }
+    // Loaded: the arena's first encounter (where survival or the arcade game
+    // kept the state) is taken over from its start, with the lives of a new game
+    bool resume() {
+        int id = -1;
+        for (const SurvivalZone& sz : SURVIVAL_ZONES)
+            if (sz.stage == stage + 1 && sz.zone == zone) id = sz.encounter;
+        if (id < 0) return false;
+        uint32_t i = 0;
+        while (i < SCRIPT_WORDS) {   // its header in the script
+            int32_t op = int32_t(rd32(script_addr(i)));
+            if (op == -10 && int32_t(rd32(script_addr(i + 1))) == id) break;
+            int n = op < 0 ? op_args(op) : -2;
+            if (op < 0 && n < 0) return false;
+            i += op < 0 ? 1 + uint32_t(n) : 3 + rd32(script_addr(i + 2));
+        }
+        if (i >= SCRIPT_WORDS) return false;
+        if (rd8(STAGE) != stage || int(rd32(ZONE) & 15) != zone) return false;
+        encounter = id;
+        enemies.clear(), looks.clear(), setup.clear();
+        if (!take_over(i)) return false;
+        if (int l = unlock_lives(stage + 1, zone, rd8(SETTING_LIFE)); l > 0) wr32(PLAYER_LIFE, uint32_t(l));
+        at_arena();
+        return true;
+    }
+
     // A new run: everything as at the start
     void reset(int s, int z) {
         stage = s - 1;
@@ -989,6 +1132,8 @@ struct Survival {
         lap_started = ambush_started = 0;
         loading_frames = travel_frames = 0;
         loading_lives = 0;
+        cache.clear();
+        cache_loading = cache_saving = cache_tried = false;
         shoot_in = false;
         for (const SurvivalZone& sz : SURVIVAL_ZONES)
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
@@ -1145,22 +1290,41 @@ void survival_enter(Ctx& c, uint32_t fn) {
         Survival& s = g_surv;
         uint32_t pc = rd32(VM_PC);
         if (s.state == Survival::STARTING) {   // first run of the encounter: its header
-            s.base_diff = rd8(SETTING_DIFF) >> 4;
             if (s.take_over(pc)) {
-                s.state = Survival::HOLDING;
-                s.wave = 0;
-                s.first_encounter = s.encounter;   // each lap starts again here
-                s.first_enemies = s.enemies, s.first_looks = s.looks, s.first_setup = s.setup;
-                s.first_count = s.enemies.size();
-                s.find_zone_encounters();
-                s.start_lives = s.lives = std::max(1, int(rd32(PLAYER_LIFE)));
-                s.wave_started = now_seconds();
-                if (s.mode == SurvivalMode::Loading) s.mode = SurvivalMode::Ready, s.step = SurvivalStep::Arrived;
+                s.at_arena();
+                // The arena as it is now, for next time (it loads from there)
+                if (s.cache.empty()) {
+                    s.cache = s.cache_path();
+                    CreateDirectoryA("save/survival", nullptr);
+                    game_state_save(s.cache + ".tmp");
+                    s.cache_saving = true;
+                }
             } else {   // no enemies in this one: wait for the next encounter, of this zone or a later one
                 s.enemies.clear(), s.looks.clear(), s.setup.clear();
                 s.state = Survival::WAITING;
                 s.zone_empty = true;
             }
+        }
+    }
+}
+
+extern int g_boss_maker;   // runtime.cpp: --make-boss-state plays by itself
+
+// The arcade game reaches an arena: unlocked (with its notice), and the
+// state as it is kept for survival mode
+static int g_arcade_lives = 0;         // the most lives the player has had in this game (as a new game starts)
+static std::string g_arcade_saving;    // the arena state being written
+static void arcade_arena(int id) {
+    int stage = rd8(STAGE) + 1, zone = int(rd32(ZONE) & 15);
+    for (const SurvivalZone& sz : SURVIVAL_ZONES) {
+        if (sz.stage != stage || sz.zone != zone || sz.encounter != id) continue;
+        int lives = std::max(g_arcade_lives, int(rd32(PLAYER_LIFE)));
+        unlock(stage, zone, lives, true);
+        std::string path = arena_state_path(stage, zone);
+        if (g_arcade_saving.empty() && !game_state_valid(path)) {
+            CreateDirectoryA("save/survival", nullptr);
+            game_state_save(path + ".tmp");
+            g_arcade_saving = path;
         }
     }
 }
@@ -1175,6 +1339,8 @@ bool survival_spawn_call(Ctx& c, uint32_t fn) {
                 encounter_enemies(int(rd32(r + 20))));
     }
     Survival& s = g_surv;
+    if (!s.on && fn == FN_ENCOUNTER_START && g_boss_maker < 0 && rd32(COURSE_SELECT) == 0xC)
+        arcade_arena(int(rd32(r + 20)));
     if (s.gate) return false;
     int zone_now = int(rd32(ZONE) & 15);
     if (s.on && s.state == Survival::WAITING && fn == FN_ENCOUNTER_START && rd8(STAGE) == s.stage &&
@@ -1217,20 +1383,65 @@ bool survival_frame(Ctx&) {
         printf("[survival] stage %d, zone %d\n", s.stage + 1, s.zone);
     }
     if (g_ungate.exchange(false)) s.gate = false;
+    if (!s.on) {   // the arcade game
+        g_arcade_lives = rd32(COURSE_SELECT) == 0xC ? std::max(g_arcade_lives, int(rd32(PLAYER_LIFE))) : 0;
+        if (!g_arcade_saving.empty() && game_state_result() != 0) {
+            bool ok = game_state_result() > 0 && MoveFileExA((g_arcade_saving + ".tmp").c_str(),
+                                                              g_arcade_saving.c_str(), MOVEFILE_REPLACE_EXISTING);
+            printf("[survival] arena %s %s\n", ok ? "kept in" : "could not be kept in", g_arcade_saving.c_str());
+            g_arcade_saving.clear();
+        }
+    }
     if (s.on) {
         switch (s.mode) {
         case SurvivalMode::Loading:
             if (s.gate) break;
+            // The arena kept from another time, once the game is in its main
+            // loop (a state loads only from there: without a window, past the boot)
+            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !getenv("LW_SURV_NO_CACHE")) {
+                s.cache_tried = true;
+                std::string path = s.cache_path();
+                s.keep_life = rd8(SETTING_LIFE), s.keep_diff = rd8(SETTING_DIFF);   // the settings as they are now
+                if (game_state_valid(path) && game_state_load(path)) s.cache = path, s.cache_loading = true;
+            }
+            if (s.cache_loading) {
+                s.loading_frames = 1;
+                int r = game_state_result();
+                if (r == 0) break;
+                s.cache_loading = false;
+                if (r > 0) wr8(SETTING_LIFE, s.keep_life), wr8(SETTING_DIFF, s.keep_diff);
+                if (r > 0 && s.resume()) {
+                    printf("[survival] arena loaded from %s\n", s.cache.c_str());
+                    break;
+                }
+                printf("[survival] %s did not load: the way there instead\n", s.cache.c_str());
+                if (r > 0) DeleteFileA(s.cache.c_str());   // (not when the game was just not ready for it)
+                s.cache.clear();
+                if (r > 0) {   // loaded but not understood: from the attract again
+                    s.on = false;
+                    s.mode = SurvivalMode::Off;
+                    s.publish();
+                    break;
+                }
+            }
             s.loading_frames++;
             if (s.step == SurvivalStep::Travelling) s.travel_frames++;
             s.press_buttons();
             if (s.loading_frames > LOADING_GIVE_UP) {
                 printf("[survival] did not reach zone %d of stage %d\n", s.zone, s.stage + 1);
+                relock(s.stage + 1, s.zone);
                 s.on = false;
                 s.mode = SurvivalMode::Off;
+                s.publish();   // the window goes back to the menu
             }
             break;
         case SurvivalMode::Ready:   // the start screen: the game waits for the first shot
+            if (s.cache_saving && game_state_result() != 0) {
+                s.cache_saving = false;
+                bool ok = game_state_result() > 0 &&
+                          MoveFileExA((s.cache + ".tmp").c_str(), s.cache.c_str(), MOVEFILE_REPLACE_EXISTING);
+                printf("[survival] arena %s %s\n", ok ? "kept in" : "could not be kept in", s.cache.c_str());
+            }
             if (s.confirm || getenv("LW_SURV_AUTOSTART")) {   // testing aid: no window to shoot at
                 s.confirm = false;
                 s.mode = SurvivalMode::Playing;

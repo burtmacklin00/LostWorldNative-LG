@@ -189,7 +189,26 @@ screens in src/ui/survival_ui.cpp, startup in app.cpp):
   behind the loading screen. The mode inserts a credit and presses start until
   route selection opens (0x1C2AD8), shoots in it, and the stage list
   is rewritten on the first call to fn_00081364 after fn_000812DC so
-  the route lands on the chosen stage.
+  the route lands on the chosen stage. If the arena is not reached after
+  40000 frames, the window goes back to the menu (and the arena is locked
+  again). Service corridor is never reached this way: stage 3's lobby waits
+  for the 0x6053C enemies of encounter 36, which never leave by themselves,
+  and playing the way's encounters without their enemies (or ending them at
+  once) loses the stage's path; it only opens from the arcade game (below).
+- Arena cache: the first time an arena is reached, the whole game state is
+  saved to `save/survival/STAGE_ZONE.state`. Later runs load it right after
+  the home state, put back the LIFE and difficulty settings (0x122A,
+  0x122D) as they are now and take the arena's first encounter over
+  again from its header (the stage and zone must match), so
+  the way there is skipped. A state that does not load is deleted and the
+  way there is played again; LW_SURV_NO_CACHE=1 ignores the cache.
+- Unlocks: when the arcade game (0x1C2AD8 = 0xC, not --make-boss-state)
+  calls fn_00039428 with an arena's first encounter (SurvivalZone::encounter)
+  in its stage and zone, the arena is unlocked (save/survival/unlocked.ini,
+  `stage:zone lives life`: the most lives the player had in that game and
+  the LIFE setting then) with a notice, and the state is kept there if there
+  is none. Loading it, the encounter is taken over from its header and the
+  lives are set to that number, plus the change in the LIFE setting since. Reaching an arena in survival mode also unlocks it.
 - Hold: on the first encounter with enemies in that zone it copies its script to
   0x700000 (free RAM: the game never goes past 0x200000) replacing the end with
   `-21 0x3FFFFFFF` (endless wait), and the game stops on the start

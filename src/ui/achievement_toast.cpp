@@ -139,6 +139,9 @@ void AchievementToast::chime() {
 }
 
 void AchievementToast::push(const std::wstring& name, const std::wstring& text) { queue_.push_back({name, text}); }
+void AchievementToast::push_rising(const std::wstring& label, const std::wstring& name, const std::wstring& text) {
+    queue_.push_back({name, text, label, true});
+}
 
 HFONT AchievementToast::font(Family f, int px) {
     auto key = std::make_pair(int(f), px);
@@ -273,13 +276,21 @@ bool AchievementToast::draw(int w, int h, double now, std::vector<uint32_t>& out
     auto U = [&](float v) { return int(v * u + 0.5f); };
     const auto& n = queue_.front();
     int title_px = U(46), text_px = U(28), label_px = U(22);
-    int inner = std::max({mask(TITLE, title_px, n.name).text_w, mask(TEXT, text_px, n.text).text_w, U(300)});
+    int inner = std::max({mask(TITLE, title_px, n.name).text_w, mask(TEXT, text_px, n.text).text_w,
+                          mask(TEXT, label_px, n.label).text_w, U(300)});
     int rest_x1 = w - U(40), pw = inner + U(56), y1 = h - U(48), y0 = y1 - U(170);
-    // Off screen to the right -> resting place -> off screen again
+    if (n.rising) rest_x1 = (w + pw) / 2;   // the bottom middle
+    // Off screen to the right (or below) -> resting place -> off screen again
     double off = 0;
     if (t < SLIDE_IN) off = 1 - ease_out_back(t / SLIDE_IN);
     else if (t > SHOW_SECONDS - SLIDE_OUT) off = ease_in_back(std::min(1.0, (t - (SHOW_SECONDS - SLIDE_OUT)) / SLIDE_OUT));
-    int x1 = rest_x1 + int(off * (pw + U(40) + U(20))), x0 = x1 - pw;
+    int x1 = rest_x1, x0 = x1 - pw;
+    if (n.rising) {
+        int dy = int(off * (y1 - y0 + U(48) + U(20)));
+        y0 += dy, y1 += dy;
+    } else {
+        x1 += int(off * (pw + U(40) + U(20))), x0 = x1 - pw;
+    }
     float alpha = float(std::clamp(t / 0.12, 0.0, 1.0));
     fill(x0, y0, x1, y1, 0x0C0A06, 0.88f * alpha);
     int th = std::max(1, U(3));
@@ -291,7 +302,7 @@ bool AchievementToast::draw(int w, int h, double now, std::vector<uint32_t>& out
     float flash = float(std::clamp(1.0 - std::fabs(t - SLIDE_IN * 0.7) / 0.25, 0.0, 1.0));
     fill(x0, y0, x0 + U(8), y1, mix(AMBER, 0xFFFFFF, flash), 0.95f * alpha);
     int x = x0 + U(32);
-    text(TEXT, label_px, L"ACHIEVEMENT UNLOCKED", x, y0 + U(18), 0, AMBER, AMBER, alpha);
+    text(TEXT, label_px, n.label, x, y0 + U(18), 0, AMBER, AMBER, alpha);
     text(TITLE, title_px, n.name, x, y0 + U(52), 0, GOLD_TOP, GOLD_BOTTOM, alpha);
     text(TEXT, text_px, n.text, x, y0 + U(114), 0, PALE_TOP, PALE_BOTTOM, alpha);
     if (t > SHINE_AT && t < SHINE_AT + SHINE_TIME) shine(x0, y0, x1, y1, float((t - SHINE_AT) / SHINE_TIME));

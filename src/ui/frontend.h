@@ -124,6 +124,8 @@ public:
 
     // Redraws into `out` when something changed (or the size did); true if it did
     bool draw(int w, int h, std::vector<uint32_t>& out);
+    bool locked_notice_ = false;   // SURVIVAL: every arena locked, the notice saying how they unlock
+    void draw_locked_notice();
     void invalidate() { dirty_ = true; }
 
 private:
