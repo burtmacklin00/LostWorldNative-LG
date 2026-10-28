@@ -45,7 +45,9 @@
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - High.bat`, `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
 - **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
-  from the `4x3` or `16x9` folder into the game folder (and `4x3\bezel.png`, if you add one).
+  from the `4x3` or `16x9` folder into the game folder (4:3 also copies the bezel, `4x3\bezel.png`).
+  Replace `4x3\bezel.png` with your own if you like: `update.bat` never overwrites files you
+  already have in `4x3` and `16x9`.
 - **Easy install and updates**: `setup-and-build.bat` installs what the build needs and builds;
   `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
 - Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
