@@ -149,10 +149,11 @@ saved games and are not versioned.
   About half the GPU work, with the motion still even.
 - --no-vsync (or VSYNC: OFF in the settings, DISPLAY tab): each image goes out
   as soon as it is drawn instead of at the monitor's next refresh (Vulkan
-  immediate mode, or mailbox if the driver has no immediate mode). As many
-  images as the GPU can draw, less latency, and tearing on monitors without
-  G-Sync/FreeSync. FRAME RATE: HALF does nothing with vsync off. The console
-  prints `[video] vsync on/off` when it changes.
+  immediate mode, or mailbox if the driver has no immediate mode), still no
+  more images than the monitor's refreshes. About 14 ms less latency (measured
+  at 120 Hz), but tearing and less even motion on monitors without
+  G-Sync/FreeSync: keep it on there. FRAME RATE: HALF does nothing with vsync
+  off. The console prints `[video] vsync on/off` when it changes.
 - QUALITY (settings, DISPLAY tab): LOW, MEDIUM, HIGH and ULTRA set together the
   options that cost the most (render resolution, frame rate, ray tracing,
   ambient occlusion, sun shadows, light shafts, soft particles, sky, surface
