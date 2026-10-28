@@ -44,6 +44,10 @@
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - High.bat`, `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
+- **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
+  from the `4x3` or `16x9` folder into the game folder (and `4x3\bezel.png`, if you add one).
+- **Easy install and updates**: `setup-and-build.bat` installs what the build needs and builds;
+  `update.bat` downloads this fork's latest version and rebuilds (no Git needed).
 - Outputs for Hook of the Reaper (recoil, damage, death, ammo) are planned.
 
 Updates from the original project are checked daily and merged here only after testing.

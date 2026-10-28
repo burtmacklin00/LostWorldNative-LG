@@ -80,6 +80,7 @@ public:
     // A player's own crosshair picture (crosshair.png beside the exe), drawn
     // centred on the gun instead of the built-in ring; empty rgba: the ring again
     void set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba);
+    void set_bezel(int w, int h, const std::vector<uint8_t>& rgba);   // display.ini's bezel picture
 
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
     // The image of the last record() composed again, with the crosshairs where
@@ -371,4 +372,5 @@ private:
     float back_shift_ = 0.0f;
     float crosshair_x_[2] = {}, crosshair_y_[2] = {};
     bool crosshair_picture_[2] = {};
+    bool bezel_ = false;
 };

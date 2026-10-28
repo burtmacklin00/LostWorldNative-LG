@@ -277,7 +277,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     cb[10] = {10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[11] = {11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[12] = {12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
-    cb[13] = {13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_FRAGMENT_BIT};
+    cb[13] = {13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, VK_SHADER_STAGE_FRAGMENT_BIT};   // 2 crosshairs, bezel
     VkDescriptorBindingFlags cflags[14] = {0, 0, 0, bflags[1], 0, bflags[1], 0, 0, 0, 0, 0, 0, 0, bflags[1]};
     bfi.bindingCount = 14;
     bfi.pBindingFlags = cflags;
@@ -295,7 +295,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &ao_set_layout_);
 
     VkDescriptorPoolSize ps[4] = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 34 + TexturePack::MAX_SLOTS + Pack2D::MAX_SLOTS},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 38 + TexturePack::MAX_SLOTS + Pack2D::MAX_SLOTS},   // +4: the bezel slot
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
@@ -796,6 +796,13 @@ void R3DRenderer::set_text_atlas(const TextHD& text) {
 void R3DRenderer::set_crosshair_picture(int player, int w, int h, const std::vector<uint8_t>& rgba) {
     crosshair_picture_[player] = !rgba.empty();
     if (!rgba.empty()) upload_slot(compose_set_, 13, overlay_sampler_, uint32_t(player), w, h, rgba, &crosshair_images_);
+}
+
+// display.ini's bezel: drawn over everything but the crosshairs and the menus,
+// sized to the window's height and centred (its transparent hole shows the game)
+void R3DRenderer::set_bezel(int w, int h, const std::vector<uint8_t>& rgba) {
+    bezel_ = !rgba.empty();
+    if (!rgba.empty()) upload_slot(compose_set_, 13, overlay_sampler_, 2, w, h, rgba, &crosshair_images_);
 }
 
 void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0, int y1) {
@@ -1804,7 +1811,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                            extend_back ? 1.0f : 0.0f},
                    .sky = {seconds, 0, sun_ ? 1.0f : 0.0f, 0},
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
-                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f), 0, 0},
+                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ ? 4.0f : 0.0f), 0, 0},
                    .crosshair2 = {-1, -1, sharpen_, 0}};
     place_crosshairs(lay, pc);
     return pc;

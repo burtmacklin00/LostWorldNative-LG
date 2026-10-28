@@ -42,6 +42,7 @@
 #include "../ui/frontend.h"
 #include "../ui/menu_music.h"
 #include "../ui/survival_ui.h"
+#include "../video/image_io.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
 #include "../video/r3d_scene.h"
@@ -613,6 +614,44 @@ static std::string full_path(const std::string& path) {
     return n && n < MAX_PATH ? std::string(full, n) : path;
 }
 
+// display.ini beside LostWorld.exe: the picture shape, and an optional bezel.
+// The 4x3 and 16x9 folders hold one each; "Display - 4x3.bat" and
+// "Display - 16x9.bat" copy them in. Command-line options still win.
+//   [Display]
+//   Aspect = 4:3          (4:3 the arcade picture, 16:9 native widescreen, 21:9)
+//   Bezel = bezel.png     (drawn over the screen; its transparent hole shows the game)
+static std::string g_bezel_path;
+
+static void load_display_ini() {
+    std::string ini = exe_folder() + "display.ini";
+    if (!file_exists(ini.c_str())) return;
+    char v[MAX_PATH] = {};
+    GetPrivateProfileStringA("Display", "Aspect", "", v, sizeof(v), ini.c_str());
+    if (v[0]) {
+        const char* colon = strchr(v, ':');
+        float a = colon ? float(atof(v) / std::max(atof(colon + 1), 0.01)) : float(atof(v));
+        if (a > 0.5f && a < 5.0f) g_opt.max_aspect = a;
+        printf("[video] display.ini: aspect %s\n", v);
+    }
+    GetPrivateProfileStringA("Display", "Bezel", "", v, sizeof(v), ini.c_str());
+    std::string b = v;
+    while (!b.empty() && isspace((unsigned char)b.back())) b.pop_back();
+    if (!b.empty()) g_bezel_path = (b.find(':') != std::string::npos || b[0] == '\\' || b[0] == '/') ? b : exe_folder() + b;
+}
+
+static void load_bezel(R3DRenderer& renderer) {
+    if (g_bezel_path.empty()) return;
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgba;
+    if (png_load(g_bezel_path, w, h, rgba) && w > 0 && h > 0) {
+        renderer.set_bezel(w, h, rgba);
+        printf("[video] bezel: %s (%dx%d)\n", g_bezel_path.c_str(), w, h);
+    } else {
+        printf("[video] bezel not loaded: %s\n", g_bezel_path.c_str());
+    }
+}
+
+
 // The zip the ROM came from (empty when it came from a data folder): the boss
 // state makers are started on the same ROM
 // QUALITY for the first start, from the graphics card's name: a rough guess
@@ -769,6 +808,7 @@ int main(int argc, char** argv) {
         return a == "--survival" ? 2 : 1;
     };
     int exit_code = 0;
+    if (g_opt.menu) load_display_ini();   // before the command line, which wins
     if (!parse_options(g_opt, argc, argv, extra, exit_code)) return exit_code;
     // What the options set outside the struct: emulation globals and the gun
     g_data_dir = g_opt.data_dir;
@@ -934,6 +974,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     renderer.set_max_aspect(g_opt.max_aspect);
+    load_bezel(renderer);
     renderer.set_smooth_2d(!g_opt.pixel_2d);
     renderer.set_hud_edges(!g_opt.hud_centre);
     renderer.set_distance_haze(g_opt.haze);

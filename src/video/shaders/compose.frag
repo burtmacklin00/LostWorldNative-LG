@@ -22,7 +22,7 @@ layout(set = 0, binding = 9) uniform sampler2D sky_coords;   // backdrop replace
 layout(set = 0, binding = 10) uniform sampler2D light_shafts;   // rays.frag
 layout(set = 0, binding = 12) uniform sampler2D diffusion;   // the picture behind the HUD, blurred (bloom.frag)
 layout(set = 0, binding = 11) uniform sampler2D exposure_log;   // 1x1: average log brightness of the 3D image, eased
-layout(set = 0, binding = 13) uniform sampler2D crosshair_pictures[2];   // crosshair.png, crosshair_p2.png
+layout(set = 0, binding = 13) uniform sampler2D crosshair_pictures[3];   // crosshair.png, crosshair_p2.png, bezel
 
 layout(push_constant) uniform Compose {
     vec2 scale;       // image size relative to the window
@@ -552,6 +552,17 @@ void main() {
     float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
     c = clamp(mix(vec3(luma), c, pc.effects.y), 0.0, 1.0);
     c = pow(c, vec3(1.0 / pc.effects.z));
+    // Bezel (display.ini): the window's height, centred; its transparent hole
+    // shows the game. Below the crosshairs, so they stay visible over it
+    if ((int(pc.motion.y) & 4) != 0) {
+        vec2 bsize = vec2(textureSize(crosshair_pictures[2], 0));
+        float bw = pc.window.y * bsize.x / bsize.y;
+        float tx = (uv.x * pc.window.x - (pc.window.x - bw) * 0.5) / bw;
+        if (tx >= 0.0 && tx <= 1.0) {
+            vec4 b = texture(crosshair_pictures[2], vec2(tx, uv.y));
+            c = mix(c, b.rgb, b.a);
+        }
+    }
     if (pc.crosshair2.x >= 0.0) {
         vec4 x = player_crosshair(uv * pc.window, pc.crosshair2.xy, 1, vec3(0.2, 0.9, 1.0));
         c = mix(c, x.rgb, x.a);
