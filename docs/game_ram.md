@@ -190,11 +190,14 @@ screens in src/ui/survival_ui.cpp, startup in app.cpp):
   route selection opens (0x1C2AD8), shoots in it, and the stage list
   is rewritten on the first call to fn_00081364 after fn_000812DC so
   the route lands on the chosen stage. On the way, every encounter before
-  the arena that plays no cutscene (0x389DC / 0x386D8) ends as it starts: its
-  pc is moved to a lone -999 at 0x740000, so the camera walks on at once
+  the arena runs from a copy at 0x740000 with each call of a counted enemy
+  (the list above plus 0x6053C, 0x5F8FC, 0x4BF4C) overwritten by -1 words,
+  so it plays out with its camera turns and cutscenes but nobody to shoot
   (without it, stage 3's lobby waits forever for the 0x6053C enemies of
-  encounter 36 and Service corridor was never reached). If the arena is still
-  not reached, the window goes back to the menu.
+  encounter 36 and Service corridor was never reached). Ending those
+  encounters at once (a lone -999) is no good: the camera then leaves the
+  stage's path and the game wanders off to the next stage. If the arena is
+  still not reached after 30000 frames, the window goes back to the menu.
 - Hold: on the first encounter with enemies in that zone it copies its script to
   0x700000 (free RAM: the game never goes past 0x200000) replacing the end with
   `-21 0x3FFFFFFF` (endless wait), and the game stops on the start
