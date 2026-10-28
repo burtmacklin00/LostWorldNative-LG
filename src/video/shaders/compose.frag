@@ -42,7 +42,8 @@ layout(push_constant) uniform Compose {
     vec4 effects;     // x: bloom strength (0 = off); y: colour saturation (1 = original);
                       // z: gamma (1 = original, higher = brighter mid-tones); w: 1 = light shafts
     vec4 motion;      // x: interpolation of the back layers: the fraction of each row's scroll
-                      // since the previous game frame (in sky_coords) to draw them back by;
+                      // since the previous game frame (in sky_coords) to draw them back by
+                      // (negative: on ahead by);
                       // y: which players have their own crosshair picture (1 = player 1, 2 = player 2)
     vec4 crosshair2;  // xy: player 2's crosshair, like crosshair; z: sharpening (0 = off); w unused
 } pc;
@@ -449,9 +450,9 @@ void main() {
         // The back layers (sky) were drawn wider than the screen; beyond that
         // and for the front layers the outermost column is repeated
         vec2 qb = vec2((q.x * float(SIZE_2D.x) + float(BACK_MARGIN)) / float(SIZE_BACK.x), q.y);
-        // Between game frames the back layers (sky) go part of the way back to
-        // where they were, like the 3D image in front of them
-        if (pc.motion.x > 0.0) {
+        // Between game frames the back layers (sky) go on by their last
+        // scroll, like the 3D image in front of them (set_back_shift)
+        if (pc.motion.x != 0.0) {
             vec4 m = texelFetch(sky_coords, ivec2(clamp(int(q.y * 384.0), 0, 383), SIZE_BACK.y + 1), 0);
             if (m.b > 0.5) qb -= (m.rg * 255.0 - 128.0) * pc.motion.x / vec2(SIZE_BACK);
         }
