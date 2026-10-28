@@ -190,10 +190,13 @@ saved games and are not versioned.
   crosshair, drawn at the last moment. In total the 3D image on screen is
   about 50-60 ms behind the game at 120 Hz.
   The 2D layers wait for the 3D of the same vblank, and the sky and backgrounds (the
-  2D layers behind the 3D) are also drawn between frames: each row moves back
-  toward where its visible part was in the previous frame, following the
-  scroll of the most visible layer in that row, so the background turns together
-  with the scenery instead of jumping 57.5 times per second. The distance
+  2D layers behind the 3D) are also drawn between frames: each row goes on by
+  the scroll of its most visible layer since the previous frame, so the
+  background turns together with the scenery instead of jumping 57.5 times per
+  second. It goes on ahead rather than back because the 2D layers of a vblank
+  are what the game wrote in the frame before (their sky scroll is that of the
+  previous 3D frame's camera: drawn as they are, the sky trailed a frame behind
+  the scenery while the camera turned). The distance
   haze, the sky's sun, its rays and the shadows also follow
   the camera between frames (except on camera cuts).
   Windows reports the vblanks of one monitor (the main one): when the
@@ -423,9 +426,11 @@ normal behaviour when unset):
 | LW_INTERP=0.5 | Fixes the interpolation between the previous and the latest frame (0 to 1) |
 | LW_PACING=1 | Every 5 s, how steadily the interpolated motion advances (speed, spread, still or backward presents), with the current and the previous method |
 | LW_FRAMELOG=path | Writes a line per present (timings, frames shown) and per game frame, and when each image reached the screen (VK_KHR_present_wait); `python tools/frame_log.py path` reports missed refreshes, uneven motion and latency |
+| LW_SKYLOG=path | Writes the back layers' scroll of each 2D frame, the world camera of each 3D frame and the pairing of each present; `python tools/sky_log.py path` compares how the sky scrolls with how the camera turns (pixels per radian, how many frames apart) |
 | LW_QUEUE=N | At most N images waiting for the screen (2 by default; 0 = the whole swapchain) |
 | LW_MENU_KEYS=40,13,27 | Presses those keys in the menu (one every 10 presents; `cX/Y` clicks pixel X,Y), saves out/menu.bmp and exits |
 | LW_MENU_SHOT=path.bmp | Saves the menu image each time it is redrawn |
+| LW_MENU_PAD=1 | The menus show the gamepad's buttons in the key help, as if a gamepad drove them |
 | LW_NOFOG | Removes fog from all viewports |
 | LW_NOLOD | Draws all levels of detail, including those the game would discard by distance |
 | LW_FOGDBG | Prints per frame the camera, the ground and the models matched by the world tracking |

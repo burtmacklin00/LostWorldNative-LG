@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <ctime>
 #include <initializer_list>
 #include <thread>
@@ -26,6 +27,7 @@ constexpr uint32_t AMBER = 0xFFA032, HINT = 0xC9B88E, FOOT = 0x8A8070;
 constexpr const wchar_t* COFFEE_URL = L"https://buymeacoffee.com/snicolast8u";
 constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
 constexpr uint32_t COFFEE_INK = 0x0D0C22;   // their dark blue-black
+constexpr const wchar_t* COFFEE_HINT = L"Support the port: opens buymeacoffee.com in your browser";
 
 float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
 
@@ -282,6 +284,16 @@ const Frontend::Picture& Frontend::preview(Id id) {
         if (f.id == id)
             for (const wchar_t* ext : {L".jpg", L".png"})
                 if (load_image(L"res/preview/" + std::wstring(f.name) + ext, p.px, p.w, p.h)) break;
+    return p;
+}
+
+const Frontend::Picture& Frontend::pad_icon(const std::wstring& button) {
+    auto it = pad_icons_.find(button);
+    if (it != pad_icons_.end()) return it->second;
+    std::wstring name = button;
+    for (wchar_t& c : name) c = towlower(c);
+    Picture& p = pad_icons_[button];
+    load_image(L"res/pad/" + name + L".png", p.px, p.w, p.h);
     return p;
 }
 
@@ -648,6 +660,7 @@ void Frontend::open(Screen s) {
     locked_notice_ = false;
     screen_ = s;
     selected_ = 0;
+    coffee_focus_ = false;
     scroll_ = 0;
     hovered_ = -1;
     hit_.clear();
@@ -837,8 +850,20 @@ bool Frontend::key(int vk) {
         case VK_TAB: set_tab(tab_ + ((GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1)); return true;
         case 'R': reset_tab(); return true;
         }
+    if (coffee_focus_) switch (vk) {   // the donation link at the top: Enter opens it, Up / Down go back to the list
+        case VK_RETURN: case VK_SPACE: open_coffee(); return true;
+        case VK_UP: case 'W': coffee_focus_ = false; dirty_ = true; select(n - 1); return true;
+        case VK_DOWN: case 'S': coffee_focus_ = false; dirty_ = true; select(0); return true;
+        case VK_LEFT: case 'A': case VK_RIGHT: case 'D': return true;
+        }
     switch (vk) {
-    case VK_UP: case 'W': select((selected_ + n - 1) % n); return true;
+    case VK_UP: case 'W':
+        if (screen_ == Screen::Main && !over_game() && selected_ == 0) {   // above the first entry: the donation link
+            coffee_focus_ = dirty_ = true;
+            return true;
+        }
+        select((selected_ + n - 1) % n);
+        return true;
     case VK_DOWN: case 'S': select((selected_ + 1) % n); return true;
     case VK_LEFT: case 'A':
         if (tabs_row) set_tab(tab_ - 1);
@@ -857,6 +882,10 @@ bool Frontend::key(int vk) {
     return false;
 }
 
+void Frontend::open_coffee() {   // in the default browser
+    ShellExecuteW(nullptr, L"open", COFFEE_URL, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 void Frontend::mouse_move(int x, int y) {
     mouse_x_ = x;
     mouse_y_ = y;
@@ -865,7 +894,11 @@ void Frontend::mouse_move(int x, int y) {
         POINT p{x, y};
         if (PtInRect(&hit_[i], p)) hit = int(i);
     }
-    if (hit >= 0) select(hit);
+    if (hit >= 0) {
+        if (coffee_focus_) dirty_ = true;
+        coffee_focus_ = false;
+        select(hit);
+    }
     hovered_ = hit;
     bool on_coffee = PtInRect(&coffee_rect_, POINT{x, y}) != 0;
     if (on_coffee != coffee_hot_) dirty_ = true;
@@ -879,8 +912,8 @@ void Frontend::click(int x, int y) {
         dirty_ = true;
         return;
     }
-    if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {   // opens in the default browser
-        ShellExecuteW(nullptr, L"open", COFFEE_URL, nullptr, nullptr, SW_SHOWNORMAL);
+    if (screen_ == Screen::Main && PtInRect(&coffee_rect_, p)) {
+        open_coffee();
         return;
     }
     if (screen_ == Screen::Options && PtInRect(&reset_rect_, p)) {
@@ -1200,6 +1233,29 @@ void Frontend::picture(const Picture& p, int x0, int y0, int x1, int y1) {
     }
 }
 
+// A picture with transparency, area-averaged down to w x h at x0, y0
+void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
+    if (p.w <= 0 || w <= 0 || h <= 0) return;
+    float sx = float(p.w) / w, sy = float(p.h) / h;
+    for (int y = std::max(0, y0); y < std::min(h_, y0 + h); y++)
+        for (int x = std::max(0, x0); x < std::min(w_, x0 + w); x++) {
+            int u0 = int((x - x0) * sx), u1 = std::max(u0 + 1, std::min(p.w, int((x - x0 + 1) * sx)));
+            int v0 = int((y - y0) * sy), v1 = std::max(v0 + 1, std::min(p.h, int((y - y0 + 1) * sy)));
+            float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
+            for (int v = v0; v < v1; v++)
+                for (int u = u0; u < u1; u++) {
+                    uint32_t c = p.px[size_t(v) * p.w + u];
+                    float ca = chan(c, 24);
+                    for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
+                    a += ca;
+                }
+            if (a <= 0) continue;
+            uint32_t c = 0;
+            for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
+            blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
+        }
+}
+
 HFONT Frontend::font(Family f, int px) {
     auto key = std::make_pair(int(f), px);
     auto it = fonts_.find(key);
@@ -1492,25 +1548,7 @@ void Frontend::backdrop_background() {
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
     if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
         int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
-        int lx = int(w_ - LOGO_PICTURE_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
-        float sx = float(logo_.w) / lw, sy = float(logo_.h) / lh;
-        for (int y = std::max(0, ly); y < std::min(h_, ly + lh); y++)
-            for (int x = std::max(0, lx); x < std::min(w_, lx + lw); x++) {
-                int u0 = int((x - lx) * sx), u1 = std::max(u0 + 1, std::min(logo_.w, int((x - lx + 1) * sx)));
-                int v0 = int((y - ly) * sy), v1 = std::max(v0 + 1, std::min(logo_.h, int((y - ly + 1) * sy)));
-                float rgb[3] = {0, 0, 0}, a = 0;   // colours weighted by their alpha
-                for (int v = v0; v < v1; v++)
-                    for (int u = u0; u < u1; u++) {
-                        uint32_t c = logo_.px[size_t(v) * logo_.w + u];
-                        float ca = chan(c, 24);
-                        for (int m = 0; m < 3; m++) rgb[m] += chan(c, 16 - 8 * m) * ca;
-                        a += ca;
-                    }
-                if (a <= 0) continue;
-                uint32_t c = 0;
-                for (int m = 0; m < 3; m++) c |= uint32_t(std::clamp(rgb[m] / a, 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * m);
-                blend(x, y, c, a / ((u1 - u0) * (v1 - v0)));
-            }
+        sprite(logo_, int(w_ - LOGO_PICTURE_X * u_) - lw / 2, int(LOGO_SCREEN_TOP * h_), lw, lh);
     } else if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
         float s, x0, y0;
         poster_layout(s, x0, y0);
@@ -1582,13 +1620,18 @@ constexpr uint32_t WHITE_TOP = 0xFFF6E0, WHITE_BOTTOM = 0xFFE2A8, INK = 0x080806
 constexpr uint32_t PAD_A = 0x6FD17A, PAD_B = 0xE8655A, PAD_Y = 0xE8C85A, PAD_X = 0x5AA8E8, KEYCAP = 0xD8D2C0;
 }  // namespace
 
-// One entry of the key help: the gamepad's button (a coloured disc, or a grey
-// pill for the shoulders) or the key ("<>": the left / right arrows), then
+// One entry of the key help: the gamepad's button (its picture from res/pad,
+// else a coloured disc, or a grey pill for the shoulders) or the key ("<>": the left / right arrows), then
 // what it does. x moves past it; the rectangle is for clicks
 RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int h = U(38), x0 = x;
-    if (pad_prompts && pad_button) {
+    if (pad_prompts && pad_button && pad_icon(pad_button).w > 0) {
+        const Picture& icon = pad_icon(pad_button);
+        int iw = h * icon.w / icon.h;
+        sprite(icon, x, y, iw, h);
+        x += iw + U(10);
+    } else if (pad_prompts && pad_button) {
         std::wstring b = pad_button;
         uint32_t c = b == L"A" ? PAD_A : b == L"B" ? PAD_B : b == L"Y" ? PAD_Y : b == L"X" ? PAD_X : KEYCAP;
         int bw = std::max(h, extent(ITEM, U(20), b) + U(20));
@@ -1620,7 +1663,9 @@ RECT Frontend::prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* k
 int Frontend::prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what) {
     auto U = [&](float v) { return int(v * u_ + 0.5f); };
     int h = U(38), wd = 0;
-    if (pad_prompts && pad_button) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
+    const Picture* icon = pad_prompts && pad_button ? &pad_icon(pad_button) : nullptr;
+    if (icon && icon->w > 0) wd = h * icon->w / icon->h + U(10);
+    else if (icon) wd = std::max(h, extent(ITEM, U(20), pad_button) + U(20)) + U(10);
     else if (key) wd = (std::wstring(key) == L"<>" ? U(70) : std::max(h, extent(MONO, U(18), key) + U(22))) + U(10);
     if (what && *what) wd += measure(ITEM, U(22), what) + U(44);
     return wd;
@@ -1755,7 +1800,10 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         }
         int x0 = x1 - coffee_w;
         coffee_rect_ = {x0, cy0, x1, cy0 + ch};   // brighter under the pointer, a click opens it
-        pill(x0, cy0, x1, cy0 + ch, coffee_hot_ ? 0xFFE94D : 0xFFDD00, coffee_hot_ ? 1.0f : 0.9f);
+        bool lit = coffee_hot_ || coffee_focus_;
+        if (coffee_focus_)   // chosen with the keys or a pad: an amber ring round it, like a selected entry's bar
+            pill(x0 - U(5), cy0 - U(5), x1 + U(5), cy0 + ch + U(5), AMBER, 1);
+        pill(x0, cy0, x1, cy0 + ch, lit ? 0xFFE94D : 0xFFDD00, lit ? 1.0f : 0.9f);
         // A takeaway cup: the lid, the body narrowing to the bottom, a yellow sleeve round its middle
         int cx = x0 + U(24) + cup / 2, cy = cy0 + (ch - cup) / 2;
         pill(cx - cup / 2, cy, cx + cup / 2, cy + cup * 22 / 100, COFFEE_INK, 1);
@@ -1775,7 +1823,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
     int y = y0;
     for (int i = 0; i < n; i++) {
         const Item& it = list[i];
-        bool sel = i == selected_;
+        bool sel = i == selected_ && !coffee_focus_;
         if (sel) {
             float a = it.enabled ? 0.34f : 0.16f;
             hgrad(band0, y, band1, y + spacing, AMBER, right ? 0.0f : a, right ? a : 0.0f);
@@ -1795,7 +1843,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         y += spacing;
     }
     if (selected_ < n)
-        for (const std::wstring& line : wrap(BODY, U(23), list[selected_].hint, col_w - U(20))) {
+        for (const std::wstring& line : wrap(BODY, U(23), coffee_focus_ ? COFFEE_HINT : list[selected_].hint, col_w - U(20))) {
             y += U(32);
             text(BODY, U(23), line, tx, y - U(16), talign, {0xE8C890, 0xE8C890});
         }

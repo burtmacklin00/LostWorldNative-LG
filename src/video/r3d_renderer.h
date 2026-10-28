@@ -101,7 +101,8 @@ public:
     void set_interpolation(float t) { interp_ = t; }
     // Fraction of their scroll since the previous game frame (the second extra
     // row of the sky coordinates) by which the back layers are drawn back
-    // towards where they were: 1 - interpolation, 0 = as composed
+    // towards where they were; negative goes on ahead by that fraction of it
+    // (-interpolation: the 2D layers are a game frame behind the 3D); 0 = as composed
     void set_back_shift(float f) { back_shift_ = f; }
     // Distance haze (not in the original): the scenery takes the colour of the
     // horizon with distance and fades into the 2D backdrop before it stops
