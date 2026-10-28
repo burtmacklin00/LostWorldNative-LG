@@ -198,6 +198,13 @@ screens in src/ui/survival_ui.cpp, startup in app.cpp):
   encounters at once (a lone -999) is no good: the camera then leaves the
   stage's path and the game wanders off to the next stage. If the arena is
   still not reached after 30000 frames, the window goes back to the menu.
+- Arena cache: the first time an arena is reached, the whole game state is
+  saved to `save/survival/STAGE_ZONE_lLIFE_dDIFF.state` (LIFE and difficulty
+  settings in the name: other settings make their own). Later runs load it
+  right after the home state, find the encounter it stands at (the copy at
+  0x700000 starts with `-10 id`) and take it over again from its start, so
+  the way there is skipped. A state that does not load is deleted and the
+  way there is played again; LW_SURV_NO_CACHE=1 ignores the cache.
 - Hold: on the first encounter with enemies in that zone it copies its script to
   0x700000 (free RAM: the game never goes past 0x200000) replacing the end with
   `-21 0x3FFFFFFF` (endless wait), and the game stops on the start
