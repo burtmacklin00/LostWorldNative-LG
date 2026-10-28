@@ -609,7 +609,7 @@ std::vector<Frontend::Item> Frontend::items() const {
             bool rec = survival_record(z.stage, z.zone, wave, score);
             bool open = survival_unlocked(z.stage, z.zone);
             std::wstring value = !open ? L"LOCKED" : rec ? L"WAVE " + std::to_wstring(wave) : L"NEW";
-            std::wstring hint = where + (!open ? L".  Reach it in the arcade game to unlock it"
+            std::wstring hint = where + (!open ? L".  Reach it in CLASSIC ARCADE to unlock it"
                                          : rec ? L".  Your record: wave " + std::to_wstring(wave) + L", " +
                                                      std::to_wstring(score) + L" points"
                                                : L".  No record yet");
@@ -2065,7 +2065,7 @@ void Frontend::draw_locked_notice() {
     text(display(), U(64), L"ARENAS LOCKED", cx, y0 + U(36), 1, {GOLD_TOP, GOLD_BOTTOM, EDGE, U(3), 1, U(4)});
     int y = y0 + U(140);
     for (const std::wstring& line : wrap(BODY, U(26),
-             L"Each survival arena opens when you reach it in the arcade game. Play PLAY > ARCADE: "
+             L"Each survival arena opens when you reach it in the arcade game. Play CLASSIC ARCADE: "
              L"when you get to one, ARENA UNLOCKED shows up and it is ready here.", pw - U(100))) {
         text(BODY, U(26), line, cx, y, 1, {0xE8C890, 0xE8C890});
         y += U(38);
