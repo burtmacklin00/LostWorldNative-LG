@@ -98,6 +98,12 @@ PNG); `cover.png`, a poster whose logo becomes the title otherwise; and `sega.pn
 - [Full manual](docs/MANUAL.md): every option, the modes, texture packs, debugging.
 - [How it works](docs/ARCHITECTURE.md): the PowerPC to C++ recompiler and the hardware.
 
+## Support
+
+If you enjoy the port and want to help with the time and tools behind it, you can
+[buy me a coffee](https://buymeacoffee.com/snicolast8u). Entirely optional: it supports the work
+on this project, not the game, which belongs to Sega.
+
 ## License
 
 The code in this repository is under the [MIT License](LICENSE). The libraries and fonts in
