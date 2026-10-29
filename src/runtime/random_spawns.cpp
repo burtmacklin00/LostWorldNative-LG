@@ -34,6 +34,7 @@ constexpr uint32_t FN_RAPTOR = 0x00053BB4;   // (slot 1..5, type, group of spawn
 constexpr uint32_t FN_PLACED = 0x00063ADC;   // (kind, x, z, heading): the stage 2 river
 constexpr uint32_t FN_PLACED_XZ = 0x0007409C;   // (x, z): the same stretch
 constexpr uint32_t COURSE_SELECT = 0x1C2AD8; // 0xC while a game is played
+constexpr uint32_t STAGE = 0x1A623C;         // byte: current stage (0 = stage 1)
 constexpr uint32_t ZONE = 0x1A3984;          // low nibble: current zone
 constexpr uint32_t ZONE_INFO = 0x1A37D4;     // 12 bytes per zone: {trigger table index, x, z}
 constexpr uint32_t TRIGGER_TABLES = 0x120A1C;   // 28 bytes each, +8: the zone's records
@@ -43,9 +44,10 @@ constexpr int LIFE_MIN = 70, LIFE_MAX = 150; // a boss's life, % of the arcade's
 
 // The bosses' life: a word in the boss object that each hit lowers (by 1, or 2
 // with flag +0xC8 clear; the Deinosuchus's weak spot by 14) and the boss's
-// code sets when the fight or one of its phases starts (the T-Rex female gets
-// 150 or 250 in fn_000CC48C). Seen from the score call of each hit: the return
-// address says which boss, and the caller's frame (r31 at the call) holds the object
+// code sets when the fight starts (the T-Rex female 150 or 250 in
+// fn_000CC48C, the Deinosuchus 170, the Carnotaurus 530, the T-Rex 620).
+// Seen from the score call of each hit: the return address says which boss,
+// and the caller's frame (r31 at the call) holds the object
 struct BossHit {
     uint32_t lr;     // return address of the fn_0003DC60 call
     uint32_t slot;   // the object pointer, at this offset of the caller's frame
@@ -58,11 +60,10 @@ constexpr BossHit BOSS_HITS[] = {
     {0x000E86EC, 0x18, 0x98},   // Carnotaurus (stage 4)
     {0x000FE9D4, 0x08, 0x98},   // T-Rex (stage 5)
 };
-// A boss being fought: its object, its factor and the life it was left with
+// The boss being fought: its object and its share of the arcade's life
 struct Boss {
     uint32_t obj = 0;
     int pct = 100;
-    int32_t last = 0;
 };
 Boss g_boss;
 
@@ -299,6 +300,8 @@ void random_spawns_hooks() {
 
 void random_spawns_frame() {
     g_probe_frame++;
+    static uint8_t stage = 0xFF;   // a new stage, a new boss (the next one may be put where the last one was)
+    if (rd8(STAGE) != stage) stage = rd8(STAGE), g_boss = {};
     if (!g_probe || g_probe_count >= PROBE_MAX) return;
     if (g_probe_hits == g_probe_dumped && g_probe_frame % 120) return;
     uint32_t head[2] = {uint32_t(g_probe_frame), g_probe_hits};
@@ -311,6 +314,7 @@ void random_spawns_frame() {
 
 void random_spawns_set(bool on) {
     if (on && !g_on) g_rng = uint32_t(time(nullptr)) | 1;
+    g_boss = {};
     g_on = on;
 }
 
@@ -328,19 +332,18 @@ void random_spawns_enter(Ctx& c, uint32_t fn) {
             if (c.lr != b.lr) continue;
             uint32_t obj = rd32(c.r[31] + b.slot);
             if (obj >= RAM_SIZE - 0x100) break;
+            if (obj == g_boss.obj) break;
+            // Its first hit: the fight's opening life scaled. (Later phases of the
+            // Carnotaurus and the T-Rex set the word again and again, to about 100
+            // and 150, as more than a life: those stay as they are)
+            g_boss = {obj, LIFE_MIN + int(rnd(LIFE_MAX - LIFE_MIN + 1))};
+            if (const char* e = getenv("LW_BOSS_LIFE")) g_boss.pct = std::max(1, atoi(e));   // testing aid: this %
             int32_t life = int32_t(rd32(obj + b.life));
-            if (obj != g_boss.obj) {
-                g_boss = {obj, LIFE_MIN + int(rnd(LIFE_MAX - LIFE_MIN + 1)), -1};
-                if (const char* e = getenv("LW_BOSS_LIFE")) g_boss.pct = std::max(1, atoi(e));   // testing aid: this %
-            }
-            // First hit, or the life was set again since the last one (a new phase): scaled
-            if (life > g_boss.last && life > 10) {
+            if (life > 10) {
                 int32_t scaled = std::max(1, life * g_boss.pct / 100);
                 wr32(obj + b.life, uint32_t(scaled));
                 printf("[random] boss life %d -> %d (%d %%)\n", life, scaled, g_boss.pct);
-                life = scaled;
             }
-            g_boss.last = life;
             break;
         }
     if (fn != FN_ENCOUNTER_START || !rom_ok()) return;

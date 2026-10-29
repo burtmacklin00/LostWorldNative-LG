@@ -21,7 +21,7 @@
 - **Smooth motion** at 120 / 144 Hz and above.
 - **Arcade sound**, with surround and headphone modes.
 - **Mouse, gamepad (gyro too) or two mice** for 2 players.
-- **New modes**: Boss Fight, Survival, achievements and stats.
+- **New modes**: Random Spawns (the arcade game shuffled), Boss Fight, Survival, achievements and stats.
 - **NEW:** Ultra-widescreen support.
 
 <p align="center">

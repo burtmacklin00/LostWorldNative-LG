@@ -174,6 +174,30 @@ Encounters seen: stage 1: 2 (intro), 3, 5, 4, 6 (zone 1), 7, 8, 9, 10; stage
 enemies from the list). Stage 2 doesn't use this machine (its triggers are
 0x85DD4, 0x86434, 0x8609C...) and neither does stage 5 (0x1ECE8, 0xFF57C...).
 
+The boot code copies the script from the ROM at 0xFFF468BC, which random
+spawns (src/runtime/random_spawns.cpp) puts back before each encounter and
+then changes in place. The zone's encounters are in its trigger records:
+`0x1A37D4[zone * 12]` indexes the 28-byte tables at 0x120A1C, whose +8 is the
+list of 24-byte records (fn_00039428 with p0 = the encounter).
+
+## Bosses' life
+
+Each boss keeps its life in a word of its object, which every hit lowers
+(by 1, or by 2 while flag +0xC8 is clear) and the boss's code sets when the
+fight starts. Its scoring call (fn_0003DC60) says which boss was hit by its
+return address; at that call the caller's r31 + slot holds the object.
+
+| Boss | Return address | Slot | Life word | Set to |
+|---|---|---|---|---|
+| T-Rex female | 0xCCB74 | +0x08 | +0x98 | 150 or 250 (fn_000CC48C, bit 0x8 of 0xE7C) |
+| Deinosuchus | 0x8E86C / 0x8E888 (body), 0x8F14C (weak spot, -14) | +0x10 / +0x0C | +0x4C | 170, 35 |
+| Carnotaurus | 0xE86EC (lowers it after the call) | +0x18 | +0x98 | 530, then about 100 again and again |
+| T-Rex | 0xFE9D4 | +0x08 | +0x98 | 620, then about 150 again and again |
+
+With 10 % of it (LW_BOSS_LIFE=10, random spawns) the T-Rex female goes down
+after a few hits; the later values of the Carnotaurus and the T-Rex are set
+again after almost every hit, so they are not just a life.
+
 ## Survival mode
 
 `--survival STAGE:ZONE` or PLAY > SURVIVAL in the menu (src/runtime/survival.cpp,
