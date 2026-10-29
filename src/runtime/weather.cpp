@@ -37,7 +37,7 @@ void weather_roll() {
     }
     g_rng = r;
     g_rolled = w;
-    printf("[weather] %s\n", NAMES[w]);
+    printf("[weather] rolled %s\n", NAMES[w]);
 }
 
 int weather_rolled() { return g_rolled; }

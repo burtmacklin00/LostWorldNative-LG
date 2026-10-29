@@ -27,18 +27,18 @@ struct R3DWeather {
         case 2:   // FOG: pale and thick
             w.sun = 0.35f, w.ambient = 1.1f, w.overcast = 0.85f;
             w.sky[0] = w.fog_color[0] = 0.70f, w.sky[1] = w.fog_color[1] = 0.73f, w.sky[2] = w.fog_color[2] = 0.74f;
-            w.fog = 0.006f;
+            w.fog = 0.0035f;
             break;
         case 3:   // RAIN
             w.sun = 0.3f, w.overcast = 0.75f;
             w.sky[0] = w.fog_color[0] = 0.42f, w.sky[1] = w.fog_color[1] = 0.46f, w.sky[2] = w.fog_color[2] = 0.50f;
             w.fog = 0.0025f, w.rain = 0.6f;
             break;
-        case 4:   // STORM: dark, heavy rain, lightning. The fog is a dark grey, which
-                  // is also where the renderer lets the bolts show
+        case 4:   // STORM: dark, heavy rain, lightning. The fog is a dark grey just
+                  // thick enough (over 0.003) for the renderer to let the bolts show
             w.sun = 0.12f, w.ambient = 0.75f, w.overcast = 0.9f;
             w.sky[0] = w.fog_color[0] = 0.20f, w.sky[1] = w.fog_color[1] = 0.22f, w.sky[2] = w.fog_color[2] = 0.26f;
-            w.fog = 0.004f, w.rain = 1, w.storm = 1;
+            w.fog = 0.0032f, w.rain = 1, w.storm = 1;
             break;
         default: break;
         }
