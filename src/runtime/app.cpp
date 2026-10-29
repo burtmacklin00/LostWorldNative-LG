@@ -1346,6 +1346,8 @@ int main(int argc, char** argv) {
     bool boss_loading = false; // asked the game thread for it
     int boss_fight = -1;       // the fight on
     double boss_over_at = 0;   // when its stage ended or the game was over
+    bool boss_p2_played = false;   // player 2 joined this fight
+    double boss_p2_idle_at = 0;    // since when player 2 has not been playing (CONTINUE screen)
     // Debugging aid: LW_BOSS=N starts the fight with boss N (1-4) right away
     if (const char* b = getenv("LW_BOSS")) {
         int i = atoi(b) - 1;
@@ -1882,6 +1884,8 @@ int main(int argc, char** argv) {
                     boss_loading = true;
                     boss_fight = boss_pending;
                     boss_over_at = 0;
+                    boss_p2_played = false;
+                    boss_p2_idle_at = 0;
                     frontend.boss_mode = true;
                     close_menu();
                 } else {
@@ -1905,8 +1909,17 @@ int main(int argc, char** argv) {
             // game is (no credits left): a moment later, the main menu, with
             // the arcade game as it was waiting behind it
             if (boss_fight >= 0 && !boss_loading && !frontend.active()) {
-                // Player 1 state (docs/game_ram.md): 3 once the continue has run out
-                bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || rd8(0x1A3784 + 0xD) == 3;
+                // Player states (docs/game_ram.md): 1 / 2 playing, 0 CONTINUE,
+                // 3 once the continue has run out. Player 2 can join the fight;
+                // then it goes on while player 2 plays, and the CONTINUE screen
+                // gets its time (12 s) after player 2's last life
+                uint8_t p1 = rd8(0x1A3791), p2 = rd8(0x1A37A1);
+                bool p2_playing = p2 == 1 || p2 == 2;
+                double t_now = qpc_seconds();
+                if (p2_playing) boss_p2_played = true, boss_p2_idle_at = 0;
+                else if (boss_p2_idle_at == 0) boss_p2_idle_at = t_now;
+                bool p2_done = !boss_p2_played || p2 == 3 || t_now - boss_p2_idle_at > 12;
+                bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || (p1 == 3 && !p2_playing && p2_done);
                 if (!over) boss_over_at = 0;
                 else if (boss_over_at == 0) {
                     boss_over_at = qpc_seconds();
