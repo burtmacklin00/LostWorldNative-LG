@@ -1,5 +1,6 @@
 #include "ui_overlay.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -105,6 +106,17 @@ void UiOverlay::set_image(const uint32_t* bgra, uint32_t w, uint32_t h) {
     pending_.assign(bgra, bgra + size_t(w) * h);
     pending_w_ = w;
     pending_h_ = h;
+    dirty_y0_ = 0, dirty_y1_ = h;
+    dirty_ = visible_ = true;
+}
+
+void UiOverlay::update_rows(const uint32_t* bgra, uint32_t w, uint32_t h, uint32_t y0, uint32_t y1) {
+    y1 = std::min(y1, h);
+    if (w != pending_w_ || h != pending_h_ || pending_.size() != size_t(w) * h) return set_image(bgra, w, h);
+    if (y0 >= y1) return;
+    memcpy(pending_.data() + size_t(y0) * w, bgra + size_t(y0) * w, size_t(y1 - y0) * w * 4);
+    if (!dirty_) dirty_y0_ = y0, dirty_y1_ = y1;
+    else dirty_y0_ = std::min(dirty_y0_, y0), dirty_y1_ = std::max(dirty_y1_, y1);
     dirty_ = visible_ = true;
 }
 
@@ -123,6 +135,7 @@ void UiOverlay::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D exten
     if (dirty_) {
         size_t bytes = pending_.size() * 4;
         if (pending_w_ != w_ || pending_h_ != h_ || bytes > staging_size_) {
+            filled_ = false;
             vkDeviceWaitIdle(dev_);
             destroy_image();
             if (staging_) {
@@ -178,13 +191,20 @@ void UiOverlay::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D exten
         }
         // The previous frame has finished (the presenter waits for it), so
         // the staging buffer is free to rewrite
-        memcpy(mapped_, pending_.data(), bytes);
-        vk_image_barrier(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        uint32_t y0 = filled_ ? std::min(dirty_y0_, h_) : 0, y1 = filled_ ? std::min(dirty_y1_, h_) : h_;
+        if (y1 <= y0) y0 = 0, y1 = std::min(1u, h_);   // nothing new: one row again, as it was
+        size_t row = size_t(w_) * 4;
+        if (y1 > y0) memcpy(static_cast<uint8_t*>(mapped_) + y0 * row, pending_.data() + size_t(y0) * w_, (y1 - y0) * row);
+        vk_image_barrier(cmd, image_, filled_ ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         VkBufferImageCopy c{};
+        c.bufferOffset = y0 * row;
         c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        c.imageExtent = {w_, h_, 1};
+        c.imageOffset = {0, int32_t(y0), 0};
+        c.imageExtent = {w_, y1 - y0, 1};
         vkCmdCopyBufferToImage(cmd, staging_, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
         vk_image_barrier(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        filled_ = true;
         dirty_ = false;
     }
     if (!image_) return;

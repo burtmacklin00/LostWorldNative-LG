@@ -146,6 +146,11 @@ public:
 
     // Redraws into `out` when something changed (or the size did); true if it did
     bool draw(int w, int h, std::vector<uint32_t>& out);
+    // After draw: only rows y0..y1-1 changed (GUN TEST's marks moving)
+    bool partial_rows(int& y0, int& y1) const {
+        y0 = partial_y0_, y1 = partial_y1_;
+        return partial_;
+    }
     bool locked_notice_ = false;   // SURVIVAL: every arena locked, the notice saying how they unlock
     void draw_locked_notice();
     void invalidate() { dirty_ = true; }
@@ -219,6 +224,15 @@ private:
     void draw_gun_test(bool over_game);
     int gun_step_ = 0;   // GUN TEST: 0 watching, 1 waiting for player 1's gun to fire, 2 for player 2's
     int gun_player(const GunView& g, bool& picked) const;   // whose gun it is, and whether GUN TEST picked it
+    // The marks move every refresh: the page without them is kept, and only
+    // where they were and are is drawn again
+    std::string gun_key() const;   // all the page shows but the marks' places
+    void draw_gun_marks();
+    std::vector<uint32_t> gun_page_;
+    std::string gun_page_key_;
+    std::vector<RECT> gun_marks_;   // where the marks are drawn now
+    bool partial_ = false;
+    int partial_y0_ = 0, partial_y1_ = 0;
     // Key help along the bottom: button (or key) and what it does; returns its rectangle
     RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
     int prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);   // how far it moves x

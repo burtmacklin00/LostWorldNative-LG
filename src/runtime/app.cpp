@@ -1852,7 +1852,6 @@ int main(int argc, char** argv) {
             // them while the players' guns are being picked
             static std::map<std::string, unsigned> gun_presses;
             if (frontend.gun_test_open()) {
-                static ULONGLONG gun_drawn = 0;
                 ULONGLONG now = GetTickCount64();
                 std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
                 std::vector<Frontend::GunView> view;
@@ -1874,10 +1873,15 @@ int main(int argc, char** argv) {
                                         int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
                     view.push_back(g);
                 }
-                frontend.guns = view;
-                frontend.quiet_mice = hidden;
-                if (now - gun_drawn >= 33) {   // about 30 times a second
-                    gun_drawn = now;
+                auto same = [](const Frontend::GunView& a, const Frontend::GunView& b) {
+                    return a.path == b.path && a.absolute == b.absolute && a.active == b.active && a.has_pos == b.has_pos &&
+                           a.x == b.x && a.y == b.y && a.trigger == b.trigger && a.reload == b.reload && a.player == b.player;
+                };
+                bool changed = view.size() != frontend.guns.size() || hidden != frontend.quiet_mice;
+                for (size_t i = 0; !changed && i < view.size(); i++) changed = !same(view[i], frontend.guns[i]);
+                if (changed) {   // every refresh while a mark moves: only the marks are drawn again
+                    frontend.guns = view;
+                    frontend.quiet_mice = hidden;
                     frontend.invalidate();
                 }
             } else {
@@ -1902,7 +1906,9 @@ int main(int argc, char** argv) {
                 GetClientRect(presenter.hwnd(), &rc);
                 double t0 = qpc_seconds();
                 if (frontend.draw(rc.right, rc.bottom, ui_pixels)) {
-                    ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
+                    int y0, y1;
+                    if (frontend.partial_rows(y0, y1)) ui.update_rows(ui_pixels.data(), rc.right, rc.bottom, y0, y1);
+                    else ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
                     double ms = (qpc_seconds() - t0) * 1000;
                     if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
                     static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
