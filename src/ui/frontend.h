@@ -64,6 +64,7 @@ struct FrontendSettings {
     int vibration = 2;      // gamepad vibration: 0 off, 1 low, 2 medium, 3 high
     int aim_assist = 2;     // gamepad aim assist: 0 off, 1 low, 2 medium, 3 high
     bool menu_music = true; // ui/menu_music.h, when there is a music file
+    std::string gun_p1, gun_p2; // the guns picked in GUN TEST: device paths ("" = the first and second to fire)
 
     // save/settings.ini; missing keys keep their current value
     void load(const char* path);
@@ -79,7 +80,7 @@ struct FrontendSettings {
 
 class Frontend {
 public:
-    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic };
+    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
                         CrosshairChanged };   // a new crosshair picture (crosshair_pick)
@@ -92,7 +93,7 @@ public:
     bool active() const { return screen_ != Screen::None; }
     // A menu over the paused game (the pause menu, its settings, the boss list from it)
     bool over_game() const {
-        return screen_ == Screen::Pause || (screen_ == Screen::Options && options_from_pause_) ||
+        return screen_ == Screen::Pause || ((screen_ == Screen::Options || screen_ == Screen::GunTest) && options_from_pause_) ||
                (screen_ == Screen::Boss && boss_over_game_);
     }
 
@@ -122,6 +123,23 @@ public:
     // The list of bosses, over the game (from the pause menu or after a fight) or on the menu backdrop
     void open_boss_list(bool over_game);
 
+    // GUN TEST (Controls): every mouse and light gun Windows lists, kept up to
+    // date by the window while the screen is open (runtime/raw_mice.h)
+    struct GunView {
+        std::string path;      // what settings.ini keeps
+        std::wstring name;
+        bool absolute = false; // reports positions over the screen: a light gun (or a tablet)
+        bool active = false;   // reported in the last second
+        bool has_pos = false;
+        int x = 0, y = 0;      // client pixels
+        bool trigger = false, reload = false;
+        int player = -1;       // whose gun it is now (0, 1; -1 none)
+    };
+    std::vector<GunView> guns;
+    bool gun_test_open() const { return screen_ == Screen::GunTest; }
+    bool picking_guns() const { return screen_ == Screen::GunTest && gun_step_ > 0; }
+    void gun_fired(int index);   // a left button press from guns[index]
+
     // RECORDS screen (runtime/stats.h): the window keeps this copy up to date while it is open
     StatsView records;
 
@@ -138,7 +156,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_ASPECT,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_ASPECT, OPT_GUN_TEST,
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
@@ -197,6 +215,9 @@ private:
     void draw_menu(bool over_game, const std::vector<Item>& list);
     void draw_options(bool over_game, const std::vector<Item>& list);
     void draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h);
+    void draw_gun_test(bool over_game);
+    int gun_step_ = 0;   // GUN TEST: 0 watching, 1 waiting for player 1's gun to fire, 2 for player 2's
+    int gun_player(const GunView& g, bool& picked) const;   // whose gun it is, and whether GUN TEST picked it
     // Key help along the bottom: button (or key) and what it does; returns its rectangle
     RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
     int prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);   // how far it moves x
