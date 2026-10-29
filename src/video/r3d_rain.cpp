@@ -101,9 +101,11 @@ void R3DRain::observe(const R3DScene& scene) {
     // A dozen streak triangles or more: it rains (the game draws some 250)
     size_t count = game_.size();
     float target = count >= 12 ? 1.0f : 0.0f;
+    game_amount_ += (target - game_amount_) * (target > game_amount_ ? 1.0f / 90.0f : 1.0f / 240.0f);
+    target = std::max(target, forced_);
     amount_ += (target - amount_) * (target > amount_ ? 1.0f / 90.0f : 1.0f / 240.0f);
     static const char* force = getenv("LW_RAIN");   // debugging aid: fixed amount (0 to 1)
-    if (force) amount_ = float(atof(force));
+    if (force) amount_ = game_amount_ = float(atof(force));
     float dl = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     if (count >= 12 && dl > 0) {
         // The game's slant, kept within reason, eased so a turn of the camera

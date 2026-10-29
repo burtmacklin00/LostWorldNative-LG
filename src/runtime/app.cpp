@@ -38,6 +38,7 @@
 #include "stats.h"
 #include "random_spawns.h"
 #include "survival.h"
+#include "weather.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
@@ -745,6 +746,7 @@ int main(int argc, char** argv) {
         g_opt.soft = ini.soft;
         g_opt.lightning = ini.lightning;
         g_opt.rain = ini.rain;
+        g_opt.random_weather = ini.random_weather;
         g_opt.hdr = ini.hdr;
         g_opt.rim = ini.rim;
         g_opt.relief = ini.relief;
@@ -1117,6 +1119,7 @@ int main(int argc, char** argv) {
         s.soft = g_opt.soft;
         s.lightning = g_opt.lightning;
         s.rain = g_opt.rain;
+        s.random_weather = g_opt.random_weather;
         s.hdr = g_opt.hdr;
         s.rim = g_opt.rim;
         s.relief = g_opt.relief;
@@ -1702,6 +1705,7 @@ int main(int argc, char** argv) {
                     renderer.set_soft_particles(g_opt.soft = s.soft);
                     renderer.set_lightning(g_opt.lightning = s.lightning);
                     renderer.set_rain(g_opt.rain = s.rain);
+                    g_opt.random_weather = s.random_weather;
                     renderer.set_hdr(g_opt.hdr = s.hdr);
                     renderer.set_rim_light(g_opt.rim = s.rim);
                     renderer.set_relief(g_opt.relief = s.relief);
@@ -2110,6 +2114,12 @@ int main(int argc, char** argv) {
             scene_seconds += qpc_seconds() - scene_from;
             g_select_aim = select_dot_on_screen(*scene);
             built = latest;
+            // The weather (weather.h): --weather in any game, or the one rolled
+            // for RANDOM SPAWNS and survival
+            int weather = g_opt.weather;
+            if (weather == WEATHER_NONE && g_opt.random_weather && (random_spawns_playing() || survival_enabled()))
+                weather = weather_rolled();
+            renderer.set_weather(R3DWeather::preset(weather));
             renderer.set_scene(scene);
             if (g_sky_log) {
                 std::lock_guard<std::mutex> lock(g_sky_log_mutex);

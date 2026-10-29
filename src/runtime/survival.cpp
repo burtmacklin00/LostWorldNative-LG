@@ -49,6 +49,7 @@
 #include "bosses.h"
 #include "inputs.h"
 #include "ppc_rt.h"
+#include "weather.h"
 
 namespace {
 
@@ -1238,6 +1239,7 @@ bool survival_record(int stage, int zone, int& wave, int& score, int* lap) {
 void survival_begin(int stage, int zone) {
     g_begin_stage = stage, g_begin_zone = zone;
     g_begin = true;
+    weather_roll();   // each run its own weather (weather.h)
     std::lock_guard<std::mutex> lock(g_surv.view_mutex);   // the loading screen right away
     g_surv.view = SurvivalView{};
     g_surv.view.mode = SurvivalMode::Loading;

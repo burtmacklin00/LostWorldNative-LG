@@ -102,6 +102,7 @@ add_executable(LostWorld
     src/runtime/scsi53c810.cpp
     src/runtime/survival.cpp
     src/runtime/random_spawns.cpp
+    src/runtime/weather.cpp
     src/runtime/stats.cpp
     src/ui/survival_ui.cpp
     src/ui/achievement_toast.cpp
