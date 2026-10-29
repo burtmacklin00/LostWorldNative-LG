@@ -2295,7 +2295,8 @@ void Frontend::draw_gun_test(bool over_game) {
                         L"ENTER picks them here once and for all.");
     if (quiet_mice)
         notes.push_back(std::to_wstring(quiet_mice) + (quiet_mice == 1 ? L" more device Windows lists as a mouse has" : L" more devices Windows lists as mice have") +
-                        L" sent nothing (often a keyboard or a receiver): it shows up here once it moves.");
+                        (quiet_mice == 1 ? L" sent nothing (often a keyboard or a receiver): it shows up here once it moves."
+                                         : L" sent nothing (often a keyboard or a receiver): they show up here once they move."));
     int ny = std::max(top + std::min(count, shown) * row_h + U(20), bottom - U(10));
     for (const std::wstring& note : notes)
         for (const std::wstring& line : wrap(BODY, U(22), note, list1 - list0 - U(20))) {
