@@ -94,6 +94,19 @@ Don't write during boot (the game hangs): from frame ~1000 on.
 | 0x122D | Difficulty = high nibble (7 by default). Read live by about 10 enemy routines |
 | 0x1230 | BOSS ACTION |
 | 0x1226 | COUNTRY |
+| 0x1225 | Coin setting (byte): 0x1A = FREE PLAY |
+
+## Coins and credits (system, at 0x12D4)
+
+| Address | What it is |
+|---|---|
+| 0x12D4 | Credits (byte; +8 per chute with individual chutes) |
+| 0x12F4 | 0xFF in FREE PLAY, 0 with coins. Worked out at boot from 0x1225 (fn_0010A1C8). fn_0010BCEC (credits) returns it in the top byte, so START always has enough; fn_0010C37C (use credits) takes none |
+| 0x12F6 | Coin chutes: 0 common, else individual |
+| 0x1A61F0 | The game's own free play flag (int), set once at boot by fn_0002EA48 from fn_0010BCEC's top bit; picks the FREE PLAY lettering |
+
+free_play.cpp writes 0x12F4 = 0xFF and 0x1A61F0 = 1 each frame after boot
+while free play is on (the EEPROM is untouched).
 
 ## Tasks
 

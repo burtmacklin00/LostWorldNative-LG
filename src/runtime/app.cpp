@@ -38,6 +38,7 @@
 #include "survival.h"
 #include "outputs.h"
 #include "wide_aim.h"
+#include "free_play.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
@@ -2040,6 +2041,7 @@ int main(int argc, char** argv) {
             pad_in_menu = true;
             g_menu_open = g_hold = true;
         }
+        free_play::set(g_opt.free_play);
         join_update();
         bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
         if (f12 && !f12_was_down) capture_2d = true;

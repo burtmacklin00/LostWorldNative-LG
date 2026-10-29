@@ -22,6 +22,7 @@
 #include "bosses.h"
 #include "outputs.h"
 #include "wide_aim.h"
+#include "free_play.h"
 #include "eeprom.h"
 #include "inputs.h"
 #include "fns.h"
@@ -1140,8 +1141,9 @@ void rt_event(Ctx& c) {
                 uint8_t state = rd8(0x1A3791 + 0x10 * p);
                 g_inputs.p[p].playing = state == 1 || state == 2;
             }
-            wide_aim::frame(g_frame);
-            outputs::frame(g_frame);   // Hook of the Reaper (outputs.h)   // widescreen aim: the guns' calibration reaches the side areas
+            wide_aim::frame(g_frame);    // widescreen aim: the guns' calibration reaches the side areas
+            free_play::frame(g_frame);   // the arcade's own FREE PLAY setting (free_play.h)
+            outputs::frame(g_frame);     // Hook of the Reaper (outputs.h)
             if (g_frame % 60 == 0) {
                 static ULONGLONG last_ms = GetTickCount64();
                 ULONGLONG now = GetTickCount64();

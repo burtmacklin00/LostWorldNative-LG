@@ -59,8 +59,7 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
 
  KEYBOARD
    Tab .............. Pause menu during play (Tab again resumes)
-   1 / 2 ............ Player 1 / 2 start (free play: also inserts the
-                      credit)
+   1 / 2 ............ Player 1 / 2 start
    5 / 6 ............ Coin for player 1 / 2 (only without free play;
                       with free play they do nothing)
    Esc .............. With the launcher: quits the game completely.
@@ -105,6 +104,9 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Graphics - High.bat ..... Ray-traced shadows
    Graphics - Ultra.bat .... Everything on (the game's default)
    Crosshairs - On.bat / Crosshairs - Off.bat
+
+ With FREE PLAY on, the game runs in the arcade's own FREE PLAY mode:
+ the screen says FREE PLAY instead of CREDIT 0.
 
  Everything else is in the game: Options (main menu) or the pause
  menu > Settings. FREE PLAY and TRIGGER STARTS are in the GAME tab;
