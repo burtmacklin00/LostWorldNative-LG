@@ -13,7 +13,6 @@ constexpr uint32_t COIN_SETTING = 0x1225;    // settings (0x121C + 9): 0x1A = FR
 constexpr uint8_t COIN_FREE_PLAY = 0x1A;
 constexpr uint32_t FREE_FLAG = 0x12F4;       // system: 0xFF free play, 0 coins
 constexpr uint32_t GAME_FLAG = 0x1A61F0;     // the game's copy (int)
-constexpr unsigned long long BOOT_FRAMES = 1500;   // game_ram.md: no writes there during boot
 
 std::atomic<bool> g_on{true};
 std::atomic<bool> g_native{false};
@@ -25,8 +24,8 @@ void set(bool on) { g_on = on; }
 
 bool native() { return g_native; }
 
-void frame(unsigned long long game_frame) {
-    if (game_frame < BOOT_FRAMES) return;
+void frame(bool boot_over) {
+    if (!boot_over) return;   // game_ram.md: no writes there during boot
     if (g_on) {
         wr8(FREE_FLAG, 0xFF);
         wr32(GAME_FLAG, 1);

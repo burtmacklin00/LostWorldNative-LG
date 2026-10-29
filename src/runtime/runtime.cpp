@@ -1142,7 +1142,6 @@ void rt_event(Ctx& c) {
                 g_inputs.p[p].playing = state == 1 || state == 2;
             }
             wide_aim::frame(g_frame);    // widescreen aim: the guns' calibration reaches the side areas
-            free_play::frame(g_frame);   // the arcade's own FREE PLAY setting (free_play.h)
             outputs::frame(g_frame);     // Hook of the Reaper (outputs.h)
             if (g_frame % 60 == 0) {
                 static ULONGLONG last_ms = GetTickCount64();
@@ -1160,6 +1159,11 @@ void rt_event(Ctx& c) {
             // Survival mode: on to the chosen stage at full speed, behind its loading screen
             bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 200000   // (survival gives up first)
                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
+            // The arcade's own FREE PLAY setting (free_play.h), from the SEGA
+            // logo on: the boot is over then, before any menu or mode can start
+            static bool boot_over = false;
+            if ((boot_done && !survival_enabled()) || g_frame >= 1500) boot_over = true;
+            free_play::frame(boot_over);
             if (g_boot_skip && boot_done) {
                 g_boot_skip = g_fast_idle = false;
                 g_sound.set_dsp_enabled(true);

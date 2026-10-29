@@ -7,13 +7,15 @@
 // FREE PLAY): 0x12F4 = 0xFF (fn_0010A1C8; read by fn_0010BCEC, the credits,
 // and fn_0010C37C, which then takes none), and the game's own copy 0x1A61F0
 // = 1 (fn_0002EA48, once at boot; it picks the FREE PLAY lettering).
-// After boot both are written each frame while free play is on.
+// From the end of the boot (the SEGA logo) both are written each frame
+// while free play is on, so a mode that loads a saved game state (arcade,
+// boss fights) shows FREE PLAY from its first frame.
 #pragma once
 
 namespace free_play {
 
 void set(bool on);                         // the setting (menu or command line)
 bool native();                             // the game is in its FREE PLAY mode now
-void frame(unsigned long long game_frame);   // game thread, every frame
+void frame(bool boot_over);               // game thread, every frame
 
 }  // namespace free_play
