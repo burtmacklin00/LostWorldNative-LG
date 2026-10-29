@@ -11,6 +11,12 @@
 // following the game's scroll; a 512x512 reduction of it stands in for the
 // layer everywhere else (the distance haze, the horizon colour).
 //
+// A <hash>.txt next to a replacement can hold "keep X Y W H" lines: that box
+// of the 512x512 picture is left out of the hash and the game's own pixels
+// show there, for texts that change on a screen that is otherwise the same
+// (CREDITS N and INSERT COIN under the chosen difficulty). The PNG is then
+// named after the hash of the picture with that box cleared (transparent).
+//
 // With the procedural sky on, the stages' skies (any backdrop below the 3D
 // image that wraps around as a panorama) are drawn instead with soft drifting
 // clouds, at any resolution (compose.frag sky_procedural), in the colours of
@@ -53,6 +59,10 @@ public:
         uint32_t bands[BANDS * 2] = {};   // procedural: sky and cloud colour per band
         uint64_t hash = 0;                // replacement file it was loaded from
         uint64_t used = 0;                // frame it was last shown in (frame_done counts)
+        int keep_x = 0, keep_y = 0, keep_w = 0, keep_h = 0;   // box where the game's own pixels show
+        bool kept(int px, int py) const {
+            return px >= keep_x && px < keep_x + keep_w && py >= keep_y && py < keep_y + keep_h;
+        }
     };
     // Replacement for a layer below the 3D image (TileGen::compose), nullptr = none
     const Picture* find(const uint8_t* vram, int layer, bool four_bpp);
@@ -65,6 +75,9 @@ public:
 private:
     const Picture* load(uint64_t hash);
     const Picture* procedural(uint64_t hash, bool upper);
+    uint64_t with_keep(uint64_t hash, const uint8_t* vram, int layer, bool four_bpp);
+
+    struct Keep { int x, y, w, h; };
 
     std::string dir_, dump_dir_, capture_dir_;
     bool capture_ = false, procedural_on_ = false;
@@ -73,6 +86,9 @@ private:
     std::unordered_map<uint64_t, uint64_t> hashes_;      // layer contents key -> picture hash
     std::unordered_set<uint64_t> available_;             // hashes with a replacement file
     std::unordered_set<uint64_t> dumped_;
+    std::vector<Keep> keeps_;                            // the different "keep" boxes of the .txt files
+    std::unordered_map<uint64_t, int> keep_of_;          // replacement hash -> its box in keeps_
+    std::unordered_map<uint64_t, uint64_t> kept_;        // picture hash -> replacement with a box (0 = none)
     std::unordered_map<uint64_t, int> loaded_;           // hash -> picture
     std::vector<Picture> pictures_;
     std::vector<RgbaImage> pending_;

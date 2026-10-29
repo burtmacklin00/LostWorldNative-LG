@@ -339,8 +339,10 @@ void TileGen::compose(const uint8_t* vram, const Output& out, const TextHD* text
                     if (raw && back_raw) back_raw[y * SCREEN_W + x] = raw;
                     if (raw && back_raw_top && pair == 0) back_raw_top[y * SCREEN_W + x] = raw;
                 }
-                if (sky_picture[layer]) {
-                    row_of(layer);
+                if (sky_picture[layer]) row_of(layer);
+                // (except in its "keep" box, where the game's own pixels show)
+                if (sky_picture[layer] &&
+                    !sky_picture[layer]->kept((x + row_xs[layer]) & 511, row_py[layer])) {
                     int px = (x + row_xs[layer]) & 511, py = row_py[layer];
                     uint32_t c = sky_picture[layer]->low[py * SkyPack::SIZE + px];
                     int i = y * BACK_W + x + BACK_MARGIN;

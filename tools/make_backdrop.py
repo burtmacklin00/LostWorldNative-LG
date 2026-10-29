@@ -11,6 +11,10 @@ colour; "image X Y W H file" lines paste a redrawn picture over a box first.
 After a "ref out/sky/<hash>.png" line, the next texts and pictures are only
 used on the dumps that show exactly the same pixels in their box as that one
 (the screen changes as it goes: panels that switch off, others that stay).
+"keep X Y W H" (one per dump): that box is left to the game, for texts that
+change on a screen that is otherwise the same (CREDITS N); it applies to the
+dumps equal to the ref one outside the box. The box is cleared before the
+hash, and textures/sky/<hash>.txt tells the game about it (sky_pack.h).
 Colours: green, white, light (white or pale), yellow, red; "colour/RRGGBB" adds an
 outline of that colour.
 The result goes to textures/sky/<hash>.png. Fonts come from
@@ -63,13 +67,17 @@ if len(args) < 2:
     sys.exit(__doc__)
 spec_path, dumps = args[0], args[1:]
 
-items, images = [], []
+items, images, keeps = [], [], []
 ref = None   # pixels the boxes must show for the next lines to apply (None = always)
 for line in open(spec_path, encoding="utf-8"):
     if not line.strip() or line.startswith("#"):
         continue
     if line.startswith("ref "):
         ref = np.asarray(Image.open(line.split(None, 1)[1].strip()).convert("RGBA")).copy()
+        continue
+    if line.startswith("keep "):   # keep X Y W H: a box the game draws itself
+        _, x, y, w, h = line.split()
+        keeps.append((int(x), int(y), int(w), int(h), ref))
         continue
     if line.startswith("image "):   # image X Y W H file: a redrawn picture pasted over that box
         _, x, y, w, h, path = line.split(None, 5)
@@ -280,9 +288,21 @@ if variants:   # the same screen with the highlight in each other box
 os.makedirs(OUT, exist_ok=True)
 done = set()
 for src in sources:
+    keep = None
+    for x, y, w, h, ref in keeps:
+        outside = np.ones(src.shape[:2], bool)
+        outside[y:y + h, x:x + w] = False
+        if ref is None or np.array_equal(src[outside], ref[outside]):
+            keep = (x, y, w, h)
+            src = src.copy()
+            src[y:y + h, x:x + w] = 0   # as the game hashes it
+            break
     h = plane_hash(src)
     if h in done:
         continue
     done.add(h)
     redraw(src).save(f"{OUT}/{h:016x}.png")
-    print(f"{OUT}/{h:016x}.png")
+    if keep:
+        with open(f"{OUT}/{h:016x}.txt", "w") as f:
+            f.write("keep %d %d %d %d\n" % keep)
+    print(f"{OUT}/{h:016x}.png" + (" (keep %d %d %d %d)" % keep if keep else ""))
