@@ -1430,6 +1430,20 @@ int main(int argc, char** argv) {
                           .sky_coords = sky_on ? out.sky_coords.data() : nullptr,
                           .back_rows = back_rows.data()},
                          hd_text, sky_on ? &sky : nullptr);
+        // Survival is for one player: the game's own "Push 2P Start" in
+        // player 2's corner (fn_0002F338 draws it at cells 41..60, rows
+        // 43..46) is left out, so nothing invites a player who can't join
+        if (survival_shown && survival_view().mode != SurvivalMode::Off) {
+            constexpr int X0 = 312, Y0 = 336;   // cells 39.. and 42.. (a margin around the prompt)
+            // (the raw layers too: a 2D replacement picture is found from them)
+            for (uint32_t* layer : {out.front.data(), raw_front ? front_raw.data() : nullptr,
+                                    raw_front ? front_raw_top.data() : nullptr, raw_front ? front_under.data() : nullptr})
+                if (layer)
+                    for (int y = Y0; y < SCREEN_H; y++) std::fill(layer + y * SCREEN_W + X0, layer + y * SCREEN_W + SCREEN_W, 0u);
+            for (int cy = Y0 / 8; cy < TextHD::CELLS_Y; cy++)
+                for (int cx = X0 / 8; cx < TextHD::CELLS_X; cx++)
+                    std::fill_n(&out.text_cells[(cy * TextHD::CELLS_X + cx) * TextHD::CELL_TEXELS], TextHD::CELL_TEXELS, 0u);
+        }
         // How far each row of the back layers scrolled since the previous
         // 2D frame composed, for drawing them in between (renderer.set_back_shift)
         {
