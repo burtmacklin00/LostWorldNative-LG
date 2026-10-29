@@ -39,6 +39,32 @@ constexpr uint32_t ZONE_INFO = 0x1A37D4;     // 12 bytes per zone: {trigger tabl
 constexpr uint32_t TRIGGER_TABLES = 0x120A1C;   // 28 bytes each, +8: the zone's records
 constexpr float NEAR_LOOK = 120;             // raptor groups swap only between camera turns this close
 constexpr int TYPE_CHANCE = 30;              // % of the raptors that take another type of the zone's
+constexpr int LIFE_MIN = 70, LIFE_MAX = 150; // a boss's life, % of the arcade's
+
+// The bosses' life: a word in the boss object that each hit lowers (by 1, or 2
+// with flag +0xC8 clear; the Deinosuchus's weak spot by 14) and the boss's
+// code sets when the fight or one of its phases starts (the T-Rex female gets
+// 150 or 250 in fn_000CC48C). Seen from the score call of each hit: the return
+// address says which boss, and the caller's frame (r31 at the call) holds the object
+struct BossHit {
+    uint32_t lr;     // return address of the fn_0003DC60 call
+    uint32_t slot;   // the object pointer, at this offset of the caller's frame
+    uint32_t life;   // the life word in the object
+};
+constexpr BossHit BOSS_HITS[] = {
+    {0x000CCB74, 0x08, 0x98},   // T-Rex female (stage 1)
+    {0x0008E86C, 0x10, 0x4C}, {0x0008E888, 0x10, 0x4C},   // Deinosuchus, body (10 / 200 points)
+    {0x0008F14C, 0x0C, 0x4C},   // Deinosuchus, its weak spot
+    {0x000E86EC, 0x18, 0x98},   // Carnotaurus (stage 4)
+    {0x000FE9D4, 0x08, 0x98},   // T-Rex (stage 5)
+};
+// A boss being fought: its object, its factor and the life it was left with
+struct Boss {
+    uint32_t obj = 0;
+    int pct = 100;
+    int32_t last = 0;
+};
+Boss g_boss;
 
 std::atomic<bool> g_on{false};
 uint32_t g_rng = 1;
@@ -296,8 +322,28 @@ void random_spawns_enter(Ctx& c, uint32_t fn) {
         printf("[probe] frame %llu hit %u: type %u player %u points %u (lr %08X)\n", (unsigned long long)g_probe_frame,
                g_probe_hits, c.r[3], c.r[4], c.r[5], c.lr);
     }
-    if (fn != FN_ENCOUNTER_START || !rom_ok()) return;
     bool shuffled = g_on && rd32(COURSE_SELECT) == 0xC && !survival_enabled() && g_boss_maker < 0;
+    if (fn == FN_ADD_SCORE && shuffled)
+        for (const BossHit& b : BOSS_HITS) {
+            if (c.lr != b.lr) continue;
+            uint32_t obj = rd32(c.r[31] + b.slot);
+            if (obj >= RAM_SIZE - 0x100) break;
+            int32_t life = int32_t(rd32(obj + b.life));
+            if (obj != g_boss.obj) {
+                g_boss = {obj, LIFE_MIN + int(rnd(LIFE_MAX - LIFE_MIN + 1)), -1};
+                if (const char* e = getenv("LW_BOSS_LIFE")) g_boss.pct = std::max(1, atoi(e));   // testing aid: this %
+            }
+            // First hit, or the life was set again since the last one (a new phase): scaled
+            if (life > g_boss.last && life > 10) {
+                int32_t scaled = std::max(1, life * g_boss.pct / 100);
+                wr32(obj + b.life, uint32_t(scaled));
+                printf("[random] boss life %d -> %d (%d %%)\n", life, scaled, g_boss.pct);
+                life = scaled;
+            }
+            g_boss.last = life;
+            break;
+        }
+    if (fn != FN_ENCOUNTER_START || !rom_ok()) return;
     if (g_patched || shuffled) restore();
     if (shuffled) shuffle(int(rd32(c.r[3] + 0x14)));
 }
