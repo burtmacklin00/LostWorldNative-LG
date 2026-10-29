@@ -1362,6 +1362,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
                 const float* a = w->world_axes;
                 float yaw = std::atan2(-a[8], -a[2]);   // the view direction in the world frame
                 bolt_azimuth_ = yaw + (lightning_hash(uint32_t(strike.id) * 31u + 5u) - 0.5f) * 1.6f;
+                if (force_flash) bolt_azimuth_ = yaw;   // in the middle of the picture, to judge it
                 bolt_main_ = lightning_channel(strike.id, bolt_seg_, bolt_count_);
             }
             // The channel only where the fog or the weather's grey sky hides the backdrop (painted foliage elsewhere)
