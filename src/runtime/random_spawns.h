@@ -8,7 +8,8 @@
 // type of each raptor (only for ones the zone uses where the camera looks),
 // the position of enemies placed by coordinates (the stage 2 river), when each
 // enemy comes, and the order of runs of plain sections (camera turn, enemies,
-// wait). Bosses get a random amount of life.
+// wait). Bosses get a random amount of life, and each stage random weather
+// (weather.h).
 #pragma once
 #include <cstdint>
 #include <string>
@@ -23,3 +24,4 @@ void random_spawns_frame();   // every vblank
 // Window thread: the next arcade game is shuffled or the original
 void random_spawns_set(bool on);
 bool random_spawns_on();
+bool random_spawns_playing();   // a shuffled game is being played (not its attract or another mode)

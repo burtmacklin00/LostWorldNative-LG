@@ -429,7 +429,7 @@ void main() {
     vec3 fog_color = vp.fog_color.rgb * vp.fog_color.a;
     // The lightning channel shows only where the fog hides almost everything
     if ((flags & WORLD) != 0u && fog > 0.0)
-        fog_color = fog_color * (mist_light(view_pos) + lightning_glow(view_pos) * pow(fog, 6.0)) +
+        fog_color = fog_color * (mist_light(view_pos) + lightning_glow(view_pos) * pow(fog, 6.0) * smoothstep(0.9, 1.0, fog)) +
                     atm.spot_fog.rgb * spotlight().y;
     c.rgb = mix(c.rgb, fog_color, fog);
     // The modern torch's beam in the air between the eye and this surface

@@ -288,6 +288,17 @@ anything, so the camera walks the stage path as in the arcade. The
 opening of stage 2 and the bosses' own attacks stay as they are. The
 Carnotaurus and the T-Rex only get the life of their first phase changed.
 
+### Random weather
+
+RANDOM SPAWNS also rolls the weather at the start of every stage, and
+SURVIVAL at the start of every run: SUNNY, CLOUDY (soft light, grey sky, a
+light haze), FOG, RAIN or STORM (dark, heavy rain and lightning). It is laid
+over the game's own light, only outdoors in daylight (caves, corridors and
+the night keep theirs), and changes over a few seconds. The rain and the
+lightning follow the RAIN and LIGHTNING settings. RANDOM WEATHER in
+ATMOSPHERE turns it off; `--weather sunny|cloudy|fog|rain|storm` forces one
+in every game (tests, screenshots).
+
 ## Survival mode
 
 In the menu, PLAY > SURVIVAL shows the working arenas (stage 1: the
