@@ -348,9 +348,13 @@ static bool poll_gamepads(HWND hwnd) {
         int p = pad_player(i, connected);
         PlayerInputs& pl = g_inputs.p[p];
         if (pad.aimed && p == 0) g_p1_pad = i;
-        if (p == 1 || g_p1_pad == i) set_player_aim(p, pad.aim_x, pad.aim_y);
-        else {   // the mouse aims: the pad's sight waits where the mouse is
-            PlayerAim a = player_aim(0);
+        // Player 2's pad does not aim when player 2 has a gun (a light gun's
+        // own gamepad, a cabinet's control encoder): its sight would hold the
+        // gun's crosshair in place. Its buttons still count
+        bool p2_pad_aims = p == 1 && !raw_mice::has_gun(1);
+        if (p2_pad_aims || g_p1_pad == i) set_player_aim(p, pad.aim_x, pad.aim_y);
+        else {   // the mouse / gun aims: the pad's sight waits where it is
+            PlayerAim a = player_aim(p);
             g_pads.set_aim(i, a.x, a.y);
         }
         bool fire = pad.fire, reload = pad.reload;

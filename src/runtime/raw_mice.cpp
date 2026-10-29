@@ -210,6 +210,8 @@ bool two_mice() { return g_fixed ? g_owner[0] >= 0 || g_owner[1] >= 0 : g_owner[
 
 bool guns_pinned() { return g_fixed; }
 
+bool has_gun(int player) { return two_mice() && g_owner[player] >= 0; }
+
 MenuGun menu_gun(HWND hwnd) {
     MenuGun out{};
     for (int p = 1; p >= 0; p--) {   // what the guns did meanwhile is no shot in the game afterwards
