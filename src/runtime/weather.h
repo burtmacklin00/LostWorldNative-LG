@@ -13,3 +13,4 @@ int weather_from_name(const char* s);   // "sunny" ... (any case), WEATHER_NONE 
 // modes that have one: any thread
 void weather_roll();
 int weather_rolled();   // the last one rolled
+void weather_force(int w);   // --weather: this one instead (the rolls are not logged)

@@ -773,6 +773,7 @@ int main(int argc, char** argv) {
     int exit_code = 0;
     if (!parse_options(g_opt, argc, argv, extra, exit_code)) return exit_code;
     if (const char* w = weather_name(g_opt.weather)) printf("[weather] %s in every game (--weather)\n", w);
+    weather_force(g_opt.weather);
     // What the options set outside the struct: emulation globals and the gun
     g_data_dir = g_opt.data_dir;
     g_frame_limit = g_opt.frame_limit;

@@ -12,6 +12,7 @@ const int WEIGHTS[WEATHER_COUNT] = {30, 25, 15, 18, 12};   // % of the rolls
 
 std::atomic<int> g_rolled{WEATHER_NONE};
 std::atomic<unsigned> g_rng{0};
+std::atomic<bool> g_forced{false};
 
 }  // namespace
 
@@ -37,7 +38,9 @@ void weather_roll() {
     }
     g_rng = r;
     g_rolled = w;
-    printf("[weather] rolled %s\n", NAMES[w]);
+    if (!g_forced) printf("[weather] rolled %s\n", NAMES[w]);
 }
 
 int weather_rolled() { return g_rolled; }
+
+void weather_force(int w) { g_forced = w != WEATHER_NONE; }

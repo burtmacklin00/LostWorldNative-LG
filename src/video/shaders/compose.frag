@@ -471,8 +471,8 @@ void main() {
                 vec2 ndc = p * 2.0 - 1.0;
                 vec3 dir = vec3((ndc.x + atm.view.z) / atm.view.x, (ndc.y + atm.view.w) / atm.view.y, -1.0);
                 float l = dot(back.rgb, vec3(0.2126, 0.7152, 0.0722));
-                vec3 grey = atm.weather.yzw * (0.4 * back.a + 0.6 * l) * (mist_light(dir) + lightning_glow(dir));
-                back.rgb = mix(back.rgb, grey, atm.weather.x);
+                vec3 grey = atm.weather.yzw * (0.4 * back.a + 0.6 * l) * mist_light(dir);
+                back.rgb = mix(back.rgb, grey, atm.weather.x) + lightning_glow(dir) * 0.5 * atm.weather.x * back.a;
             }
             // The modern torch's beam in the air in front of the sky (rays as long as the scenery's)
             if (atm.view.x != 0.0 && atm.view.y != 0.0) {
