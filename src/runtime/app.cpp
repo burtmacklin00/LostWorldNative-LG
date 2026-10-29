@@ -1858,8 +1858,8 @@ int main(int argc, char** argv) {
                 std::vector<Frontend::GunView> view;
                 for (size_t i = 0; i < devs.size(); i++) {
                     const raw_mice::Device& d = devs[i];
-                    auto seen = gun_presses.find(d.path);
-                    bool fired = menu_was == Frontend::Screen::GunTest && seen != gun_presses.end() && d.presses > seen->second;
+                    auto known = gun_presses.find(d.path);
+                    bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
                     gun_presses[d.path] = d.presses;
                     if (fired && frontend.picking_guns()) {
                         frontend.guns.clear();   // the list as it is now, for the index

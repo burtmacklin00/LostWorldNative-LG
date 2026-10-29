@@ -2228,7 +2228,7 @@ void Frontend::draw_gun_test(bool over_game) {
     int y = U(150);
     if (gun_step_) {
         text(TITLE, U(48), gun_step_ == 1 ? L"FIRE PLAYER 1'S GUN" : L"FIRE PLAYER 2'S GUN", margin + U(10), y, 0,
-             {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820 : 0x20B8D8, INK, U(3)});
+             {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820u : 0x20B8D8u, INK, U(3)});
         y += U(64);
         text(BODY, U(23), gun_step_ == 1 ? L"Pull its trigger, wherever it points.  ESC: leave the guns as they were"
                                          : L"Now the other gun.  ESC: only one gun, player 2 joins with the next mouse to fire",
