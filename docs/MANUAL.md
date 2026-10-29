@@ -375,6 +375,10 @@ tools/backdrops/stage_select.txt out/sky/<hash>.png` upscales them 4x, erases
 each text in the list and rewrites it with its font, and saves
 textures/sky/<hash>.png. With `--variants` it also creates the versions with
 a different difficulty bar highlighted (each has its own hash).
+A `keep X Y W H` line leaves that box of the backdrop to the game: it is
+left out of the hash and the game's own pixels show there (CREDITS and
+INSERT COIN under the chosen difficulty, which change with the credits);
+make_backdrop.py writes it to textures/sky/<hash>.txt next to the picture.
 
 Texts on the background layers that change piece by piece (the
 tutorial screen: the phrase, INSERT MORE…) are replaced by area, like the front ones:

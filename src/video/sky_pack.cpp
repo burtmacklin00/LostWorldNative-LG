@@ -36,6 +36,23 @@ void SkyPack::init(const std::string& dir, const std::string& dump_dir) {
     pictures_.reserve(LAST_SLOT - FIRST_SLOT + 1);   // find() hands out pointers into it
     capture_dir_ = dump_dir.empty() ? "out/sky" : dump_dir;
     list_hashes(dir, available_);
+    for (const std::string& name : list_files(dir, "*.txt")) {
+        unsigned long long hash = 0;
+        if (sscanf(name.c_str(), "%16llx", &hash) != 1) continue;
+        FILE* f = fopen((dir + "/" + name).c_str(), "r");
+        if (!f) continue;
+        char line[128];
+        Keep k;
+        while (fgets(line, sizeof(line), f))
+            if (sscanf(line, "keep %d %d %d %d", &k.x, &k.y, &k.w, &k.h) == 4 && k.w > 0 && k.h > 0) {
+                int i = 0;
+                while (i < int(keeps_.size()) && memcmp(&keeps_[i], &k, sizeof(k)) != 0) i++;
+                if (i == int(keeps_.size())) keeps_.push_back(k);
+                keep_of_[hash] = i;
+                break;   // one box per replacement
+            }
+        fclose(f);
+    }
     if (!dump_dir_.empty()) list_hashes(dump_dir_, dumped_);   // already written by earlier runs
     if (!available_.empty()) printf("[sky] %zu backdrop replacements\n", available_.size());
 }
@@ -85,7 +102,31 @@ const SkyPack::Picture* SkyPack::find(const uint8_t* vram, int layer, bool four_
             return procedural(hash, layer == 3);
         }
     }
-    return available_.count(hash) ? load(hash) : nullptr;
+    if (available_.count(hash)) return load(hash);
+    uint64_t kept = with_keep(hash, vram, layer, four_bpp);
+    return kept ? load(kept) : nullptr;
+}
+
+// The replacement that matches the picture once its box is cleared, 0 = none
+uint64_t SkyPack::with_keep(uint64_t hash, const uint8_t* vram, int layer, bool four_bpp) {
+    if (keeps_.empty()) return 0;
+    auto it = kept_.find(hash);
+    if (it != kept_.end()) return it->second;
+    if (kept_.size() > 4096) kept_.clear();
+    TileGen::layer_plane(vram, layer, four_bpp, plane_);
+    uint64_t found = 0;
+    std::vector<uint32_t> cleared;
+    for (int i = 0; i < int(keeps_.size()) && !found; i++) {
+        const Keep& k = keeps_[i];
+        cleared = plane_;
+        for (int y = (std::max)(k.y, 0); y < (std::min)(k.y + k.h, SIZE); y++)
+            for (int x = (std::max)(k.x, 0); x < (std::min)(k.x + k.w, SIZE); x++) cleared[y * SIZE + x] = 0;
+        uint64_t h = fnv1a_words(cleared.data(), cleared.size());
+        auto o = keep_of_.find(h);
+        if (o != keep_of_.end() && o->second == i && available_.count(h)) found = h;
+    }
+    kept_[hash] = found;
+    return found;
 }
 
 void SkyPack::frame_done() {
@@ -146,6 +187,11 @@ const SkyPack::Picture* SkyPack::load(uint64_t hash) {
     pending_.push_back(std::move(img));
     p.hash = hash;
     p.used = frame_;
+    auto keep = keep_of_.find(hash);
+    if (keep != keep_of_.end()) {
+        const Keep& k = keeps_[keep->second];
+        p.keep_x = k.x, p.keep_y = k.y, p.keep_w = k.w, p.keep_h = k.h;
+    }
     if (index < int(pictures_.size())) {   // takes over a slot
         loaded_.erase(pictures_[index].hash);
         pictures_[index] = std::move(p);
