@@ -831,6 +831,7 @@ int main(int argc, char** argv) {
         if (ini.aa == 2) g_opt.msaa = 1;
         g_opt.supersample = ini.scale / 100.0f;
         g_opt.half_rate = ini.half_rate;
+        g_opt.frame_cap = ini.frame_cap;
         g_opt.haze = ini.haze ? 1.0f : 0.0f;
         g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
         g_opt.ao = ini.ao ? 1.0f : 0.0f;
@@ -1206,6 +1207,7 @@ int main(int argc, char** argv) {
         for (int sc : FrontendSettings::SCALES)
             if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
         s.half_rate = g_opt.half_rate;
+        s.frame_cap = g_opt.frame_cap;
         s.haze = g_opt.haze > 0;
         s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
         s.ao = g_opt.ao > 0;
@@ -1793,6 +1795,7 @@ int main(int argc, char** argv) {
                     g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers = s.speakers));
                     renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
                     g_opt.half_rate = s.half_rate;
+                    g_opt.frame_cap = s.frame_cap;
                     renderer.set_distance_haze(s.haze ? haze_strength : 0);
                     renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
@@ -2092,6 +2095,20 @@ int main(int argc, char** argv) {
             prep_on = interpolating;
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_frames.clear();
+        }
+        // FRAME CAP: at most frame_cap pictures a second; the waiting is done
+        // here, before the picture is prepared (the game keeps its own pace)
+        if (g_opt.frame_cap > 0 && film.empty() && g_opt.replay.empty() && !g_opt.shot_frame) {
+            static double next_picture = 0;
+            double period = 1.0 / g_opt.frame_cap, now = qpc_seconds();
+            if (next_picture - now > period) next_picture = now;   // the cap changed, or a pause
+            while (now < next_picture) {
+                double left = next_picture - now;
+                if (left > 0.002) Sleep(DWORD((left - 0.0015) * 1000));   // timeBeginPeriod(1): ~1 ms steps
+                else SwitchToThread();
+                now = qpc_seconds();
+            }
+            next_picture = now - next_picture < period ? next_picture + period : now + period;
         }
         double display = display_clock.tick(presenter.hwnd());
         // HALF FRAME RATE: above 100 Hz every other refresh shows the image

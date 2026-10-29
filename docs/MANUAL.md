@@ -164,6 +164,10 @@ saved games and are not versioned.
   the 3D is drawn every other refresh (72 images per second at 144 Hz) and the
   refresh in between shows the same picture with only the crosshairs redrawn.
   About half the GPU work, with the motion still even.
+- --frame-cap N (or FRAME CAP in the settings, DISPLAY tab: OFF, 30, 60, 120): at most N
+  pictures a second. Off, it is the monitor's refresh rate (vsync). The game itself always runs
+  at arcade speed; on a monitor whose refresh rate is not a multiple of the cap, the motion is
+  less even than with HALF FRAME RATE.
 - QUALITY (settings, DISPLAY tab): LOW, MEDIUM, HIGH and ULTRA set together the
   options that cost the most (render resolution, frame rate, ray tracing,
   ambient occlusion, sun shadows, light shafts, soft particles, sky, surface

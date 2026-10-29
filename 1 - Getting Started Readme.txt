@@ -107,7 +107,8 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Crosshairs - On.bat / Crosshairs - Off.bat
 
  Everything else is in the game: Options (main menu) or the pause
- menu > Settings. FREE PLAY and TRIGGER STARTS are in the GAME tab.
+ menu > Settings. FREE PLAY and TRIGGER STARTS are in the GAME tab;
+ FRAME CAP (Off, 30, 60, 120 FPS) is in the DISPLAY tab.
 
 
 ---------------------------------------------------------------------

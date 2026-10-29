@@ -30,6 +30,7 @@ struct Options {
     bool classic_text = false;       // --classic-text: original pixel-art letters instead of vector fonts
     bool interp = true;              // --no-interp: show game frames as they are
     bool half_rate = false;          // --half-rate: above 100 Hz the 3D is drawn every other refresh
+    int frame_cap = 0;               // --frame-cap N: at most N pictures a second (0 = the monitor's refresh rate)
     bool dump_textures = false;      // --dump-textures: write new textures to out/textures
     float light_gain = 1.0f;         // --light-gain: light multiplier on the sun and the ambient
     float bloom = 1;                 // --bloom [N] / --no-bloom: glow around bright things
