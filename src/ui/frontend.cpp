@@ -2285,12 +2285,17 @@ void Frontend::draw_gun_test(bool over_game) {
     std::vector<std::wstring> notes;
     if (!settings.second_mouse) notes.push_back(L"SECOND MOUSE is OFF: every mouse and gun moves player 1's sight.");
     int count = int(guns.size());
-    if (count <= 1)
-        notes.push_back(L"Windows sees only one mouse.  If two guns move the same mark, they reach the game as one: "
+    if (count == 0)
+        notes.push_back(L"Nothing has moved yet: move a mouse or point a gun at the screen.");
+    else if (count == 1)
+        notes.push_back(L"Only one mouse has moved so far.  If two guns move this same mark, they reach the game as one: "
                         L"set each gun as a mouse of its own in its software.");
     else if (settings.gun_p1.empty() && settings.gun_p2.empty())
         notes.push_back(L"Nothing picked: in a game, the second mouse to fire becomes player 2's gun.  "
                         L"ENTER picks them here once and for all.");
+    if (quiet_mice)
+        notes.push_back(std::to_wstring(quiet_mice) + (quiet_mice == 1 ? L" more device Windows lists as a mouse has" : L" more devices Windows lists as mice have") +
+                        L" sent nothing (often a keyboard or a receiver): it shows up here once it moves.");
     int ny = std::max(top + std::min(count, shown) * row_h + U(20), bottom - U(10));
     for (const std::wstring& note : notes)
         for (const std::wstring& line : wrap(BODY, U(22), note, list1 - list0 - U(20))) {

@@ -135,7 +135,8 @@ public:
         bool trigger = false, reload = false;
         int player = -1;       // whose gun it is now (0, 1; -1 none)
     };
-    std::vector<GunView> guns;
+    std::vector<GunView> guns;   // those that have reported something since the start
+    int quiet_mice = 0;          // and how many others Windows lists that never did
     bool gun_test_open() const { return screen_ == Screen::GunTest; }
     bool picking_guns() const { return screen_ == Screen::GunTest && gun_step_ > 0; }
     void gun_fired(int index);   // a left button press from guns[index]

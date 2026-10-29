@@ -1856,21 +1856,26 @@ int main(int argc, char** argv) {
                 ULONGLONG now = GetTickCount64();
                 std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
                 std::vector<Frontend::GunView> view;
+                int hidden = 0;
                 for (size_t i = 0; i < devs.size(); i++) {
                     const raw_mice::Device& d = devs[i];
                     auto known = gun_presses.find(d.path);
                     bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
                     gun_presses[d.path] = d.presses;
                     if (fired && frontend.picking_guns()) {
-                        frontend.guns.clear();   // the list as it is now, for the index
-                        for (const raw_mice::Device& e : devs) frontend.guns.push_back({e.path, e.name});
-                        frontend.gun_fired(int(i));
+                        frontend.guns = {{d.path, d.name}};
+                        frontend.gun_fired(0);
+                    }
+                    if (!d.last_input) {   // nothing from it yet: the pointer side of a keyboard, say, unless it moves
+                        hidden++;
+                        continue;
                     }
                     Frontend::GunView g{d.path, d.name, d.absolute, d.last_input && now - d.last_input < 1000, d.has_pos,
                                         int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
                     view.push_back(g);
                 }
                 frontend.guns = view;
+                frontend.quiet_mice = hidden;
                 if (now - gun_drawn >= 33) {   // about 30 times a second
                     gun_drawn = now;
                     frontend.invalidate();
