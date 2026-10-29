@@ -135,6 +135,7 @@ const std::vector<Entry>& table() {
         off("--no-free-play", &Options::free_play, "coins needed to start and continue (5 / 6)"),
         off("--no-outputs", &Options::outputs, "no Hook of the Reaper outputs (TCP port 8000)"),
         off("--no-wide-aim", &Options::wide_aim, "widescreen: the guns do not reach the side areas"),
+        flag("--gamepads", &Options::gamepads, "controllers play too (off by default: light guns, or the mouse)"),
         off("--no-trigger-start", &Options::trigger_start, "the gun's trigger does not start or continue a game"),
         num("--crosshair-hide", &Options::crosshair_hide, "hide a crosshair after N seconds unused (0 = never)"),
         section("Debugging and tests"),

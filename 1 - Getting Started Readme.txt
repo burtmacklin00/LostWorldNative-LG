@@ -69,9 +69,10 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    F2 / F3 .......... Arcade test / service buttons
    F9 ............... Debug snapshot (out\snap), for reporting problems
 
- GAMEPAD (optional)
-   Sticks or gyro aim, R2 / R1 fire, L2 / L1 reload,
-   START joins (or pauses during play), BACK pauses.
+ CONTROLLERS
+   Ignored: only the light guns play (or the mouse without guns), so
+   a cabinet's XInput controls never take over a player. To play with
+   a gamepad, start LostWorld.exe with --gamepads.
 
 
 ---------------------------------------------------------------------

@@ -20,7 +20,7 @@
 - **Sharp image**: MSAA or NVIDIA DLAA, HD text and HUD, texture packs.
 - **Smooth motion** at 120 / 144 Hz and above.
 - **Arcade sound**, with surround and headphone modes.
-- **Mouse, gamepad (gyro too) or two mice** for 2 players.
+- **Light guns, mouse or two mice** for 2 players; gamepads (gyro too) with `--gamepads`.
 - **New modes**: Boss Fight, Survival, achievements and stats.
 
 <p align="center">

@@ -65,6 +65,7 @@ struct Options {
     bool free_play = true;           // --no-free-play: coins needed (free play: 1 / 2 insert the credit themselves)
     bool outputs = true;             // --no-outputs: no Hook of the Reaper outputs (TCP port 8000)
     bool wide_aim = true;            // --no-wide-aim / display.ini WideAim = 0: in widescreen, side-area shots stay at the 4:3 edge
+    bool gamepads = false;           // --gamepads: controllers play too (off: light guns, or the mouse without them)
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
     uint64_t shot_frame = 0;         // --shot N: screenshot of frame N, then exit

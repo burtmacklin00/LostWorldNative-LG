@@ -51,6 +51,8 @@ int main() {
         Options o;
         CHECK(parse(o, {}) && o.free_play && o.trigger_start && o.crosshair_hide == 0);
         CHECK(parse(o, {"--no-free-play", "--no-trigger-start"}) && !o.free_play && !o.trigger_start);
+        CHECK(parse(o, {}) && !o.gamepads);
+        CHECK(parse(o, {"--gamepads"}) && o.gamepads);
         CHECK(parse(o, {"--free-play", "--crosshair-hide", "5"}) && o.free_play && o.crosshair_hide == 5);
     }
     {   // custom values

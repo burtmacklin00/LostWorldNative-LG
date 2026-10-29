@@ -55,6 +55,9 @@ as pixels of a 1080-line screen; `crosshair_p2.png` gives player 2 their own (ot
 2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun.
 F11 or Alt+Enter toggles fullscreen.
 
+Gamepads are off by default (only the light guns, or the mouse, play: a
+cabinet's XInput controls never take a player over); `--gamepads` turns them on.
+
 With a gamepad (Xbox, DualSense, DualShock 4, Switch Pro and the others SDL3
 knows): both sticks move the crosshair (soft curve near the centre for fine aim and
 more speed after a moment at full tilt), R2 / R1 / bottom button fire and

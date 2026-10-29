@@ -327,6 +327,7 @@ static std::vector<AimTarget> aim_targets() {
 }
 
 static bool poll_gamepads(HWND hwnd) {
+    if (!g_opt.gamepads) return false;
     bool focused = GetForegroundWindow() == hwnd;
     g_pads.set_targets(aim_targets());
     g_pads.poll(g_pad_settings, focused, g_menu_open);
@@ -968,7 +969,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("GPU: %s\n", presenter.device_name().c_str());
-    g_pads.init();
+    if (g_opt.gamepads) g_pads.init();   // off by default: guns (or the mouse) only, a cabinet's controllers ignored
     timeBeginPeriod(1);
     QueryPerformanceFrequency(&g_qpf);
     QueryPerformanceCounter(&g_start_time);
