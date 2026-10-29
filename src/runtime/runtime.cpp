@@ -185,6 +185,7 @@ uint32_t pci_read(uint32_t cfg) {
 std::unordered_map<uint32_t, std::vector<uint8_t>> g_dev;
 std::vector<uint8_t> g_texture_fifo;   // the part not yet uploaded (the whole stream with g_collect_stats)
 std::unordered_set<uint32_t> g_r3d_dirty;                          // pages touched since the last frame
+uint32_t g_r3d_last_dirty = 0xFFFFFFFF;                             // a page known to be in g_r3d_dirty
 size_t g_fifo_consumed = 0;                                         // bytes of the FIFO already uploaded
 uint64_t g_r3d_frames = 0;
 void r3d_flush();
@@ -213,6 +214,31 @@ uint8_t* dev_ptr(uint32_t a) {
         last_page = page.data();
     }
     return last_page + (a & 0xFFFF);
+}
+
+// The game writes a Real3D page many times in a row: the set is only touched
+// when the page changes
+inline void mark_r3d_dirty(uint32_t page) {
+    if (page == g_r3d_last_dirty) return;
+    g_r3d_dirty.insert(page);
+    g_r3d_last_dirty = page;
+}
+
+// Plain device memories, where nothing in dev_read8 / dev_write8 reacts to
+// an access besides the dirty pages and the FIFO stream: the Real3D culling
+// and polygon memories (0x8C, 0x8E, 0x98), the texture FIFO (0x94) and the
+// tilegen's layer memory and palette (below its registers at 0xF1180000).
+// Whole halfwords and words go in and out at once there, byte for byte the
+// same as the byte path; n bytes from a, within one 64 KB page.
+enum class Plain { No, R3D, Fifo, Memory };
+inline Plain plain_memory(uint32_t a, uint32_t n) {
+    if ((a & 0xFFFF) > 0x10000 - n) return Plain::No;   // runs into the next page
+    switch (a >> 24) {
+    case 0x8C: case 0x8E: case 0x98: return Plain::R3D;
+    case 0x94: return Plain::Fifo;
+    case 0xF1: return a < 0xF1180000 ? Plain::Memory : Plain::No;
+    default: return Plain::No;
+    }
 }
 
 const uint8_t* rom_ptr(uint32_t a) {
@@ -286,7 +312,7 @@ void dev_write8(uint32_t a, uint8_t v) {
     // 0x90000000: texture port, three words (source, header, trigger) per upload
     if ((a >> 24) == 0x90 && (a & 3) == 3) texture_port_word(le32_at(dev_ptr(a & ~3u)));
     uint32_t region = a >> 24;
-    if (region == 0x8C || region == 0x8E || region == 0x98) g_r3d_dirty.insert(a >> 16);
+    if (region == 0x8C || region == 0x8E || region == 0x98) mark_r3d_dirty(a >> 16);
     // Writing to the command port (0x88000000) closes the 3D frame
     if (a == 0x88000003) r3d_flush();
 }
@@ -340,6 +366,7 @@ void r3d_flush() {
     for (uint32_t key : g_r3d_dirty)
         state->pages[key] = std::make_shared<const R3DPage>(*reinterpret_cast<const R3DPage*>(g_dev[key].data()));
     g_r3d_dirty.clear();
+    g_r3d_last_dirty = 0xFFFFFFFF;
     state->frame = ++g_r3d_frames;
 
     size_t words = (g_texture_fifo.size() - g_fifo_consumed) / 4;
@@ -550,14 +577,27 @@ uint8_t rt_rd8_slow(uint32_t a) {
 }
 uint16_t rt_rd16_slow(uint32_t a) {
     if (auto p = rom_ptr(a)) return uint16_t(p[0] << 8 | p[1]);
-    uint16_t v = uint16_t(dev_read8(a) << 8 | dev_read8(a + 1));
+    uint16_t v;
+    if (plain_memory(a, 2) != Plain::No) {
+        const uint8_t* p = dev_ptr(a);
+        v = uint16_t(p[0] << 8 | p[1]);
+    } else {
+        v = uint16_t(dev_read8(a) << 8 | dev_read8(a + 1));
+    }
     note(a, false, v);
     if (g_diff_active) g_diff_mmio.insert(g_diff_mmio.end(), {a, 2u, v});
     return v;
 }
 uint32_t rt_rd32_slow(uint32_t a) {
     if (auto p = rom_ptr(a)) return uint32_t(p[0]) << 24 | p[1] << 16 | p[2] << 8 | p[3];
-    uint32_t v = uint32_t(dev_read8(a)) << 24 | dev_read8(a + 1) << 16 | dev_read8(a + 2) << 8 | dev_read8(a + 3);
+    uint32_t v;
+    if (plain_memory(a, 4) != Plain::No) {
+        uint32_t w;
+        memcpy(&w, dev_ptr(a), 4);
+        v = bswap32(w);
+    } else {
+        v = uint32_t(dev_read8(a)) << 24 | dev_read8(a + 1) << 16 | dev_read8(a + 2) << 8 | dev_read8(a + 3);
+    }
     note(a, false, v);
     if (g_diff_active) g_diff_mmio.insert(g_diff_mmio.end(), {a, 4u, v});
     return v;
@@ -575,16 +615,27 @@ static void check_wild_write(uint32_t a, uint32_t v) {
 }
 
 void rt_wr8_slow(uint32_t a, uint8_t v) { check_wild_write(a, v); note(a, true, v); dev_write8(a, v); }
+// A store to plain memory (plain_memory), as its bytes in memory order
+static void plain_write(uint32_t a, const uint8_t* bytes, uint32_t n, Plain kind) {
+    memcpy(dev_ptr(a), bytes, n);
+    if (kind == Plain::R3D) mark_r3d_dirty(a >> 16);
+    else if (kind == Plain::Fifo) g_texture_fifo.insert(g_texture_fifo.end(), bytes, bytes + n);
+}
+
 void rt_wr16_slow(uint32_t a, uint16_t v) {
     check_wild_write(a, v);
     note(a, true, v);
-    dev_write8(a, uint8_t(v >> 8));
-    dev_write8(a + 1, uint8_t(v));
+    const uint8_t bytes[2] = {uint8_t(v >> 8), uint8_t(v)};
+    if (Plain kind = plain_memory(a, 2); kind != Plain::No) return plain_write(a, bytes, 2, kind);
+    dev_write8(a, bytes[0]);
+    dev_write8(a + 1, bytes[1]);
 }
 void rt_wr32_slow(uint32_t a, uint32_t v) {
     check_wild_write(a, v);
     note(a, true, v);
-    for (int i = 0; i < 4; i++) dev_write8(a + i, uint8_t(v >> (24 - 8 * i)));
+    const uint8_t bytes[4] = {uint8_t(v >> 24), uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v)};
+    if (Plain kind = plain_memory(a, 4); kind != Plain::No) return plain_write(a, bytes, 4, kind);
+    for (int i = 0; i < 4; i++) dev_write8(a + i, bytes[i]);
 }
 
 // Access statistics for a run of bytes, as the byte-by-byte path would count them
@@ -625,7 +676,7 @@ void rt_dma_copy(uint32_t dst, uint32_t src, uint32_t n) {
         memmove(dp, sp, run);   // RAM to RAM may overlap
         if (dst >= RAM_SIZE) {
             note_range(dst, run, true, sp[run - 1]);
-            if (r3d) g_r3d_dirty.insert(dst >> 16);
+            if (r3d) mark_r3d_dirty(dst >> 16);
             if (fifo) g_texture_fifo.insert(g_texture_fifo.end(), sp, sp + run);
         }
         dst += run, src += run, n -= run;
