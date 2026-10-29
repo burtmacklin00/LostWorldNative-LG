@@ -1766,11 +1766,14 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     Image& dsrc = depth_resolved_;
     transition(cmd, dsrc, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     if (ao_on) {
+    // The occlusion fades with the fog actually drawn, the weather's included
+    float ao_sun, ao_ambient, ao_fog, ao_fog_color[4];
+    weather_light(w, ao_sun, ao_ambient, ao_fog, ao_fog_color);
     bool full = w.x <= 0.5f && w.w >= SCREEN_W - 0.5f;
     float vx = full ? 0.0f : w.x + lay.game_x0, vw = full ? lay.view_w : w.w;
     float ap[16] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
                     w.proj[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
-                    12.0f, std::min(ao_strength_, 1.0f) * 0.85f, w.fog_density, w.fog_start,
+                    12.0f, std::min(ao_strength_, 1.0f) * 0.85f, ao_fog, w.fog_start,
                     alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, getenv("LW_RTSPLIT") ? 1.0f : 0.0f};
     auto fullscreen = [&](VkPipeline pipe, Image& target, VkImageView view, uint32_t tw, uint32_t th) {
         VkRenderingAttachmentInfo at{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
