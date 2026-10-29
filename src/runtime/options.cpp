@@ -179,9 +179,12 @@ void print_usage(FILE* out) {
     }
     fprintf(out,
             "Survival mode:\n"
-            "  %-28s %s\n  %-28s %s\n",
+            "  %-28s %s\n  %-28s %s\n"
+            "Random spawns:\n"
+            "  %-28s %s\n",
             "--survival STAGE:ZONE", "wave arena in that stage and zone (see README)",
-            "--trace-survival", "trace of the mode in out/survival_trace.txt");
+            "--trace-survival", "trace of the mode in out/survival_trace.txt",
+            "--random-spawns", "the arcade game with its encounters shuffled (CLASSIC > RANDOM SPAWNS)");
 }
 
 bool options_disable_menu(int argc, char** argv, std::initializer_list<const char*> more) {

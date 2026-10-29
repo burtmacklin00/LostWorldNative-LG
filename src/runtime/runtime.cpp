@@ -30,6 +30,7 @@
 #include "../audio/sound_board.h"
 #include "../video/r3d_state.h"
 #include "stats.h"
+#include "random_spawns.h"
 #include "survival.h"
 
 Ctx g_ctx;
@@ -57,6 +58,7 @@ void diff_run(Ctx& c, uint32_t fn);
 
 void rt_trace(Ctx& c, uint32_t fn) {
     survival_enter(c, fn);
+    random_spawns_enter(c, fn);
     stats_enter(c, fn);
     if (fn == g_diff_fn && !g_diff_active) {
         diff_run(c, fn);
@@ -1149,6 +1151,7 @@ void rt_event(Ctx& c) {
             g_auto.apply(g_frame);
             if (survival_frame(c)) g_hold = true;   // survival start and results screens
             stats_frame();
+            random_spawns_frame();
             if (g_boss_maker >= 0) boss_maker_frame();
             video_snapshot();
             // Survival mode: on to the chosen stage at full speed, behind its loading screen

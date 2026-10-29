@@ -586,10 +586,16 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {RECORDS, L"RECORDS", L"", L"Achievements and your statistics"},
                 {QUIT, L"QUIT", L"", L"Close the game"}};
     case Screen::Play:
-        return {{ARCADE, L"CLASSIC ARCADE", L"", L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad"},
+        return {{CLASSIC, L"CLASSIC ARCADE", L"", L"The arcade game: as it was, or with the dinosaurs shuffled"},
                 {BOSS, L"BOSS FIGHT", L"", L"Pick a boss and go straight to the fight"},
                 {SURVIVAL, L"SURVIVAL", L"", L"Hold one spot against endless waves of dinosaurs"},
                 {BACK, L"BACK", L"", L"Return to the main menu"}};
+    case Screen::Classic:
+        return {{ARCADE, L"ARCADE", L"", L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad"},
+                {RANDOM, L"RANDOM SPAWNS", L"",
+                 L"Dinosaurs come from new places and at new times, and every boss takes a different number of shots.  "
+                 L"Different every game"},
+                {BACK, L"BACK", L"", L"Return to the mode select"}};
     case Screen::Pause:
         if (boss_mode)
             return {{RESUME, L"RESUME", L"", L"Back to the fight"},
@@ -703,7 +709,9 @@ void Frontend::activate(const Item& it, int dir) {
     case RECORDS: tab_ = 0; record_scroll_ = 0; open(Screen::Records); break;
     case QUIT: push(Action::Quit); break;
     case QUIT_TO_MENU: push(Action::QuitToMenu); break;
-    case ARCADE: push(Action::StartArcade); break;
+    case CLASSIC: open(Screen::Classic); selected_ = random_spawns ? 1 : 0; break;
+    case ARCADE: random_spawns = false; push(Action::StartArcade); break;
+    case RANDOM: random_spawns = true; push(Action::StartArcade); break;
     case BOSS: open_boss_list(false); break;
     case SURVIVAL: {
         open(Screen::Survival);
@@ -833,6 +841,7 @@ void Frontend::back() {
         break;
     case Screen::Records: open(Screen::Main); selected_ = 2; break;   // onto Records
     case Screen::Survival: open(Screen::Play); selected_ = 2; break;   // onto Survival
+    case Screen::Classic: open(Screen::Play); selected_ = 0; break;    // onto Classic arcade
     case Screen::Pause: push(Action::Resume); break;
     case Screen::Main: selected_ = 3; dirty_ = true; break;   // onto Quit
     default: break;
@@ -1783,6 +1792,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             y0 = U(430);
         }
         const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA"
+                             : screen_ == Screen::Classic ? L"CLASSIC ARCADE"
                              : boss ? L"SELECT BOSS" : nullptr;
         if (sub) {
             text(MONO, U(24), sub, tx, y0, talign, {0xF0C070, 0xE0A050});

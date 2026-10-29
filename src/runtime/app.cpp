@@ -35,6 +35,7 @@
 #include "rom_zip.h"
 #include "runtime.h"
 #include "stats.h"
+#include "random_spawns.h"
 #include "survival.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
@@ -762,6 +763,7 @@ int main(int argc, char** argv) {
     }
     // The survival mode's options live in survival.cpp: the table hands them over
     auto extra = [](Options&, const std::string& a, const char* next) -> int {
+        if (random_spawns_option(a)) return 1;
         if (!survival_option(a, next)) return 0;
         return a == "--survival" ? 2 : 1;
     };
@@ -833,6 +835,7 @@ int main(int argc, char** argv) {
 
     // Survival mode: --survival STAGE:ZONE, or picked in the menu
     survival_hooks();
+    random_spawns_hooks();
     int cli_stage = 0, cli_zone = 0;
     bool survival_cli = survival_cli_request(cli_stage, cli_zone);
 
@@ -1626,6 +1629,7 @@ int main(int argc, char** argv) {
                 switch (a) {
                 case Frontend::Action::StartArcade:   // the game at the SEGA logo is the home state QUIT TO MAIN MENU puts back
                     if (!g_boot_skip) game_state_keep_home();
+                    random_spawns_set(frontend.random_spawns);   // CLASSIC > ARCADE or RANDOM SPAWNS
                     [[fallthrough]];
                 case Frontend::Action::Resume:
                     boss_pending = -1;
@@ -1634,6 +1638,7 @@ int main(int argc, char** argv) {
                 case Frontend::Action::StartSurvival: {
                     const SurvivalZone& z = SURVIVAL_ZONES[frontend.survival_choice];
                     boss_pending = -1;
+                    random_spawns_set(false);
                     if (boss_fight >= 0 || frontend.boss_mode) {   // from boss mode: back to the arcade first
                         boss_fight = -1;
                         frontend.boss_mode = false;
@@ -1642,6 +1647,7 @@ int main(int argc, char** argv) {
                     break;
                 }
                 case Frontend::Action::StartBoss:
+                    random_spawns_set(false);
                     if (frontend.boss_status[frontend.boss_choice] == Frontend::BOSS_READY) boss_pending = frontend.boss_choice;
                     break;
                 case Frontend::Action::PrepareBosses:
