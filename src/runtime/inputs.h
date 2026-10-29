@@ -16,6 +16,9 @@ struct PlayerInputs {
 struct Inputs {
     PlayerInputs p[2];
     std::atomic<bool> service{false}, test{false};
+    // Survival mode is for one player: player 2's coin, start and gun
+    // buttons don't reach the game (set by the game thread every frame)
+    std::atomic<bool> block_p2{false};
 
     // F0040004, active low. Bank 0: bit0 coin 1, bit1 coin 2, bit2 test,
     // bit3 service, bit4 start 1, bit5 start 2 (fn_001180A8 packs bit 4 with
@@ -24,17 +27,18 @@ struct Inputs {
         uint8_t v = 0xFF;
         if (!bank1) {
             if (p[0].coin) v &= ~0x01;
-            if (p[1].coin) v &= ~0x02;
+            if (p[1].coin && !block_p2) v &= ~0x02;
             if (test) v &= ~0x04;
             if (service) v &= ~0x08;
             if (p[0].start) v &= ~0x10;
-            if (p[1].start) v &= ~0x20;
+            if (p[1].start && !block_p2) v &= ~0x20;
         }
         return v;
     }
     // F0040008 player 1, F004000C player 2: bit0 trigger, bit1 second trigger (used to reload)
     uint8_t player_port(int player) const {
         uint8_t v = 0xFF;
+        if (player == 1 && block_p2) return v;
         if (p[player].trigger) v &= ~0x01;
         if (p[player].offscreen) v &= ~0x02;
         return v;

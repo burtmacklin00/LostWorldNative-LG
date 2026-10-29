@@ -323,6 +323,9 @@ a shot starts again from the beginning of the arena and Esc returns to the
 main menu (the arcade game stays as it was). Esc during play opens
 the pause menu as usual.
 
+Survival is for one player: player 2's gun and start do nothing in it (their
+start lamp stays off).
+
 It uses the game's encounter machine (see game_ram.md). Stages 2 and 5
 use a different system, and zone 7 of stage 1 (the T-Rex chase) reloads
 the zone endlessly.

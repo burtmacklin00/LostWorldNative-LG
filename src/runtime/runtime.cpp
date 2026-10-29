@@ -1141,6 +1141,7 @@ void rt_event(Ctx& c) {
                 uint8_t state = rd8(0x1A3791 + 0x10 * p);
                 g_inputs.p[p].playing = state == 1 || state == 2;
             }
+            g_inputs.block_p2 = survival_enabled();   // survival is a one-player mode
             wide_aim::frame(g_frame);    // widescreen aim: the guns' calibration reaches the side areas
             outputs::frame(g_frame);     // Hook of the Reaper (outputs.h)
             if (g_frame % 60 == 0) {
