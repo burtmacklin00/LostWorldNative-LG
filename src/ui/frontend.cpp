@@ -2149,6 +2149,28 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
         bg_.clear();
         bg_stone_.clear();
     }
+    partial_ = false;
+    if (screen_ != Screen::GunTest) gun_page_.clear();
+    else if (gun_page_.size() == size_t(w) * h && out.size() == gun_page_.size() && gun_page_key_ == gun_key()) {
+        // Only the marks moved: put the page back where they were, draw them where they are
+        px_ = out.data();
+        int y0 = h, y1 = 0;
+        auto restore = [&](const RECT& r) {
+            int x0 = std::max(0, int(r.left)), x1 = std::min(w, int(r.right));
+            int r0 = std::max(0, int(r.top)), r1 = std::min(h, int(r.bottom));
+            if (x0 >= x1 || r0 >= r1) return;
+            for (int y = r0; y < r1; y++)
+                memcpy(&out[size_t(y) * w + x0], &gun_page_[size_t(y) * w + x0], size_t(x1 - x0) * 4);
+            y0 = std::min(y0, r0), y1 = std::max(y1, r1);
+        };
+        for (const RECT& r : gun_marks_) restore(r);
+        draw_gun_marks();
+        for (const RECT& r : gun_marks_) y0 = std::min(y0, std::max(0, int(r.top))), y1 = std::max(y1, std::min(h, int(r.bottom)));
+        partial_ = true;
+        partial_y0_ = y0, partial_y1_ = std::max(y0, y1);
+        dirty_ = false;
+        return true;
+    }
     bool over_game = this->over_game();
     bool page = screen_ == Screen::Options || screen_ == Screen::Records || screen_ == Screen::GunTest;
     if (over_game) out.assign(size_t(w) * h, 0);
@@ -2161,8 +2183,12 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     values_.clear();
     more_up_ = more_down_ = back_rect_ = reset_rect_ = coffee_rect_ = RECT{};
     auto list = items();
-    if (screen_ == Screen::GunTest) draw_gun_test(over_game);
-    else if (page) draw_options(over_game, list);
+    if (screen_ == Screen::GunTest) {
+        draw_gun_test(over_game);
+        gun_page_ = out;   // without the marks
+        gun_page_key_ = gun_key();
+        draw_gun_marks();
+    } else if (page) draw_options(over_game, list);
     else draw_menu(over_game, list);
     if (locked_notice_ && screen_ == Screen::Survival) draw_locked_notice();
     dirty_ = false;
@@ -2197,6 +2223,43 @@ int Frontend::gun_player(const GunView& g, bool& picked) const {
     picked = !g.path.empty() && (g.path == settings.gun_p1 || g.path == settings.gun_p2);
     if (picked) return g.path == settings.gun_p1 ? 0 : 1;
     return g.player;
+}
+
+std::string Frontend::gun_key() const {
+    std::string k = std::to_string(gun_step_) + "|" + settings.gun_p1 + "|" + settings.gun_p2 + "|" +
+                    std::to_string(quiet_mice) + (settings.second_mouse ? "M" : "m") + (pad_prompts ? "P" : "p") +
+                    (over_game() ? "G" : "g");
+    for (const GunView& g : guns)
+        k += "|" + g.path + char('0' + g.absolute) + char('0' + g.active) + char('0' + g.has_pos) + char('0' + g.trigger) +
+             char('0' + g.reload) + std::to_string(g.player);
+    return k;
+}
+
+// Each device's mark where it points: a ring in its player's colour (filled
+// while it fires) and its number
+void Frontend::draw_gun_marks() {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int w = w_, h = h_;
+    gun_marks_.clear();
+    for (int i = 0; i < int(guns.size()); i++) {
+        const GunView& g = guns[i];
+        if (!g.has_pos || g.x < 0 || g.y < 0 || g.x >= w || g.y >= h) continue;
+        bool picked = false;
+        int pl = gun_player(g, picked);
+        uint32_t col = pl == 0 ? P1_COLOUR : pl == 1 ? P2_COLOUR : 0xFFFFFF;
+        float r = std::max(12.0f, h / 45.0f), t = std::max(2.0f, r / 5);
+        int b = int(r + t) + 2;
+        for (int py = g.y - b; py <= g.y + b; py++)
+            for (int px = g.x - b; px <= g.x + b; px++) {
+                if (px < 0 || py < 0 || px >= w || py >= h) continue;
+                float d = std::sqrt(float((px - g.x) * (px - g.x) + (py - g.y) * (py - g.y)));
+                float cov = std::clamp(t * 0.5f - std::abs(d - r) + 0.5f, 0.0f, 1.0f);
+                if (g.trigger) cov = std::max(cov, std::clamp(r - d, 0.0f, 1.0f) * 0.55f);   // filled while it fires
+                if (cov > 0) blend(px, py, col, cov);
+            }
+        text(ITEM, U(24), std::to_wstring(i + 1), g.x + b + U(4), g.y - b - U(10), 0, {col, col, INK, U(2)});
+        gun_marks_.push_back({g.x - b - 2, g.y - b - U(30), g.x + b + U(60), g.y + b + 2});
+    }
 }
 
 void Frontend::gun_fired(int index) {
@@ -2303,26 +2366,6 @@ void Frontend::draw_gun_test(bool over_game) {
             text(BODY, U(22), line, list0 + U(10), ny, 0, {0xE8C890, 0xE8C890});
             ny += U(32);
         }
-
-    // The marks, over everything
-    for (int i = 0; i < int(guns.size()); i++) {
-        const GunView& g = guns[i];
-        if (!g.has_pos || g.x < 0 || g.y < 0 || g.x >= w || g.y >= h) continue;
-        bool picked = false;
-        int pl = gun_player(g, picked);
-        uint32_t col = pl == 0 ? P1_COLOUR : pl == 1 ? P2_COLOUR : 0xFFFFFF;
-        float r = std::max(12.0f, h / 45.0f), t = std::max(2.0f, r / 5);
-        int b = int(r + t) + 2;
-        for (int py = g.y - b; py <= g.y + b; py++)
-            for (int px = g.x - b; px <= g.x + b; px++) {
-                if (px < 0 || py < 0 || px >= w || py >= h) continue;
-                float d = std::sqrt(float((px - g.x) * (px - g.x) + (py - g.y) * (py - g.y)));
-                float cov = std::clamp(t * 0.5f - std::abs(d - r) + 0.5f, 0.0f, 1.0f);
-                if (g.trigger) cov = std::max(cov, std::clamp(r - d, 0.0f, 1.0f) * 0.55f);   // filled while it fires
-                if (cov > 0) blend(px, py, col, cov);
-            }
-        text(ITEM, U(24), std::to_wstring(i + 1), g.x + b + U(4), g.y - b - U(10), 0, {col, col, INK, U(2)});
-    }
 
     // Key help
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
