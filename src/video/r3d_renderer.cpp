@@ -1364,8 +1364,8 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
                 bolt_azimuth_ = yaw + (lightning_hash(uint32_t(strike.id) * 31u + 5u) - 0.5f) * 1.6f;
                 bolt_main_ = lightning_channel(strike.id, bolt_seg_, bolt_count_);
             }
-            // The channel only where the fog hides the backdrop (painted foliage elsewhere)
-            u.bolt[0] = grey_fog || force_flash ? strike.bolt : 0.0f;
+            // The channel only where the fog or the weather's grey sky hides the backdrop (painted foliage elsewhere)
+            u.bolt[0] = grey_fog || storm || force_flash ? strike.bolt : 0.0f;
             u.bolt[1] = float(bolt_count_);
             u.bolt[2] = bolt_azimuth_;
             u.bolt[3] = float(bolt_main_);
