@@ -121,6 +121,7 @@ static bool g_start_was[2] = {};     // 1 / 2 held at the last poll
 static bool g_block_buttons = false; // after a menu closes: buttons ignored until released
 static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the mouse (whichever moved last)
 static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
+static bool g_p1_reload_button = false;   // player 1's gun reload (right) button, held
 
 // Window pixels -> fraction of the 4:3 game screen (accounting for the black bars)
 static void aim_at(int player, HWND hwnd, POINT pt) {
@@ -242,6 +243,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
             if (p == 1 && g.clicked && !pl.playing && p1.playing) player_join(1);
             pl.trigger = g.trigger;
             pl.offscreen = g.reload;
+            if (p == 0) g_p1_reload_button = g.reload;
             if (p == 1 || g_p1_pad < 0) {
                 aim_at(p, hwnd, g.pos);
                 shot_outside_reloads(p, hwnd, g.pos);
@@ -250,6 +252,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
     } else {
         p1.trigger = down(VK_LBUTTON);
         p1.offscreen = down(VK_RBUTTON);
+        g_p1_reload_button = p1.offscreen;
         g_inputs.p[1].trigger = g_inputs.p[1].offscreen = false;   // player 2's pad adds its buttons after this
         POINT pt;
         GetCursorPos(&pt);
@@ -1192,8 +1195,9 @@ int main(int argc, char** argv) {
         if (!frontend.init("third_party/fonts")) printf("[menu] fonts missing: using the Windows ones\n");
         if (!ui.init(presenter)) g_opt.menu = false;
     }
-    // Survival results: Esc goes back to the main menu, and the arcade game as
-    // it was comes back when the menu closes
+    // Survival results: player 1's reload button (or Esc without the
+    // launcher) goes back to the main menu, and the arcade game as it was
+    // comes back when the menu closes
     auto survival_to_menu = [&] {
         survival_end();
         game_state_load_home();
@@ -2032,6 +2036,15 @@ int main(int argc, char** argv) {
             }
         }
         poll_keyboard_mouse(presenter.hwnd());
+        {   // survival results: the reload button goes back to the main menu
+            static bool reload_was = false;
+            bool pressed = g_p1_reload_button && !reload_was;
+            reload_was = g_p1_reload_button;
+            if (pressed && !frontend.active() && survival_view().mode == SurvivalMode::Results) {
+                survival_to_menu();
+                g_block_buttons = true;   // the press does not reach the game
+            }
+        }
         bool pad_pause = poll_gamepads(presenter.hwnd());
         if (g_pads.changed()) {   // the CONTROLS tab names the pads
             std::wstring names;

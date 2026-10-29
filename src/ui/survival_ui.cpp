@@ -224,7 +224,7 @@ void SurvivalUi::draw_intro(const SurvivalView& v, double now) {
                  cx, top + U(602), 1, FOOT, FOOT, 0.9f);
     } else {
         if (int(now * 2.5) % 2 == 0) text(TITLE, U(64), L"SHOOT TO START", cx, top + U(510), 1, GOLD_TOP, GOLD_BOTTOM);
-        text(TEXT, U(28), L"ESC: PAUSE", cx, top + U(596), 1, FOOT, FOOT);
+        text(TEXT, U(28), L"TAB: PAUSE", cx, top + U(596), 1, FOOT, FOOT);
     }
 }
 
@@ -335,7 +335,7 @@ void SurvivalUi::draw_results(const SurvivalView& v, double now) {
     if (since >= 0 && (blink || v.new_record || since < 0.6))
         text(TITLE, U(60), L"SHOOT TO PLAY AGAIN", cx, top + U(525), 1, GOLD_TOP, GOLD_BOTTOM,
              float(std::min(1.0, since / 0.6)));
-    text(TEXT, U(28), L"ESC: MAIN MENU", cx, top + U(655), 1, FOOT, FOOT);
+    text(TEXT, U(28), L"RELOAD BUTTON: MAIN MENU", cx, top + U(655), 1, FOOT, FOOT);
 }
 
 bool SurvivalUi::draw(int w, int h, const SurvivalView& v, double now, std::vector<uint32_t>& out,

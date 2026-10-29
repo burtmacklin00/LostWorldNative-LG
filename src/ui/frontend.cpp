@@ -1881,7 +1881,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
     const wchar_t* back_what = screen_ == Screen::Main ? nullptr : screen_ == Screen::Pause ? L"RESUME" : L"BACK";
     int py = h - U(64), x = U(80);
     if (!over_game) {   // the key help at the bottom right; at the left, the credit to the makers of the game
-        x = w - U(80) + U(44) - prompt_width(L"A", L"ENTER", L"SELECT") - (back_what ? prompt_width(L"B", L"ESC", back_what) : 0);
+        x = w - U(80) + U(44) - prompt_width(L"A", L"TRIGGER", L"SELECT") - (back_what ? prompt_width(L"B", L"RELOAD", back_what) : 0);
         if (sega_.w > 0) {   // their logo, its own transparency kept
             int lh = U(52), lw = lh * sega_.w / sega_.h, lx = U(80), ly = h - U(46) - lh;
             for (int j = 0; j < lh; j++)
@@ -1894,8 +1894,8 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             text(ITEM, U(22), L"ORIGINAL ARCADE GAME \u00A9 1997 SEGA", U(80), py + U(6), 0, {0xB8B09A, 0xA09884});
         }
     }
-    prompt(x, py, L"A", L"ENTER", L"SELECT");
-    if (back_what) back_rect_ = prompt(x, py, L"B", L"ESC", back_what);
+    prompt(x, py, L"A", L"TRIGGER", L"SELECT");   // the gun (or mouse) buttons; Enter / Esc work too
+    if (back_what) back_rect_ = prompt(x, py, L"B", L"RELOAD", back_what);
 }
 
 // Options and Records: the categories down the left, the rows in the middle and
@@ -2047,7 +2047,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
         prompt(x, py, L"A", L"<>", L"CHANGE");
         reset_rect_ = prompt(x, py, L"Y", L"R", L"RESET TO DEFAULTS");
     }
-    back_rect_ = prompt(x, py, L"B", L"ESC", L"BACK");
+    back_rect_ = prompt(x, py, L"B", L"RELOAD", L"BACK");
     hit_.back() = {back_rect_.left - U(8), back_rect_.top - U(8), back_rect_.right + U(8), back_rect_.bottom + U(8)};
     if (selected_ == int(list.size()) - 1) frame(hit_.back().left, hit_.back().top, hit_.back().right,
                                                  hit_.back().bottom, std::max(1, U(2)), AMBER, 0.9f);
@@ -2147,5 +2147,5 @@ void Frontend::draw_locked_notice() {
         text(BODY, U(26), line, cx, y, 1, {0xE8C890, 0xE8C890});
         y += U(38);
     }
-    text(ITEM, U(22), L"PRESS ENTER OR CLICK", cx, y0 + ph - U(56), 1, {HINT, HINT});
+    text(ITEM, U(22), L"SHOOT TO CONTINUE", cx, y0 + ph - U(56), 1, {HINT, HINT});
 }
