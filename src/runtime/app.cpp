@@ -981,11 +981,11 @@ int main(int argc, char** argv) {
     SkyPack sky;   // sky and other backdrops below the 3D image
     sky.init("textures/sky", g_opt.dump_textures ? "out/sky" : "");
     sky.set_procedural(g_opt.sky_procedural);
-    // Interpolation of the back layers (the sky): where each row's picture was
-    // in the last two 2D frames composed, and the vblanks of the 2D frames
-    // whose scroll is in sky_coords (the shift applies while the 3D goes
-    // between the 3D frames of those same vblanks)
-    std::vector<int32_t> back_rows(SCREEN_H * 3), back_rows_prev(SCREEN_H * 3, -1);
+    // Interpolation of the back layers (the sky, renderer's SkyMotion): the
+    // layer and scroll of each row of the 2D frame composed, and the vblanks
+    // of the last two 2D frames composed (the sky goes on with the camera
+    // while the 3D goes between the 3D frames of those same vblanks)
+    std::vector<int32_t> back_rows(SCREEN_H * 3);
     uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
     TextHD text;   // menus, captions and score drawn from vector fonts
     if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
@@ -1004,7 +1004,8 @@ int main(int argc, char** argv) {
         std::vector<RgbaImage> overlays, sky_pictures;   // new pictures for the GPU slots
         bool hud_band = false;
         float overlay_brightness = 1;
-        uint64_t shift_from = ~0ull, shift_to = ~0ull;   // the 2D frames of the back layers' shift
+        std::vector<int32_t> back_rows = std::vector<int32_t>(SCREEN_H * 3);   // layer and scroll per row (TileGen)
+        uint64_t shift_from = ~0ull, shift_to = ~0ull;   // this 2D frame and the one composed before it
     };
     // A game frame made ready for the screen ahead of time: its 3D scene and
     // the 2D layers of its vblank (the preparation thread, below)
@@ -1307,17 +1308,10 @@ int main(int argc, char** argv) {
                           .sky_coords = sky_on ? out.sky_coords.data() : nullptr,
                           .back_rows = back_rows.data()},
                          hd_text, sky_on ? &sky : nullptr);
-        // How far each row of the back layers scrolled since the previous
-        // 2D frame composed, for drawing them in between (renderer.set_back_shift)
+        // The layer and scroll of each row of the back layers, for drawing
+        // them in between game frames (renderer.set_sky_rows)
         {
-            uint32_t* shift_row = &out.sky_coords[(SCREEN_H + 1) * TileGen::SKY_COORDS_W];
-            for (int y = 0; y < SCREEN_H; y++) {
-                const int32_t* now_row = &back_rows[3 * y];
-                const int32_t* was = &back_rows_prev[3 * y];
-                int dx = ((now_row[1] - was[1] + 256) & 511) - 256, dy = ((now_row[2] - was[2] + 256) & 511) - 256;
-                bool known = now_row[0] >= 0 && now_row[0] == was[0] && std::abs(dx) < 100 && std::abs(dy) < 100;
-                shift_row[y] = known ? 0xFF000000u | 0xFFu | uint32_t(dx + 128) << 16 | uint32_t(dy + 128) << 8 : 0;
-            }
+            out.back_rows = back_rows;
             // Debugging aid: LW_SKYLOG=path writes the back layers' scroll of each 2D
             // frame and the world camera of each 3D frame (tools/sky_log.py)
             if (g_sky_log) {
@@ -1329,7 +1323,6 @@ int main(int argc, char** argv) {
             }
             out.shift_from = back_rows_frame;
             out.shift_to = back_rows_frame = out.frame;
-            back_rows_prev.swap(back_rows);
         }
         out.sky_pictures = sky.take_new_images();
         if (capture) {   // F12 or --shot: capture for tools/make_2d_replacement.py
@@ -1373,6 +1366,7 @@ int main(int argc, char** argv) {
     // Hands composed 2D layers to the renderer (their new pictures go separately)
     auto apply_2d = [&](const Layers2D& l) {
         renderer.set_sky_coords(l.sky_coords.data());
+        renderer.set_sky_rows(l.frame, l.back_rows.data());
         renderer.set_hud_band(l.hud_band);
         renderer.set_overlay_brightness(l.overlay_brightness);
         renderer.set_text_cells(l.text_cells.data());
@@ -1730,7 +1724,7 @@ int main(int argc, char** argv) {
                     if (g_opt.interp != s.smooth) {
                         g_opt.interp = s.smooth;
                         renderer.set_interpolation(1.0f);   // the latest game frame as it is
-                        renderer.set_back_shift(0.0f);
+                        renderer.set_back_shift(0.0f, false);
                     }
                     g_opt.several_mice = s.second_mouse;
                     if (!s.second_mouse) raw_mice::reset();
@@ -2216,15 +2210,18 @@ int main(int argc, char** argv) {
             // of the two 3D frames it goes between. The 2D layers of a vblank
             // are what the game wrote in the frame before it: their sky
             // scroll is that of the previous 3D frame's camera, so the sky
-            // goes on by its last scroll, as far as the 3D has gone towards
-            // the frame built (set_back_shift)
+            // goes on from it with the camera's turn in this frame, as far
+            // as the 3D has gone towards the frame built (set_back_shift,
+            // sky_motion.h)
             bool paired = shift_to == built->vblank && shift_from == built_from;
-            renderer.set_back_shift(paired ? float(-t) : 0.0f);
+            renderer.set_back_shift(paired ? float(t * double(shift_to - shift_from)) : 0.0f, paired);
             if (g_sky_log) {
                 std::lock_guard<std::mutex> lock(g_sky_log_mutex);
-                fprintf(g_sky_log, "p %llu %llu %llu %llu %.3f %d\n", (unsigned long long)built->vblank,
-                        (unsigned long long)built_from, (unsigned long long)shift_from, (unsigned long long)shift_to, t,
-                        int(paired));
+                SkyMotion::Row mx = renderer.sky_motion().row(40, 0), my = renderer.sky_motion().row(40, 1);
+                fprintf(g_sky_log, "p %llu %llu %llu %llu %.3f %d %d %.3f %.3f %d %.3f %.3f\n",
+                        (unsigned long long)built->vblank, (unsigned long long)built_from, (unsigned long long)shift_from,
+                        (unsigned long long)shift_to, t, int(paired), int(mx.known), mx.offset, mx.velocity, int(my.known),
+                        my.offset, my.velocity);
             }
             if (g_pacing_log) pacing_sample(now, display, built->time - frame_period * (1 - t), *built);
         }

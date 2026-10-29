@@ -783,9 +783,37 @@ void R3DRenderer::set_text_cells(const uint32_t* cells) {
 void R3DRenderer::set_sky_coords(const uint32_t* coords) {
     memcpy(static_cast<uint8_t*>(layer_staging_.mapped) + (BACK_W + SCREEN_W) * SCREEN_H * 4 + TEXT_CELLS_BYTES, coords,
            SKY_COORDS_BYTES);
-    const uint32_t* shift = coords + (SCREEN_H + 1) * TileGen::SKY_COORDS_W;   // see set_back_shift
-    sky_shift_.assign(shift, shift + SCREEN_H);
-    sky_shift_serial_++;
+}
+
+void R3DRenderer::set_sky_rows(uint64_t frame, const int32_t* rows) { sky_motion_.feed(frame, rows); }
+
+// The motion of the back layers for the 2D frame fed last (SkyMotion), with
+// the world camera's turn from the previous 3D frame when the one drawn is
+// of the same vblank; its texels go to the sky coordinates' last two rows
+void R3DRenderer::update_sky_motion() {
+    if (sky_motion_.pending()) {
+        const R3DViewport* w = nullptr;
+        if (scene_)
+            for (const R3DViewport& v : scene_->viewports)
+                if (v.world) w = &v;
+        refresh_pose(w);
+        bool camera = back_shift_camera_ && !pose_cut_;
+        float turn[2] = {0, 0};
+        if (camera) {   // yaw and pitch of the camera's forward axis (the world's -z in view space)
+            auto yaw = [](const float* a) { return std::atan2(-a[2], -a[8]); };
+            auto pitch = [](const float* a) { return std::asin(std::clamp(-a[5], -1.0f, 1.0f)); };
+            float dyaw = std::remainder(yaw(pose_now_.axes) - yaw(pose_prev_.axes), 6.2831853f);
+            turn[0] = SkyMotion::PX_PER_RADIAN * dyaw;
+            turn[1] = -SkyMotion::PX_PER_RADIAN * (pitch(pose_now_.axes) - pitch(pose_prev_.axes));
+        }
+        sky_motion_.solve(camera, turn[0], turn[1]);
+        sky_motion_serial_++;
+        layers_dirty_ = true;
+    }
+    if (layers_dirty_)
+        memcpy(static_cast<uint8_t*>(layer_staging_.mapped) + (BACK_W + SCREEN_W) * SCREEN_H * 4 + TEXT_CELLS_BYTES +
+                   size_t(SCREEN_H + 1) * TileGen::SKY_COORDS_W * 4,
+               sky_motion_.texels(), 2 * SCREEN_H * 4);
 }
 
 void R3DRenderer::set_text_atlas(const TextHD& text) {
@@ -1026,7 +1054,7 @@ static int lightning_channel(int id, float* seg, int& count) {
 // The world viewport's camera between the previous game frame and the latest
 // one, as the scenery is drawn (the interpolation); as in the latest frame
 // after a cut (a jump of the camera, a sudden turn)
-R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
+void R3DRenderer::refresh_pose(const R3DViewport* w) {
     if (pose_serial_ != scene_serial_) {
         pose_serial_ = scene_serial_;
         pose_prev_ = pose_now_;
@@ -1043,6 +1071,12 @@ R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
     float d[3] = {b.camera[0] - a.camera[0], b.camera[1] - a.camera[1], b.camera[2] - a.camera[2]};
     pose_cut_ = !a.valid || !b.valid || dot(d, d) > 10.0f * 10.0f || dot(a.axes + 6, b.axes + 6) < 0.9f ||
                 dot(a.axes + 3, b.axes + 3) < 0.9f;
+}
+
+R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
+    refresh_pose(w);
+    const WorldPose &a = pose_prev_, &b = pose_now_;
+    auto dot = [](const float* p, const float* q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; };
     if (pose_cut_ || interp_ >= 1.0f) return b;
     WorldPose p = b;
     float t = interp_;
@@ -1074,20 +1108,20 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
         light_uv[1] = (view[1] * L[1] / -L[2] - view[3]) * 0.5f + 0.5f;
     }
     if (pose_cut_) sky_sun_carried_ = false;
-    if (sky_sun_serial_ != sky_shift_serial_) {   // once per 2D frame
-        sky_sun_serial_ = sky_shift_serial_;
-        sky_sun_step_[0] = sky_sun_step_[1] = 0;
+    if (sky_sun_serial_ != sky_motion_serial_) {   // once per 2D frame
+        sky_sun_serial_ = sky_motion_serial_;
+        sky_sun_rate_[0] = sky_sun_rate_[1] = 0;
         if (sky_sun_carried_) {
             int row = std::clamp(int(sky_sun_uv_[1] * SCREEN_H), 0, SCREEN_H - 1);
-            uint32_t s = row < int(sky_shift_.size()) ? sky_shift_[row] : 0;
-            if (s) {   // the picture moves left as the scroll goes up
-                sky_sun_step_[0] = -float(int((s >> 16) & 0xFF) - 128) / view_w;
-                sky_sun_step_[1] = -float(int((s >> 8) & 0xFF) - 128) / float(SCREEN_H);
-                sky_sun_uv_[0] += sky_sun_step_[0];
-                sky_sun_uv_[1] += sky_sun_step_[1];
+            SkyMotion::Row mx = sky_motion_.row(row, 0), my = sky_motion_.row(row, 1);
+            if (mx.known) {   // the picture moves left as the scroll goes up
+                sky_sun_uv_[0] -= mx.move / view_w;
+                sky_sun_uv_[1] -= my.move / float(SCREEN_H);
+                sky_sun_rate_[0] = -mx.velocity / view_w;
+                sky_sun_rate_[1] = -my.velocity / float(SCREEN_H);
             }
             float outside = std::max({-sky_sun_uv_[0], sky_sun_uv_[0] - 1.0f, -sky_sun_uv_[1], sky_sun_uv_[1] - 1.0f});
-            sky_sun_carried_ = s && outside < 0.5f;
+            sky_sun_carried_ = mx.known && outside < 0.5f;
         }
         if (!sky_sun_carried_ && in_front) {
             sky_sun_carried_ = true;
@@ -1100,8 +1134,8 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
         return;
     }
     // Between 2D frames moved on like the sky (set_back_shift)
-    float x = (sky_sun_uv_[0] - sky_sun_step_[0] * back_shift_) * 2.0f - 1.0f;
-    float y = (sky_sun_uv_[1] - sky_sun_step_[1] * back_shift_) * 2.0f - 1.0f;
+    float x = (sky_sun_uv_[0] + sky_sun_rate_[0] * back_shift_) * 2.0f - 1.0f;
+    float y = (sky_sun_uv_[1] + sky_sun_rate_[1] * back_shift_) * 2.0f - 1.0f;
     float d[3] = {(x + view[2]) / view[0], (y + view[3]) / view[1], -1.0f};
     float l = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     for (int i = 0; i < 3; i++) out[i] = d[i] / l;
@@ -1382,6 +1416,7 @@ void R3DRenderer::record_uploads(const Frame& f) {
         transition(cmd, texture_ram_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         tex_y0_ = tex_y1_ = 0;
     }
+    update_sky_motion();
     if (layers_dirty_) {
         Image* imgs[2] = {&back_, &front_};
         for (int i = 0; i < 2; i++) {

@@ -41,9 +41,8 @@ layout(push_constant) uniform Compose {
                       // 3 = scene mode: the picture behind the HUD (backdrop and 3D), for the diffusion
     vec4 effects;     // x: bloom strength (0 = off); y: colour saturation (1 = original);
                       // z: gamma (1 = original, higher = brighter mid-tones); w: 1 = light shafts
-    vec4 motion;      // x: interpolation of the back layers: the fraction of each row's scroll
-                      // since the previous game frame (in sky_coords) to draw them back by
-                      // (negative: on ahead by);
+    vec4 motion;      // x: how far the 3D has gone from the previous game frame, in vblanks:
+                      // the back layers go on by their velocity (in sky_coords) times this;
                       // y: which players have their own crosshair picture (1 = player 1, 2 = player 2)
     vec4 crosshair2;  // xy: player 2's crosshair, like crosshair; z: sharpening (0 = off); w unused
 } pc;
@@ -450,11 +449,15 @@ void main() {
         // The back layers (sky) were drawn wider than the screen; beyond that
         // and for the front layers the outermost column is repeated
         vec2 qb = vec2((q.x * float(SIZE_2D.x) + float(BACK_MARGIN)) / float(SIZE_BACK.x), q.y);
-        // Between game frames the back layers (sky) go on by their last
-        // scroll, like the 3D image in front of them (set_back_shift)
-        if (pc.motion.x != 0.0) {
-            vec4 m = texelFetch(sky_coords, ivec2(clamp(int(q.y * 384.0), 0, 383), SIZE_BACK.y + 1), 0);
-            if (m.b > 0.5) qb -= (m.rg * 255.0 - 128.0) * pc.motion.x / vec2(SIZE_BACK);
+        // The back layers (sky) at their sub-pixel position, going on between
+        // game frames like the 3D image in front of them (sky_motion.h): per
+        // row and axis the offset from the game's scroll and the velocity
+        {
+            int row = clamp(int(q.y * 384.0), 0, 383);
+            vec4 mx = texelFetch(sky_coords, ivec2(row, SIZE_BACK.y + 1), 0);
+            vec4 my = texelFetch(sky_coords, ivec2(row, SIZE_BACK.y + 2), 0);
+            if (mx.r > 0.0) qb.x += ((mx.g - 0.5) * 2.0 + (round(mx.b * 255.0) * 256.0 + round(mx.a * 255.0) - 32768.0) / 256.0 * pc.motion.x) / float(SIZE_BACK.x);
+            if (my.r > 0.0) qb.y += ((my.g - 0.5) * 2.0 + (round(my.b * 255.0) * 256.0 + round(my.a * 255.0) - 32768.0) / 256.0 * pc.motion.x) / float(SIZE_BACK.y);
         }
         qb.x = clamp(qb.x, 0.5 / float(SIZE_BACK.x), 1.0 - 0.5 / float(SIZE_BACK.x));
         q.x = clamp(q.x, 0.5 / 496.0, 1.0 - 0.5 / 496.0);
