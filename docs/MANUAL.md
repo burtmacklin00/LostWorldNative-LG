@@ -27,14 +27,12 @@ time with 6 (coin) and 2 (start), and has their own crosshair (blue; player
 sees as a mouse), one click with it while player 1 is playing makes it
 player 2's gun and joins the game (if player 2 joined with start first, their
 first shot does it, unless a gamepad is player 2's); from then on each mouse moves its own
-crosshair and the pointer stays inside the window. A shot outside the 4:3 game screen or on
-its very edge (where a light gun parks an off-screen shot) reloads, as on the cabinet. In
-widescreen (16:9, 21:9) a shot in the side areas fires instead, and only a shot at the window's
-edge reloads; the 4:3 mode keeps the cabinet's rule. With the widescreen aim (on by default;
-`WideAim = 0` in display.ini or `--no-wide-aim` turns it off) the guns reach the side areas: the
-gun calibration in the game's RAM settings (not the EEPROM) is widened so the 0..255 gun range
-covers the whole wide picture, and the game sees a side-area shot where it is. Without it, such a
-shot fires at the nearest edge of the 4:3 screen. Disable it in Settings > Controls >
+crosshair and the pointer stays inside the window. The guns (mouse, light gun or gamepad) aim
+over the whole 3D view, also the side bands of a 16:9 or 21:9 picture, and the enemies drawn
+there can be shot (except on the stage select screen, which stays 4:3). A shot outside the 3D
+view (the black bars of a window wider than it) or on its very edge (where a light gun parks an
+off-screen shot) reloads, as on the cabinet; in 4:3 (with the bezel) the crosshair stops at the
+picture's edge. Disable it in Settings > Controls >
 Second mouse or with `--one-mouse`. Settings > Game > FREE PLAY (on by default; `--no-free-play`
 turns it off) makes 1 and 2
 insert the credit themselves, so a light gun's start button starts and continues without the
@@ -52,7 +50,9 @@ player 2 who joined by mistake leaves no crosshair standing on the screen). A `c
 next to LostWorld.exe replaces the drawn crosshairs with that picture, centred on the gun and sized
 as pixels of a 1080-line screen; `crosshair_p2.png` gives player 2 their own (otherwise they use
 `crosshair.png` too). In `--auto`, a 2 at the end of a button belongs to player
-2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun.
+2 (`coin2@F`, `start2@F`, `trigger2@F`) and `aim2:X/Y@F` sets their gun's raw ADC values;
+`point:X/Y@F` (`point2:` for player 2) aims as the mouse would, X and Y as fractions of the
+4:3 screen (below 0 or above 1 in the side bands).
 F11 or Alt+Enter toggles fullscreen.
 
 Gamepads are off by default (only the light guns, or the mouse, play: a
@@ -145,11 +145,14 @@ saved games and are not versioned.
 
 ## Video and sound options
 
-- --aspect 16:9 (default), 21:9 or 4:3: maximum width of the 3D view. The
-  sky (background 2D layers) is also drawn at the sides; the gun area stays in
-  the central 4:3 (a shot in the side bands reloads), but the crosshair follows
-  the gun over the whole picture (only the very edge, where a light gun parks an
-  off-screen shot, has none). The HUD follows --hud-centre.
+- --aspect 16:9 (default), 21:9 or 4:3 (or WIDESCREEN in the settings,
+  DISPLAY tab, applied at once): maximum width of the 3D view. WIDESCREEN
+  21:9 allows up to 2.4:1, so 2560x1080 and 3440x1440 monitors are filled
+  edge to edge. The sky (background 2D layers) is also drawn at the sides; the HUD stays in
+  the central 4:3 with --hud-centre. The guns aim over the whole 3D view:
+  the game's ADC values only reach a little beyond the 4:3 screen, so in a
+  wider view the runtime gives the game the aim itself (rt_gun_aimed, in
+  fn_0000CBF0), where its X is drawn and its shots land.
 - --msaa N (default 4; 1 = off): edge antialiasing, including the
   cut-out edges of plants.
 - --aa dlaa: NVIDIA DLAA (DLSS at native resolution) instead of MSAA. The 3D is
@@ -171,6 +174,13 @@ saved games and are not versioned.
   pictures a second. Off, it is the monitor's refresh rate (vsync). The game itself always runs
   at arcade speed; on a monitor whose refresh rate is not a multiple of the cap, the motion is
   less even than with HALF FRAME RATE.
+- --no-vsync (or VSYNC: OFF in the settings, DISPLAY tab): each image goes out
+  as soon as it is drawn instead of at the monitor's next refresh (Vulkan
+  immediate mode, or mailbox if the driver has no immediate mode), still no
+  more images than the monitor's refreshes. About 14 ms less latency (measured
+  at 120 Hz), but tearing and less even motion on monitors without
+  G-Sync/FreeSync: keep it on there. FRAME RATE: HALF does nothing with vsync
+  off. The console prints `[video] vsync on/off` when it changes.
 - QUALITY (settings, DISPLAY tab): LOW, MEDIUM, HIGH and ULTRA set together the
   options that cost the most (render resolution, frame rate, ray tracing,
   ambient occlusion, sun shadows, light shafts, soft particles, sky, surface
@@ -283,6 +293,23 @@ saved games and are not versioned.
   sample interpolation like the original chip. Default is cubic
   (SMOOTH), with less harshness in low sounds and voices.
 
+## Random spawns
+
+PLAY > CLASSIC ARCADE opens ARCADE (the original game) and RANDOM SPAWNS:
+the arcade game, every stage and stop the same, with its encounters
+shuffled differently every game. Raptors come out of other spawn points
+of the same zone (only ones the camera is already looking towards) and
+sometimes as another raptor type of that zone, the river enemies of stage
+2 come out a little to the side, every enemy comes a little sooner or later,
+and runs of plain stops (camera turn, dinosaurs, wait for them) can come in
+another order. Each boss starts with 70 % to 150 % of its arcade life.
+Also from the command line: `--random-spawns`.
+
+It changes the encounter scripts in place without adding or removing
+anything, so the camera walks the stage path as in the arcade. The
+opening of stage 2 and the bosses' own attacks stay as they are. The
+Carnotaurus and the T-Rex only get the life of their first phase changed.
+
 ## Survival mode
 
 In the menu, PLAY > SURVIVAL shows the working arenas (stage 1: the
@@ -373,6 +400,10 @@ tools/backdrops/stage_select.txt out/sky/<hash>.png` upscales them 4x, erases
 each text in the list and rewrites it with its font, and saves
 textures/sky/<hash>.png. With `--variants` it also creates the versions with
 a different difficulty bar highlighted (each has its own hash).
+A `keep X Y W H` line leaves that box of the backdrop to the game: it is
+left out of the hash and the game's own pixels show there (CREDITS and
+INSERT COIN under the chosen difficulty, which change with the credits);
+make_backdrop.py writes it to textures/sky/<hash>.txt next to the picture.
 
 Texts on the background layers that change piece by piece (the
 tutorial screen: the phrase, INSERT MORE…) are replaced by area, like the front ones:
@@ -473,6 +504,8 @@ normal behaviour when unset):
 | LW_RAIN=amount | Fixes the rain amount (0 to 1) even if the game isn't raining |
 | LW_RAINDBG | Prints per frame the game's rain streaks, their direction and the camera |
 | LW_BOSS=N | Starts the boss mode fight with boss N (1-4) directly |
+| LW_BOSS_LIFE=PCT | Random spawns: every boss gets PCT % of its life instead of a random share |
+| LW_HIT_PROBE=file | Writes RAM 0x100000-0x200000 to the file after every scoring hit and every 120 frames (to find what hits change) |
 | LW_SNDDBG | Sound board trace (68000 and SCSP) |
 | LW_SNDLOG | Each SCSP note to out/voices.csv (registers, duration, direct and effects peaks) and the per-second level of the direct mix and effects return to out/mix.csv |
 | LW_SURV_TRACE=path | File for the --trace-survival trace (default out/survival_trace.txt) |

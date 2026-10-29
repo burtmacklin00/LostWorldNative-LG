@@ -798,7 +798,8 @@ void R3DRenderer::set_crosshair_picture(int player, int w, int h, const std::vec
     if (!rgba.empty()) upload_slot(compose_set_, 13, overlay_sampler_, uint32_t(player), w, h, rgba, &crosshair_images_);
 }
 
-// display.ini's bezel: drawn over everything but the crosshairs and the menus,
+// display.ini's bezel (only with the 4:3 picture: WIDESCREEN at 16:9 or 21:9
+// leaves it out): drawn over everything but the crosshairs and the menus,
 // sized to the window's height and centred (its transparent hole shows the game)
 void R3DRenderer::set_bezel(int w, int h, const std::vector<uint8_t>& rgba) {
     bezel_ = !rgba.empty();
@@ -1419,21 +1420,29 @@ void R3DRenderer::record_uploads(const Frame& f) {
         vkDeviceWaitIdle(dev_);
         destroy_buffer(vertices_);
         create_buffer(vertices_, total * sizeof(R3DVertex) * 2, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        uploaded_serial_ = ~0ull;   // the new buffer has nothing in it yet
     }
-    if (vcount) memcpy(vertices_.mapped, scene_->vertices.data(), vcount * sizeof(R3DVertex));
+    R3DVertex* mapped = static_cast<R3DVertex*>(vertices_.mapped);
+    // The scene's vertices change once per game frame, while images go out
+    // at the monitor's rate: they are copied again only for a new scene (the
+    // previous image's GPU work is over, so the buffer still holds them)
+    bool fresh = uploaded_serial_ != scene_serial_;
+    if (fresh && vcount) memcpy(mapped, scene_->vertices.data(), vcount * sizeof(R3DVertex));
+    uploaded_serial_ = scene_serial_;
     if (!rain_vertices_.empty())
-        memcpy(static_cast<R3DVertex*>(vertices_.mapped) + vcount, rain_vertices_.data(),
-               rain_vertices_.size() * sizeof(R3DVertex));
-    // The game's own rain fades out as ours comes in
-    if (vcount && rain_.amount() > 0) {
-        R3DVertex* mapped = static_cast<R3DVertex*>(vertices_.mapped);
-        float keep = 1.0f - rain_.amount();
+        memcpy(mapped + vcount, rain_vertices_.data(), rain_vertices_.size() * sizeof(R3DVertex));
+    // The game's own rain fades out as ours comes in. Its colours come from the
+    // scene (the buffer is write-combined memory, slow to read back), and are
+    // only rewritten when the fade changes (RAIN can change in the menu)
+    float keep = 1.0f - rain_.amount();
+    if (vcount && (fresh ? keep < 1.0f : keep != uploaded_keep_))
         for (uint32_t first : rain_.game_streaks())
             for (uint32_t k = first; k < first + 3 && k < vcount; k++) {
-                uint32_t a = uint32_t(float(mapped[k].color >> 24) * keep);
-                mapped[k].color = (mapped[k].color & 0xFFFFFFu) | (a << 24);
+                uint32_t color = scene_->vertices[k].color;
+                uint32_t a = uint32_t(float(color >> 24) * keep);
+                mapped[k].color = (color & 0xFFFFFFu) | (a << 24);
             }
-    }
+    uploaded_keep_ = keep;
 }
 
 // Ray tracing: this image's world into the acceleration structure the 3D pass
@@ -1811,7 +1820,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                            extend_back ? 1.0f : 0.0f},
                    .sky = {seconds, 0, sun_ ? 1.0f : 0.0f, 0},
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
-                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ ? 4.0f : 0.0f),
+                   .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ && max_aspect_ < 1.4f ? 4.0f : 0.0f),
                               hud_edges_ ? lay.game_x0 : 0.0f, 0},
                    .crosshair2 = {-1, -1, sharpen_, 0}};
     place_crosshairs(lay, pc);

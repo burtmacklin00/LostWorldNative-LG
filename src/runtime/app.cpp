@@ -18,6 +18,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,9 +36,9 @@
 #include "rom_zip.h"
 #include "runtime.h"
 #include "stats.h"
+#include "random_spawns.h"
 #include "survival.h"
 #include "outputs.h"
-#include "wide_aim.h"
 #include "free_play.h"
 #include "../audio/sound_board.h"
 #include "../ui/achievement_toast.h"
@@ -108,6 +109,10 @@ static void dump_scene(const R3DScene& scene, const uint32_t* back, const uint32
     fclose(f);
 }
 
+// Menu WIDESCREEN 4:3, 16:9, 21:9. Ultrawide monitors are 2.37 (2560x1080) to
+// 2.39 (3440x1440), wider than 21/9 = 2.33, so 21:9 allows up to 2.4
+static const float MAX_ASPECT[3] = {4.0f / 3.0f, 16.0f / 9.0f, 2.4f};
+static int aspect_level(float max_aspect) { return max_aspect < 1.5f ? 0 : max_aspect < 2.0f ? 1 : 2; }
 static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu levels OFF, LOW, MEDIUM, HIGH
 
 // Keyboard and mouse (only while the window is active):
@@ -123,42 +128,40 @@ static int g_p1_pad = -1;            // the gamepad aiming for player 1; -1: the
 static bool g_p2_pad = false;        // a gamepad is player 2's (poll_gamepads)
 static bool g_p1_reload_button = false;   // player 1's gun reload (right) button, held
 
-// Window pixels -> fraction of the 4:3 game screen (accounting for the black bars)
+// Window pixels -> fraction of the 4:3 game screen (accounting for the black
+// bars; beyond 0..1 in the side bands of a wider 3D view)
 static void aim_at(int player, HWND hwnd, POINT pt) {
     RECT rc;
     GetClientRect(hwnd, &rc);
-    // The gun covers the original 4:3 area, centred in the (possibly wider) 3D view
     ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
     float x = (pt.x - lay.ox - lay.game_x0 * lay.scale) / (SCREEN_W * lay.scale);
     float y = (pt.y - lay.oy) / (SCREEN_H * lay.scale);
     set_player_aim(player, x, y);
 }
 
-// A shot outside the 4:3 game screen reloads, as on the cabinet, instead of
-// firing at the edge: on its very edge too (where a light gun parks a shot that
-// misses the screen). In widescreen (16:9, 21:9) only a shot at the window's
-// edge (the gun pointed away from the screen) reloads: one in the side areas
-// fires, at the nearest point of the 4:3 screen, the farthest the game sees.
-// The 4:3 mode (with or without a bezel) keeps the cabinet's rule.
-static void shot_outside_reloads(int player, HWND hwnd, POINT pt) {
+// The gun covers the whole 3D view, also the side bands of a wide one: how
+// far it reaches beyond the 4:3 screen (each new picture, as the window may
+// change)
+static void update_aim_reach(HWND hwnd) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+    if (rc.right <= 0 || rc.bottom <= 0) return;
+    ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
+    g_aim_reach = lay.game_x0 / SCREEN_W;
+}
+
+// A shot outside the 3D view (the black bars of a window wider than it) or on
+// its very edge (where a light gun puts a shot that misses the screen)
+// reloads, as on the cabinet, instead of firing at the edge. In 4:3 (the
+// bezel) that is the edge of the 4:3 picture
+static void shot_outside_reloads(int player) {
     PlayerInputs& pl = g_inputs.p[player];
     PlayerAim a = player_aim(player);   // the very edge too: where a gun can park an off-screen shot
-    if (!pl.trigger || (a.x > 0 && a.y > 0 && a.x < 1 && a.y < 1)) return;
-    if (g_opt.max_aspect > 4.0f / 3.0f + 0.01f) {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        bool window_edge = pt.x <= 1 || pt.y <= 1 || pt.x >= rc.right - 2 || pt.y >= rc.bottom - 2;
-        if (!window_edge) {
-            // With the widescreen aim the game sees the shot where it is (the
-            // gun position already reaches the side areas); otherwise at the
-            // nearest edge of the 4:3 screen
-            if (!wide_aim::active())
-                set_gun_position(player, std::clamp(a.x, 0.003f, 0.997f), std::clamp(a.y, 0.003f, 0.997f));
-            return;
-        }
+    float reach = gun_reach();
+    if (pl.trigger && (a.x <= -reach || a.y <= 0 || a.x >= 1 + reach || a.y >= 1)) {
+        pl.trigger = false;
+        pl.offscreen = true;
     }
-    pl.trigger = false;
-    pl.offscreen = true;
 }
 
 // Settings > Game > TRIGGER STARTS: a player who is not playing starts (or
@@ -246,7 +249,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
             if (p == 0) g_p1_reload_button = g.reload;
             if (p == 1 || g_p1_pad < 0) {
                 aim_at(p, hwnd, g.pos);
-                shot_outside_reloads(p, hwnd, g.pos);
+                shot_outside_reloads(p);
             }
         }
     } else {
@@ -259,7 +262,7 @@ static void poll_keyboard_mouse(HWND hwnd) {
         ScreenToClient(hwnd, &pt);
         if (g_p1_pad < 0) {
             aim_at(0, hwnd, pt);
-            shot_outside_reloads(0, hwnd, pt);
+            shot_outside_reloads(0);
         }
     }
     if (g_block_buttons) {   // the click that closed the menu does not fire
@@ -478,11 +481,12 @@ static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
 // whole refreshes, and starts again after a stall (a window drag, a slow frame).
 // DWM's vblanks are those of one monitor (the main one): they are not used
 // when the window's monitor runs at another refresh rate (two monitors at 60
-// and 144 Hz). When the images do not go out one per refresh (vsync turned
-// off in the driver, G-Sync/FreeSync below the monitor's rate, refreshes
-// missed) they are not tied to vblanks either: each goes out about as soon
-// as it is ready, so its moment is when this thread prepares it (it waits
-// for the previous presents first, so its wake-ups follow theirs)
+// and 144 Hz). When the images do not go out one per refresh (VSYNC: OFF or
+// vsync turned off in the driver, G-Sync/FreeSync below the monitor's rate,
+// refreshes missed) they are not tied to vblanks either: each goes out about
+// as soon as it is ready, so its moment is about when this thread prepares
+// it (it waits for the previous presents first, so its wake-ups follow
+// theirs), evened out over the last ones
 struct DisplayClock {
     enum Mode { Vblanks, Refreshes, Presents };
     double at = 0, last = 0, period = 1.0 / 60;
@@ -538,7 +542,13 @@ struct DisplayClock {
         }
         if (mode == Presents) {
             if (dwm && !other_monitor) period = dwm_period;
-            at = last = now;
+            // The wake-ups are less even than the images going out (the
+            // thread is woken late now and then): the moment moves on by
+            // their average interval and follows them by a tenth of the
+            // difference, starting again when one is off by a whole interval
+            double next = at + interval;
+            at = at > 0 && interval > 0 && std::abs(now - next) < interval ? next + 0.1 * (now - next) : now;
+            last = now;
             return at;
         }
         if (mode == Vblanks) {
@@ -656,11 +666,12 @@ static std::string full_path(const std::string& path) {
     return n && n < MAX_PATH ? std::string(full, n) : path;
 }
 
-// display.ini beside LostWorld.exe: the picture shape, and an optional bezel.
-// The 4x3 and 16x9 folders hold one each; "Display - 4x3.bat" and
-// "Display - 16x9.bat" copy them in. Command-line options still win.
+// display.ini beside LostWorld.exe: an optional bezel. The 4x3 and 16x9
+// folders hold one each; "Display - 4x3.bat" and "Display - 16x9.bat" copy
+// them in, and set Settings > WIDESCREEN in save\settings.ini. An Aspect line
+// here wins over that setting; command-line options win over both.
 //   [Display]
-//   Aspect = 4:3          (4:3 the arcade picture, 16:9 native widescreen, 21:9)
+//   Aspect = 4:3          (optional: 4:3 the arcade picture, 16:9, 21:9)
 //   Bezel = bezel.png     (drawn over the screen; its transparent hole shows the game;
 //                          without that file, bezel-default.png beside it is used)
 static std::string g_bezel_path;
@@ -676,9 +687,6 @@ static void load_display_ini() {
         if (a > 0.5f && a < 5.0f) g_opt.max_aspect = a;
         printf("[video] display.ini: aspect %s\n", v);
     }
-    // WideAim = 0: in widescreen, shots in the side areas fire at the 4:3 edge
-    // instead of reaching the side areas (wide_aim.h)
-    if (!GetPrivateProfileIntA("Display", "WideAim", 1, ini.c_str())) g_opt.wide_aim = false;
     GetPrivateProfileStringA("Display", "Bezel", "", v, sizeof(v), ini.c_str());
     std::string b = v;
     while (!b.empty() && isspace((unsigned char)b.back())) b.pop_back();
@@ -841,6 +849,8 @@ int main(int argc, char** argv) {
         g_opt.supersample = ini.scale / 100.0f;
         g_opt.half_rate = ini.half_rate;
         g_opt.frame_cap = ini.frame_cap;
+        g_opt.vsync = ini.vsync;
+        g_opt.max_aspect = MAX_ASPECT[ini.aspect];   // Settings > WIDESCREEN (the Display bats set it)
         g_opt.haze = ini.haze ? 1.0f : 0.0f;
         g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
         g_opt.ao = ini.ao ? 1.0f : 0.0f;
@@ -872,14 +882,13 @@ int main(int argc, char** argv) {
     }
     // The survival mode's options live in survival.cpp: the table hands them over
     auto extra = [](Options&, const std::string& a, const char* next) -> int {
+        if (random_spawns_option(a)) return 1;
         if (!survival_option(a, next)) return 0;
         return a == "--survival" ? 2 : 1;
     };
     int exit_code = 0;
     if (g_opt.menu) load_display_ini();   // before the command line, which wins
     if (!parse_options(g_opt, argc, argv, extra, exit_code)) return exit_code;
-    // Widescreen aim, in normal play only (the tests keep the factory calibration)
-    wide_aim::configure(g_opt.menu && g_opt.wide_aim, g_opt.max_aspect);
     // Hook of the Reaper outputs, in normal play only (outputs.h)
     if (g_opt.menu && g_opt.outputs) outputs::start();
     // What the options set outside the struct: emulation globals and the gun
@@ -948,6 +957,7 @@ int main(int argc, char** argv) {
 
     // Survival mode: --survival STAGE:ZONE, or picked in the menu
     survival_hooks();
+    random_spawns_hooks();
     int cli_stage = 0, cli_zone = 0;
     bool survival_cli = survival_cli_request(cli_stage, cli_zone);
 
@@ -966,6 +976,7 @@ int main(int argc, char** argv) {
     // Window: the game runs on its own thread at real speed; this thread draws
     // the latest image at the monitor's refresh rate (vsync)
     VkPresenter presenter;
+    presenter.set_vsync(g_opt.vsync);
     if (!presenter.init("Lost World Native", int(SCREEN_H * 2 * std::max(g_opt.max_aspect, 4.0f / 3.0f)), SCREEN_H * 2,
                         g_opt.dlaa)) {
         fprintf(stderr, "Could not start Vulkan; try --headless\n");
@@ -1186,6 +1197,7 @@ int main(int argc, char** argv) {
     // The menus are being driven with a gamepad: no mouse pointer until the mouse moves
     bool pad_in_menu = false;
     raw_mice::init(presenter.hwnd());   // a second mouse can be player 2's gun
+    if (g_opt.several_mice) raw_mice::set_saved(ini.gun_p1, ini.gun_p2);   // the guns picked in GUN TEST
     presenter.raw_input = raw_mice::on_input;
     UiOverlay ui;
     std::vector<uint32_t> ui_pixels;
@@ -1218,6 +1230,8 @@ int main(int argc, char** argv) {
             if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
         s.half_rate = g_opt.half_rate;
         s.frame_cap = g_opt.frame_cap;
+        s.vsync = g_opt.vsync;
+        s.aspect = aspect_level(g_opt.max_aspect);   // --aspect 2.6 shows as 21:9 and is kept until changed
         s.haze = g_opt.haze > 0;
         s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
         s.ao = g_opt.ao > 0;
@@ -1243,6 +1257,8 @@ int main(int argc, char** argv) {
         s.trigger_start = g_opt.trigger_start;
         s.smooth = g_opt.interp;
         s.second_mouse = g_opt.several_mice;
+        s.gun_p1 = ini.gun_p1;
+        s.gun_p2 = ini.gun_p2;
         s.saturation = std::clamp(int(g_opt.saturation * 100 + 0.5f), 0, 200);
         s.gamma = std::clamp(int(g_opt.gamma * 100 + 0.5f), 50, 150);
         frontend.aa_at_launch = s.aa;
@@ -1293,7 +1309,9 @@ int main(int argc, char** argv) {
                 return true;
             }
             case WM_LBUTTONDOWN: frontend.click(x, y); return true;
-            case WM_RBUTTONDOWN: frontend.key(VK_ESCAPE); return true;   // right button: back
+            case WM_RBUTTONDOWN:   // right button: back (not in GUN TEST, where it is a gun reloading)
+                if (!frontend.gun_test_open()) frontend.key(VK_ESCAPE);
+                return true;
             case WM_MOUSEWHEEL: {
                 POINT p{x, y};   // screen coordinates for this one
                 ScreenToClient(presenter.hwnd(), &p);
@@ -1671,6 +1689,12 @@ int main(int argc, char** argv) {
     int queue_extra = 0;
     double went_out = 0, last_miss = -100;
     bool repeat_image = false;   // HALF FRAME RATE: this refresh shows the last image again
+    // VSYNC: OFF still draws no more images than the monitor's refreshes:
+    // without a limit the GPU draws thousands a second for nothing and the
+    // game thread falls behind (uneven game frames). Measured with
+    // LW_FRAMELOG on an RTX 5070 Ti at 120 Hz: ~1700 images a second
+    double next_image = 0;
+    HANDLE image_timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     for (;;) {
         {   // before the inputs are read
             int depth = queue_depth ? queue_depth + queue_extra : 0;
@@ -1687,6 +1711,20 @@ int main(int argc, char** argv) {
                 out = 0;   // the next wait skips a refresh: not a miss
             }
             went_out = out;
+        }
+        if (!g_opt.vsync) {   // the next image a refresh after the last (from now after a slow one)
+            double period = display_clock.period, now = qpc_seconds();
+            if (now - next_image > period) next_image = now;
+            if (image_timer && next_image - now > 0.001) {   // to ~0.5 ms before, then a spin
+                LARGE_INTEGER due;
+                due.QuadPart = -LONGLONG((next_image - now - 0.0005) * 1e7);
+                if (SetWaitableTimer(image_timer, &due, 0, nullptr, nullptr, FALSE))
+                    WaitForSingleObject(image_timer, 100);
+            } else if (!image_timer) {
+                while (next_image - now > 0.002) Sleep(1), now = qpc_seconds();
+            }
+            while (qpc_seconds() < next_image) YieldProcessor();
+            next_image += period;
         }
         if (!presenter.pump()) break;
         double loop_from = qpc_seconds();
@@ -1770,6 +1808,7 @@ int main(int argc, char** argv) {
                 switch (a) {
                 case Frontend::Action::StartArcade:   // the game at the SEGA logo is the home state QUIT TO MAIN MENU puts back
                     if (!g_boot_skip) game_state_keep_home();
+                    random_spawns_set(frontend.random_spawns);   // CLASSIC > ARCADE or RANDOM SPAWNS
                     [[fallthrough]];
                 case Frontend::Action::Resume:
                     boss_pending = -1;
@@ -1778,6 +1817,7 @@ int main(int argc, char** argv) {
                 case Frontend::Action::StartSurvival: {
                     const SurvivalZone& z = SURVIVAL_ZONES[frontend.survival_choice];
                     boss_pending = -1;
+                    random_spawns_set(false);
                     if (boss_fight >= 0 || frontend.boss_mode) {   // from boss mode: back to the arcade first
                         boss_fight = -1;
                         frontend.boss_mode = false;
@@ -1786,6 +1826,7 @@ int main(int argc, char** argv) {
                     break;
                 }
                 case Frontend::Action::StartBoss:
+                    random_spawns_set(false);
                     if (frontend.boss_status[frontend.boss_choice] == Frontend::BOSS_READY) boss_pending = frontend.boss_choice;
                     break;
                 case Frontend::Action::PrepareBosses:
@@ -1822,6 +1863,9 @@ int main(int argc, char** argv) {
                     renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
                     g_opt.half_rate = s.half_rate;
                     g_opt.frame_cap = s.frame_cap;
+                    presenter.set_vsync(g_opt.vsync = s.vsync);
+                    if (s.aspect != aspect_level(g_opt.max_aspect))
+                        renderer.set_max_aspect(g_opt.max_aspect = MAX_ASPECT[s.aspect]);
                     renderer.set_distance_haze(s.haze ? haze_strength : 0);
                     renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
@@ -1865,6 +1909,7 @@ int main(int argc, char** argv) {
                     }
                     g_opt.several_mice = s.second_mouse;
                     if (!s.second_mouse) raw_mice::reset();
+                    else raw_mice::set_saved(s.gun_p1, s.gun_p2);
                     g_subtitles = s.subtitles;
                     renderer.set_picture(s.saturation / 100.0f, s.gamma / 100.0f);
                     g_pad_settings = {s.pad_speed, s.gyro, s.gyro_speed, s.vibration, s.aim_assist};
@@ -1989,6 +2034,46 @@ int main(int argc, char** argv) {
                 frontend.records = stats_view();   // the game stands still while the menu is open
                 frontend.invalidate();
             }
+            // GUN TEST: what every mouse and gun does, and a press from one of
+            // them while the players' guns are being picked
+            static std::map<std::string, unsigned> gun_presses;
+            if (frontend.gun_test_open()) {
+                ULONGLONG now = GetTickCount64();
+                frontend.guns_pinned = raw_mice::guns_pinned();
+                std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
+                std::vector<Frontend::GunView> view;
+                int hidden = 0;
+                for (size_t i = 0; i < devs.size(); i++) {
+                    const raw_mice::Device& d = devs[i];
+                    auto known = gun_presses.find(d.path);
+                    bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
+                    gun_presses[d.path] = d.presses;
+                    if (fired && frontend.picking_guns()) {
+                        frontend.guns = {{d.path, d.name}};
+                        frontend.gun_fired(0);
+                    }
+                    if (!d.last_input) {   // nothing from it yet: the pointer side of a keyboard, say, unless it moves
+                        hidden++;
+                        continue;
+                    }
+                    Frontend::GunView g{d.path, d.name, d.absolute, d.last_input && now - d.last_input < 1000, d.has_pos,
+                                        int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
+                    view.push_back(g);
+                }
+                auto same = [](const Frontend::GunView& a, const Frontend::GunView& b) {
+                    return a.path == b.path && a.absolute == b.absolute && a.active == b.active && a.has_pos == b.has_pos &&
+                           a.x == b.x && a.y == b.y && a.trigger == b.trigger && a.reload == b.reload && a.player == b.player;
+                };
+                bool changed = view.size() != frontend.guns.size() || hidden != frontend.quiet_mice;
+                for (size_t i = 0; !changed && i < view.size(); i++) changed = !same(view[i], frontend.guns[i]);
+                if (changed) {   // every refresh while a mark moves: only the marks are drawn again
+                    frontend.guns = view;
+                    frontend.quiet_mice = hidden;
+                    frontend.invalidate();
+                }
+            } else {
+                gun_presses.clear();
+            }
             menu_was = frontend.screen();
             {
                 double t = qpc_seconds();
@@ -1999,8 +2084,9 @@ int main(int argc, char** argv) {
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
             // The menu pointer is player 1's crosshair, drawn over the menus
             // instead of the Windows arrow. Player 2's gun is left out: if it
-            // moved the (hidden) Windows pointer, it goes back to player 1's spot
-            raw_mice::block_player2(frontend.active());
+            // moved the (hidden) Windows pointer, it goes back to player 1's spot.
+            // GUN TEST draws every gun's own mark instead
+            raw_mice::block_player2(frontend.active() && !frontend.gun_test_open());
             presenter.set_cursor_visible(false);
             g_menu_gun = false;
             if (frontend.active()) {
@@ -2030,7 +2116,7 @@ int main(int argc, char** argv) {
                     SetCursorPos(p.x, p.y);
                 }
             }
-            ui.set_cursor(frontend.active() && !pad_in_menu, float(g_menu_ptr.x), float(g_menu_ptr.y));
+            ui.set_cursor(frontend.active() && !pad_in_menu && !frontend.gun_test_open(), float(g_menu_ptr.x), float(g_menu_ptr.y));
             static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
             if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
                 frontend.pad_prompts = pad_in_menu || menu_pad;
@@ -2041,7 +2127,9 @@ int main(int argc, char** argv) {
                 GetClientRect(presenter.hwnd(), &rc);
                 double t0 = qpc_seconds();
                 if (frontend.draw(rc.right, rc.bottom, ui_pixels)) {
-                    ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
+                    int y0, y1;
+                    if (frontend.partial_rows(y0, y1)) ui.update_rows(ui_pixels.data(), rc.right, rc.bottom, y0, y1);
+                    else ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
                     double ms = (qpc_seconds() - t0) * 1000;
                     if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
                     static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
@@ -2049,6 +2137,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        update_aim_reach(presenter.hwnd());
         poll_keyboard_mouse(presenter.hwnd());
         {   // survival results: the reload button goes back to the main menu
             static bool reload_was = false;
@@ -2160,7 +2249,8 @@ int main(int argc, char** argv) {
         double display = display_clock.tick(presenter.hwnd());
         // HALF FRAME RATE: above 100 Hz every other refresh shows the image
         // before again (only the crosshairs move), half the work of the GPU
-        bool half = g_opt.half_rate && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
+        // (with vsync: without it the images are not tied to refreshes)
+        bool half = g_opt.half_rate && g_opt.vsync && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
                     film.empty();
         repeat_image = half && !repeat_image;
         if (repeat_image) {

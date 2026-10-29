@@ -110,6 +110,7 @@ const std::vector<Entry>& table() {
         off("--no-interp", &Options::interp, "game frames as they are, not interpolated"),
         flag("--half-rate", &Options::half_rate, "above 100 Hz, draw the 3D every other refresh (faster)"),
         num("--frame-cap", &Options::frame_cap, "at most N pictures a second (0 = the monitor's refresh rate)"),
+        off("--no-vsync", &Options::vsync, "images go out as soon as they are drawn, not at the refresh (tearing)"),
         flag("--letterbox", &Options::letterbox, "keep the black bars of the cutscenes"),
         flag("--pixel2d", &Options::pixel_2d, "2D layers without xBR upscaling"),
         flag("--classic-text", &Options::classic_text, "original pixel letters instead of vector fonts"),
@@ -134,7 +135,6 @@ const std::vector<Entry>& table() {
         flag("--free-play", &Options::free_play, "start and continue with 1 / 2 alone, no coin needed (default)"),
         off("--no-free-play", &Options::free_play, "coins needed to start and continue (5 / 6)"),
         off("--no-outputs", &Options::outputs, "no Hook of the Reaper outputs (TCP port 8000)"),
-        off("--no-wide-aim", &Options::wide_aim, "widescreen: the guns do not reach the side areas"),
         flag("--gamepads", &Options::gamepads, "controllers play too (off by default: light guns, or the mouse)"),
         off("--no-trigger-start", &Options::trigger_start, "the gun's trigger does not start or continue a game"),
         num("--crosshair-hide", &Options::crosshair_hide, "hide a crosshair after N seconds unused (0 = never)"),
@@ -184,9 +184,12 @@ void print_usage(FILE* out) {
     }
     fprintf(out,
             "Survival mode:\n"
-            "  %-28s %s\n  %-28s %s\n",
+            "  %-28s %s\n  %-28s %s\n"
+            "Random spawns:\n"
+            "  %-28s %s\n",
             "--survival STAGE:ZONE", "wave arena in that stage and zone (see README)",
-            "--trace-survival", "trace of the mode in out/survival_trace.txt");
+            "--trace-survival", "trace of the mode in out/survival_trace.txt",
+            "--random-spawns", "the arcade game with its encounters shuffled (CLASSIC > RANDOM SPAWNS)");
 }
 
 bool options_disable_menu(int argc, char** argv, std::initializer_list<const char*> more) {

@@ -13,7 +13,7 @@
 
 ## What you get
 
-- **True widescreen** (16:9 or 21:9), not stretched. Any resolution.
+- **True widescreen** (16:9 or 21:9, in Options > Display > Widescreen), not stretched. Any resolution.
 - **Ray-traced sun shadows**, ambient occlusion, distance haze, bloom.
 - **New weather**: dense rain, wet ground, lightning in the T-Rex storm.
 - **Modern flashlight** in the night stages.
@@ -21,7 +21,8 @@
 - **Smooth motion** at 120 / 144 Hz and above.
 - **Arcade sound**, with surround and headphone modes.
 - **Light guns, mouse or two mice** for 2 players; gamepads (gyro too) with `--gamepads`.
-- **New modes**: Boss Fight, Survival, achievements and stats.
+- **New modes**: Random Spawns (the arcade game shuffled), Boss Fight, Survival, achievements and stats.
+- **NEW:** Ultra-widescreen support.
 
 <p align="center">
   <img src="docs/img/widescreen.jpg" alt="Arcade 4:3 next to native 16:9" width="100%">
@@ -45,14 +46,14 @@
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,
   `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
-- **Widescreen aim**: in 16:9 the guns reach the side areas, so a shot there fires where you aim
-  (experimental: whether every enemy out there can be hit is being tested); pointing away from the
-  screen still reloads. `WideAim = 0` in `16x9\display.ini` makes side shots fire at the 4:3 edge
-  instead. 4:3 mode keeps the arcade's rule.
+- **Widescreen aim** (from the original project): in 16:9 or 21:9 the guns aim and shoot over the
+  whole picture, side areas too; pointing away from the screen still reloads. In 4:3 (with the
+  bezel) the crosshair stops at the picture's edge, and a shot there reloads as on the cabinet.
 - **Gun-friendly menus**: the menu pointer is player 1's crosshair, and player 2's gun is ignored
   in the menus so the two guns never fight over the pointer.
-- **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` copy the `display.ini`
-  from the `4x3` or `16x9` folder into the game folder. The bezel is read straight from `4x3`:
+- **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` set Settings >
+  WIDESCREEN and copy the `display.ini` from the `4x3` or `16x9` folder into the game folder
+  (the bezel shows only with the 4:3 picture). The bezel is read straight from `4x3`:
   your own `4x3\bezel.png` if you add one, otherwise `bezel-default.png` (which comes with it);
   updates only replace the default, never your `bezel.png`.
 - **LaunchBox ready**: `Launch Lost World.ahk` (AutoHotkey 1.1) starts the game; Esc closes it
@@ -116,9 +117,12 @@ and one *Windows 11 SDK* (it works on Windows 10 too).
 F11 or Alt+Enter toggles fullscreen. Everything else is in **Options**.
 
 Light guns that Windows sees as a mouse (Sinden, Gun4IR and the like) work as is; for a Sinden, keep
-its software running for the white border. Shooting off the screen reloads. **Options >
+its software running for the white border. The guns aim over the whole widescreen picture, side
+bands included, and shooting off the picture reloads. **Options >
 Game > Free play** lets 1 / 2 (a gun's start button) start and continue without a coin, and
 **Controls > Hide idle crosshair** clears a crosshair whose gun has not been used for a few seconds.
+**Controls > Gun test** shows every mouse and gun Windows sees and what each one does; fire player 1's
+gun and then player 2's there to keep them as those players' guns from then on.
 
 Want your own crosshair? Drop a `crosshair.png` (with transparency) next to `LostWorld.exe`, and
 `crosshair_p2.png` for player 2 if you want a different one. It is centred on the gun, and its size

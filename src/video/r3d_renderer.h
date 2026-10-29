@@ -21,8 +21,8 @@
 #include "vk_presenter.h"
 
 // Placement of the picture in the window. The 3D view can be wider than the
-// original 4:3 screen (widescreen); the 2D layers and the gun area stay 4:3
-// in the middle of it.
+// original 4:3 screen (widescreen); the 2D layers stay 4:3 in the middle of
+// it, the guns aim over all of it.
 struct ScreenLayout {
     float view_w;    // width of the 3D view in Model 3 pixels (496 = original 4:3)
     float scale;     // window pixels per Model 3 pixel
@@ -315,6 +315,8 @@ private:
     bool motion_pass_ = false;   // pipelines and targets carry motion vectors (DLAA started)
     VkImageView composed_view_ = VK_NULL_HANDLE;   // 3D image the composition samples
     uint64_t scene_serial_ = 0, drawn_serial_ = 0, jitter_index_ = 0;
+    uint64_t uploaded_serial_ = ~0ull;   // the scene whose vertices are in vertices_
+    float uploaded_keep_ = 1.0f;         // how much of the game's own rain they show
     float drawn_interp_ = 1.0f;   // interpolation of the previously displayed image
     Buffer texture_staging_, layer_staging_, vertices_;
     Buffer atmosphere_uniform_;   // atmosphere.glsl parameters, rewritten every frame

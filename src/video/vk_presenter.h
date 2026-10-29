@@ -28,7 +28,7 @@ public:
 
     // Processes window messages; returns false once it is closed
     bool pump();
-    // Records and presents a frame with vsync. The image arrives in
+    // Records and presents a frame (with vsync unless set_vsync(false)). The image arrives in
     // COLOR_ATTACHMENT_OPTIMAL and must be left that way when done.
     void frame(const RecordFn& record);
 
@@ -39,6 +39,12 @@ public:
     void toggle_fullscreen();
     bool fullscreen() const { return fullscreen_; }
     void close() { quit_ = true; }
+    // Vsync off: each image goes out as soon as it is drawn, without waiting
+    // for the monitor's refresh (tearing; mailbox if the driver has no
+    // immediate mode). Takes effect with the next frame (a new swapchain)
+    void set_vsync(bool on) {
+        if (on != vsync_) vsync_ = on, resized_ = true;
+    }
 
     // Sees key presses and mouse messages first; returning true swallows
     // them (Esc then no longer closes the window)
@@ -99,7 +105,7 @@ private:
     static LRESULT CALLBACK wndproc(HWND, UINT, WPARAM, LPARAM);
 
     HWND hwnd_ = nullptr;
-    bool quit_ = false, resized_ = false, fullscreen_ = false, show_cursor_ = false;
+    bool quit_ = false, resized_ = false, fullscreen_ = false, show_cursor_ = false, vsync_ = true;
     WINDOWPLACEMENT placement_{sizeof(WINDOWPLACEMENT)};
 
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -127,6 +133,7 @@ private:
     Timing timing_;
     LastFrame last_;
     bool present_wait_ = false;
+    VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_MAX_ENUM_KHR;   // of the swapchain (printed when it changes)
     bool ray_query_ = false;
     uint64_t present_id_ = 0, swapchain_first_id_ = 1;   // the first id presented to the current swapchain
     std::shared_mutex swapchain_mutex_;   // wait_present() against the swapchain being replaced

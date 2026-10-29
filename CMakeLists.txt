@@ -98,12 +98,12 @@ add_executable(LostWorld
     src/runtime/eeprom.cpp
     src/runtime/inputs.cpp
     src/runtime/raw_mice.cpp
-    src/runtime/wide_aim.cpp
     src/runtime/free_play.cpp
     src/runtime/outputs.cpp
     src/runtime/gamepad.cpp
     src/runtime/scsi53c810.cpp
     src/runtime/survival.cpp
+    src/runtime/random_spawns.cpp
     src/runtime/stats.cpp
     src/ui/survival_ui.cpp
     src/ui/achievement_toast.cpp
@@ -163,7 +163,7 @@ if(MSVC)
     target_link_options(LostWorld PRIVATE /ENTRY:mainCRTStartup)
 endif()
 target_compile_definitions(LostWorld PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
-target_link_libraries(LostWorld PRIVATE SDL3::SDL3-static winmm ws2_32 ole32 windowscodecs gdi32 dwmapi comdlg32 shell32
+target_link_libraries(LostWorld PRIVATE SDL3::SDL3-static winmm ws2_32 ole32 windowscodecs gdi32 dwmapi comdlg32 shell32 hid
     ${CMAKE_SOURCE_DIR}/third_party/ngx/lib/nvsdk_ngx_d.lib)
 
 if(MSVC)

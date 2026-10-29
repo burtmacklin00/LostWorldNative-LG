@@ -64,10 +64,10 @@ const wchar_t* const FACES[5] = {L"Saira ExtraCondensed ExCond", L"Barlow Conden
 void FrontendSettings::load(const char* path) {
     FILE* f = fopen(path, "r");
     if (!f) return;
-    char line[256];
+    char line[512];
     while (fgets(line, sizeof(line), f)) {
-        char key[64], value[64];
-        if (sscanf(line, " %63[^= ] = %63s", key, value) != 2) continue;
+        char key[64], value[400];   // device paths are long
+        if (sscanf(line, " %63[^= ] = %399s", key, value) != 2) continue;
         std::string k = key, v = value;
         bool on = v == "1" || v == "on" || v == "true";
         if (k == "fullscreen") fullscreen = on;
@@ -79,6 +79,8 @@ void FrontendSettings::load(const char* path) {
         else if (k == "resolution_3d") scale = std::clamp(atoi(value), SCALES[0], 100);
         else if (k == "half_rate") half_rate = on;
         else if (k == "frame_cap") frame_cap = std::clamp(atoi(value), 0, 500);
+        else if (k == "vsync") vsync = on;
+        else if (k == "aspect") aspect = v == "4:3" ? 0 : v == "21:9" ? 2 : 1;
         else if (k == "haze") haze = on;
         else if (k == "bloom") bloom = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : on ? 2 : 0;
         else if (k == "ao") ao = on;
@@ -112,6 +114,8 @@ void FrontendSettings::load(const char* path) {
         else if (k == "gyro_speed") gyro_speed = std::clamp(atoi(value), 1, 10);
         else if (k == "vibration") vibration = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : 0;
         else if (k == "aim_assist") aim_assist = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : 0;
+        else if (k == "gun_p1") gun_p1 = v == "none" ? "" : v;
+        else if (k == "gun_p2") gun_p2 = v == "none" ? "" : v;
     }
     fclose(f);
 }
@@ -125,14 +129,16 @@ void FrontendSettings::save(const char* path) const {
     static const char* const RAIN[3] = {"off", "light", "heavy"};
     static const char* const SPEAKERS[3] = {"stereo", "surround", "headphones"};
     static const char* const RT_MODES[3] = {"off", "shadows", "ao"};
+    static const char* const ASPECTS[3] = {"4:3", "16:9", "21:9"};
     fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
                "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
                "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\ntrigger_start = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\nframe_cap = %d\n",
+               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\ntrigger_start = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\nframe_cap = %d\nvsync = %d\naspect = %s\n",
             fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play, trigger_start, menu_music, scale, half_rate, frame_cap);
+            crosshair_style ? "custom" : "default", crosshair_hide, free_play, trigger_start, menu_music, scale, half_rate, frame_cap, vsync, ASPECTS[aspect]);
+    fprintf(f, "gun_p1 = %s\ngun_p2 = %s\n", gun_p1.empty() ? "none" : gun_p1.c_str(), gun_p2.empty() ? "none" : gun_p2.c_str());
     fclose(f);
 }
 
@@ -308,7 +314,8 @@ const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"L
 // the one place to put a new option (besides `all` in items()); an option
 // missing here goes at the end of GAME. Tabs past VISIBLE_OPTIONS rows scroll.
 const Frontend::OptionTab Frontend::OPTION_TABS[] = {
-    {OPT_QUALITY, DISPLAY_TAB}, {OPT_DISPLAY, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_HALF_RATE, DISPLAY_TAB}, {OPT_FRAME_CAP, DISPLAY_TAB},
+    {OPT_QUALITY, DISPLAY_TAB}, {OPT_DISPLAY, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_HALF_RATE, DISPLAY_TAB},
+    {OPT_VSYNC, DISPLAY_TAB}, {OPT_FRAME_CAP, DISPLAY_TAB},
     {OPT_MOTION, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB}, {OPT_TEXT, DISPLAY_TAB},
     {OPT_SAT, DISPLAY_TAB}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
     {OPT_SUN, LIGHTING_TAB}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_RT, LIGHTING_TAB}, {OPT_SHAFTS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB},
@@ -319,7 +326,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
     {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
     {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
-    {OPT_MICE, CONTROLS_TAB},
+    {OPT_MICE, CONTROLS_TAB}, {OPT_GUN_TEST, CONTROLS_TAB},
     {OPT_FREE_PLAY, GAME_TAB}, {OPT_TRIGGER_START, GAME_TAB}, {OPT_SUBS, GAME_TAB},
 };
 
@@ -371,16 +378,21 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
         L"Fast cards: ray traced sun shadows and every effect",
         L"Everything on: ray traced sun shadows and ambient occlusion",
         L"Your own mix of the options.  Pick a level to set the costly ones at once"};
+    static const wchar_t* const ASPECTS[3] = {L"4:3 (ORIGINAL)", L"16:9", L"21:9"};
     int quality = s.quality();
     std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
             {OPT_DISPLAY, L"DISPLAY", s.fullscreen ? L"FULLSCREEN" : L"WINDOW",
              L"Window or full screen (also F11 or Alt+Enter)"},
+            {OPT_ASPECT, L"WIDESCREEN", ASPECTS[s.aspect],
+             L"Widest 3D view: 21:9 fills ultrawide monitors (2560x1080, 3440x1440); 4:3 is the arcade's own"},
             {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(s.scale) + L"%",
              L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
             {OPT_HALF_RATE, L"FRAME RATE", s.half_rate ? L"HALF" : L"FULL",
              L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
             {OPT_FRAME_CAP, L"FRAME CAP", s.frame_cap ? std::to_wstring(s.frame_cap) + L" FPS" : std::wstring(L"OFF"),
              L"At most this many pictures a second (Off: your monitor's refresh rate).  The game itself always runs at arcade speed"},
+            {OPT_VSYNC, L"VSYNC", on_off(s.vsync),
+             L"Off: each image goes out as soon as it is drawn, without waiting for the monitor (may tear)"},
             {OPT_MOTION, L"MOTION", s.smooth ? L"SMOOTH" : L"ORIGINAL",
              L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
             {OPT_VOLUME, L"VOLUME", std::to_wstring(s.volume), L"Sound volume"},
@@ -445,6 +457,9 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
              L"Pulling a gun's trigger starts or continues that player's game, like their start button"},
             {OPT_MICE, L"SECOND MOUSE", s.second_mouse ? L"PLAYER 2" : L"OFF",
              L"A second mouse joins as player 2 with a click while player 1 plays"},
+            {OPT_GUN_TEST, L"GUN TEST", L"OPEN...",
+             L"Every mouse and light gun Windows sees, what each one is doing and which player it is.  "
+             L"Fire each gun to make it player 1's or player 2's for good"},
             {OPT_SUBS, L"SUBTITLES", SUBS[s.subtitles], L"Captions of what the characters say"},
             {OPT_PAD_SPEED, L"STICK SPEED", std::to_wstring(s.pad_speed),
              L"How fast the gamepad's sticks move the sight.  " + pads},
@@ -476,6 +491,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
         choice(q == FrontendSettings::CUSTOM ? -1 : q, 4, false);
         break;
     }
+    case OPT_ASPECT: choice(s.aspect, 3, false); break;
     case OPT_SCALE: slider(s.scale, FrontendSettings::SCALES[0], 100); break;
     case OPT_HALF_RATE: choice(s.half_rate ? 1 : 0, 2, false); break;
     case OPT_FRAME_CAP: {
@@ -484,6 +500,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
         choice(i % 4, 4, true);
         break;
     }
+    case OPT_VSYNC: toggle(s.vsync); break;
     case OPT_MOTION: choice(s.smooth ? 1 : 0, 2, false); break;
     case OPT_VOLUME: slider(s.volume, 0, 10); break;
     case OPT_SPEAKERS: choice(s.speakers, 3, false); break;
@@ -516,7 +533,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
     case OPT_TRIGGER_START: toggle(s.trigger_start); break;
     case OPT_MUSIC: toggle(s.menu_music); break;
     case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
-    case OPT_CROSS_P1: case OPT_CROSS_P2: it.kind = BUTTON; break;
+    case OPT_CROSS_P1: case OPT_CROSS_P2: case OPT_GUN_TEST: it.kind = BUTTON; break;
     case OPT_MICE: choice(s.second_mouse ? 1 : 0, 2, false); break;
     case OPT_SUBS: choice(s.subtitles, 3, false); break;
     case OPT_SAT: slider(s.saturation, 0, 200); break;
@@ -533,9 +550,11 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
 void Frontend::reset_tab() {
     const FrontendSettings d;
     for (const Item& it : items()) switch (it.id) {
+        case OPT_ASPECT: settings.aspect = d.aspect; break;
         case OPT_SCALE: settings.scale = d.scale; break;
         case OPT_HALF_RATE: settings.half_rate = d.half_rate; break;
         case OPT_FRAME_CAP: settings.frame_cap = d.frame_cap; break;
+        case OPT_VSYNC: settings.vsync = d.vsync; break;
         case OPT_MOTION: settings.smooth = d.smooth; break;
         case OPT_VOLUME: settings.volume = d.volume; break;
         case OPT_SPEAKERS: settings.speakers = d.speakers; break;
@@ -587,16 +606,22 @@ std::vector<Frontend::Item> Frontend::items() const {
                 {OPTIONS, L"OPTIONS", L"", L"Display, sound and graphics"},
                 {RECORDS, L"RECORDS", L"", L"Achievements and your statistics"},
                 {QUIT, L"QUIT", L"", L"Close the game"}};
-    case Screen::Play: {
+    case Screen::Play:
+        return {{CLASSIC, L"CLASSIC ARCADE", L"", L"The arcade game: as it was, or with the dinosaurs shuffled"},
+                {BOSS, L"BOSS FIGHT", L"", L"Pick a boss and go straight to the fight"},
+                {SURVIVAL, L"SURVIVAL", L"", L"Hold one spot against endless waves of dinosaurs"},
+                {BACK, L"BACK", L"", L"Return to the main menu"}};
+    case Screen::Classic: {
         // How to start: free play (no coin) and the gun's trigger, as set
         std::wstring how = settings.free_play
                                ? (settings.trigger_start ? L"The original arcade game.  Free play: pull the trigger or press 1 to start, or START on a gamepad"
                                                          : L"The original arcade game.  Free play: press 1 to start, or START on a gamepad")
                                : L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad";
-        return {{ARCADE, L"CLASSIC ARCADE", L"", how},
-                {BOSS, L"BOSS FIGHT", L"", L"Pick a boss and go straight to the fight"},
-                {SURVIVAL, L"SURVIVAL", L"", L"Hold one spot against endless waves of dinosaurs"},
-                {BACK, L"BACK", L"", L"Return to the main menu"}};
+        return {{ARCADE, L"ARCADE", L"", how},
+                {RANDOM, L"RANDOM SPAWNS", L"",
+                 L"Dinosaurs come from new places and at new times, and every boss takes a different number of shots.  "
+                 L"Different every game"},
+                {BACK, L"BACK", L"", L"Return to the mode select"}};
     }
     case Screen::Pause:
         if (boss_mode)
@@ -711,7 +736,9 @@ void Frontend::activate(const Item& it, int dir) {
     case RECORDS: tab_ = 0; record_scroll_ = 0; open(Screen::Records); break;
     case QUIT: push(Action::Quit); break;
     case QUIT_TO_MENU: push(Action::QuitToMenu); break;
-    case ARCADE: push(Action::StartArcade); break;
+    case CLASSIC: open(Screen::Classic); selected_ = random_spawns ? 1 : 0; break;
+    case ARCADE: random_spawns = false; push(Action::StartArcade); break;
+    case RANDOM: random_spawns = true; push(Action::StartArcade); break;
     case BOSS: open_boss_list(false); break;
     case SURVIVAL: {
         open(Screen::Survival);
@@ -762,6 +789,8 @@ void Frontend::activate(const Item& it, int dir) {
         push(Action::SettingsChanged);
         break;
     }
+    case OPT_ASPECT: settings.aspect = (settings.aspect + dir + 3) % 3; push(Action::SettingsChanged); break;
+    case OPT_VSYNC: settings.vsync = !settings.vsync; push(Action::SettingsChanged); break;
     case OPT_HAZE: settings.haze = !settings.haze; push(Action::SettingsChanged); break;
     case OPT_BLOOM: settings.bloom = (settings.bloom + dir + 4) % 4; push(Action::SettingsChanged); break;
     case OPT_AO: settings.ao = !settings.ao; push(Action::SettingsChanged); break;
@@ -804,6 +833,7 @@ void Frontend::activate(const Item& it, int dir) {
         }
         break;
     case OPT_MICE: settings.second_mouse = !settings.second_mouse; push(Action::SettingsChanged); break;
+    case OPT_GUN_TEST: open(Screen::GunTest); gun_step_ = 0; break;
     case OPT_SUBS: settings.subtitles = (settings.subtitles + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_PAD_SPEED:
         settings.pad_speed = dir > 0 && settings.pad_speed == 10 && wrap_ ? 1 : std::clamp(settings.pad_speed + dir, 1, 10);
@@ -847,8 +877,17 @@ void Frontend::back() {
         break;
     case Screen::Records: open(Screen::Main); selected_ = 2; break;   // onto Records
     case Screen::Survival: open(Screen::Play); selected_ = 2; break;   // onto Survival
+    case Screen::Classic: open(Screen::Play); selected_ = 0; break;    // onto Classic arcade
     case Screen::Pause: push(Action::Resume); break;
     case Screen::Main: selected_ = 3; dirty_ = true; break;   // onto Quit
+    case Screen::GunTest: {   // onto its row in CONTROLS
+        tab_ = CONTROLS_TAB;
+        open(Screen::Options);
+        auto list = items();
+        for (int i = 0; i < int(list.size()); i++)
+            if (list[i].id == OPT_GUN_TEST) selected_ = i;
+        break;
+    }
     default: break;
     }
 }
@@ -858,6 +897,26 @@ bool Frontend::key(int vk) {
     if (locked_notice_) {   // any of these closes it
         if (vk != VK_RETURN && vk != VK_SPACE && vk != VK_ESCAPE && vk != VK_BACK) return true;
         locked_notice_ = false;
+        dirty_ = true;
+        return true;
+    }
+    if (screen_ == Screen::GunTest) {
+        switch (vk) {
+        case VK_RETURN: case VK_SPACE:   // pick the guns again, player 1's first
+            if (!gun_step_ && !guns_pinned) gun_step_ = 1;
+            break;
+        case 'R': case VK_DELETE:   // back to the first and second gun to fire
+            if (guns_pinned || gun_step_ || (settings.gun_p1.empty() && settings.gun_p2.empty())) break;
+            settings.gun_p1.clear(), settings.gun_p2.clear();
+            push(Action::SettingsChanged);
+            break;
+        case VK_ESCAPE: case VK_BACK:
+            if (gun_step_ == 2) push(Action::SettingsChanged);   // only player 1's gun
+            if (gun_step_) gun_step_ = 0;
+            else back();
+            break;
+        default: return false;
+        }
         dirty_ = true;
         return true;
     }
@@ -945,6 +1004,10 @@ void Frontend::click(int x, int y) {
         open_coffee();
         return;
     }
+    if (screen_ == Screen::GunTest) {   // the guns fire at it: only BACK, and not while picking them
+        if (!gun_step_ && PtInRect(&back_rect_, p)) back();
+        return;
+    }
     if (screen_ == Screen::Options && PtInRect(&reset_rect_, p)) {
         reset_tab();
         return;
@@ -982,6 +1045,7 @@ void Frontend::click(int x, int y) {
 }
 
 void Frontend::wheel(int x, int y, int delta) {
+    if (screen_ == Screen::GunTest) return;
     mouse_move(x, y);
     if (screen_ == Screen::Records) {
         scroll_records(delta > 0 ? -1 : 1);
@@ -1797,6 +1861,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
             y0 = U(430);
         }
         const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA"
+                             : screen_ == Screen::Classic ? L"CLASSIC ARCADE"
                              : boss ? L"SELECT BOSS" : nullptr;
         if (sub) {
             text(MONO, U(24), sub, tx, y0, talign, {0xF0C070, 0xE0A050});
@@ -2113,8 +2178,30 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
         bg_.clear();
         bg_stone_.clear();
     }
+    partial_ = false;
+    if (screen_ != Screen::GunTest) gun_page_.clear();
+    else if (gun_page_.size() == size_t(w) * h && out.size() == gun_page_.size() && gun_page_key_ == gun_key()) {
+        // Only the marks moved: put the page back where they were, draw them where they are
+        px_ = out.data();
+        int y0 = h, y1 = 0;
+        auto restore = [&](const RECT& r) {
+            int x0 = std::max(0, int(r.left)), x1 = std::min(w, int(r.right));
+            int r0 = std::max(0, int(r.top)), r1 = std::min(h, int(r.bottom));
+            if (x0 >= x1 || r0 >= r1) return;
+            for (int y = r0; y < r1; y++)
+                memcpy(&out[size_t(y) * w + x0], &gun_page_[size_t(y) * w + x0], size_t(x1 - x0) * 4);
+            y0 = std::min(y0, r0), y1 = std::max(y1, r1);
+        };
+        for (const RECT& r : gun_marks_) restore(r);
+        draw_gun_marks();
+        for (const RECT& r : gun_marks_) y0 = std::min(y0, std::max(0, int(r.top))), y1 = std::max(y1, std::min(h, int(r.bottom)));
+        partial_ = true;
+        partial_y0_ = y0, partial_y1_ = std::max(y0, y1);
+        dirty_ = false;
+        return true;
+    }
     bool over_game = this->over_game();
-    bool page = screen_ == Screen::Options || screen_ == Screen::Records;
+    bool page = screen_ == Screen::Options || screen_ == Screen::Records || screen_ == Screen::GunTest;
     if (over_game) out.assign(size_t(w) * h, 0);
     else {
         if (bg_.empty()) background();
@@ -2125,7 +2212,12 @@ bool Frontend::draw(int w, int h, std::vector<uint32_t>& out) {
     values_.clear();
     more_up_ = more_down_ = back_rect_ = reset_rect_ = coffee_rect_ = RECT{};
     auto list = items();
-    if (page) draw_options(over_game, list);
+    if (screen_ == Screen::GunTest) {
+        draw_gun_test(over_game);
+        gun_page_ = out;   // without the marks
+        gun_page_key_ = gun_key();
+        draw_gun_marks();
+    } else if (page) draw_options(over_game, list);
     else draw_menu(over_game, list);
     if (locked_notice_ && screen_ == Screen::Survival) draw_locked_notice();
     dirty_ = false;
@@ -2148,4 +2240,179 @@ void Frontend::draw_locked_notice() {
         y += U(38);
     }
     text(ITEM, U(22), L"SHOOT TO CONTINUE", cx, y0 + ph - U(56), 1, {HINT, HINT});
+}
+
+// ---- GUN TEST ----
+
+namespace {
+constexpr uint32_t P1_COLOUR = 0xFFF233, P2_COLOUR = 0x33E6FF, NO_PLAYER = 0x9A9484;   // the game's rings
+}  // namespace
+
+int Frontend::gun_player(const GunView& g, bool& picked) const {
+    if (guns_pinned) {   // LightgunHID.ini's guns: as the game uses them
+        picked = g.player >= 0;
+        return g.player;
+    }
+    picked = !g.path.empty() && (g.path == settings.gun_p1 || g.path == settings.gun_p2);
+    if (picked) return g.path == settings.gun_p1 ? 0 : 1;
+    return g.player;
+}
+
+std::string Frontend::gun_key() const {
+    std::string k = std::to_string(gun_step_) + (guns_pinned ? "F|" : "|") + settings.gun_p1 + "|" + settings.gun_p2 + "|" +
+                    std::to_string(quiet_mice) + (settings.second_mouse ? "M" : "m") + (pad_prompts ? "P" : "p") +
+                    (over_game() ? "G" : "g");
+    for (const GunView& g : guns)
+        k += "|" + g.path + char('0' + g.absolute) + char('0' + g.active) + char('0' + g.has_pos) + char('0' + g.trigger) +
+             char('0' + g.reload) + std::to_string(g.player);
+    return k;
+}
+
+// Each device's mark where it points: a ring in its player's colour (filled
+// while it fires) and its number
+void Frontend::draw_gun_marks() {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int w = w_, h = h_;
+    gun_marks_.clear();
+    for (int i = 0; i < int(guns.size()); i++) {
+        const GunView& g = guns[i];
+        if (!g.has_pos || g.x < 0 || g.y < 0 || g.x >= w || g.y >= h) continue;
+        bool picked = false;
+        int pl = gun_player(g, picked);
+        uint32_t col = pl == 0 ? P1_COLOUR : pl == 1 ? P2_COLOUR : 0xFFFFFF;
+        float r = std::max(12.0f, h / 45.0f), t = std::max(2.0f, r / 5);
+        int b = int(r + t) + 2;
+        for (int py = g.y - b; py <= g.y + b; py++)
+            for (int px = g.x - b; px <= g.x + b; px++) {
+                if (px < 0 || py < 0 || px >= w || py >= h) continue;
+                float d = std::sqrt(float((px - g.x) * (px - g.x) + (py - g.y) * (py - g.y)));
+                float cov = std::clamp(t * 0.5f - std::abs(d - r) + 0.5f, 0.0f, 1.0f);
+                if (g.trigger) cov = std::max(cov, std::clamp(r - d, 0.0f, 1.0f) * 0.55f);   // filled while it fires
+                if (cov > 0) blend(px, py, col, cov);
+            }
+        text(ITEM, U(24), std::to_wstring(i + 1), g.x + b + U(4), g.y - b - U(10), 0, {col, col, INK, U(2)});
+        gun_marks_.push_back({g.x - b - 2, g.y - b - U(30), g.x + b + U(60), g.y + b + 2});
+    }
+}
+
+void Frontend::gun_fired(int index) {
+    if (screen_ != Screen::GunTest || index < 0 || index >= int(guns.size()) || guns[index].path.empty()) return;
+    const std::string& path = guns[index].path;
+    if (gun_step_ == 1) {
+        settings.gun_p1 = path;
+        settings.gun_p2.clear();
+        gun_step_ = 2;
+    } else if (gun_step_ == 2 && path != settings.gun_p1) {
+        settings.gun_p2 = path;
+        gun_step_ = 0;
+        push(Action::SettingsChanged);
+    }
+    dirty_ = true;
+}
+
+// Each device a row (its number, name, kind, buttons and player) and a mark
+// where it points; ENTER picks the players' guns by firing them
+void Frontend::draw_gun_test(bool over_game) {
+    auto U = [&](float v) { return int(v * u_ + 0.5f); };
+    int w = w_, h = h_;
+    fill(0, 0, w, h, 0x000000, over_game ? 0.72f : 0.35f);
+    bool wide = w / u_ >= 1800;
+    int margin = U(wide ? 70.0f : 50.0f);
+    text(display(), U(72), L"GUN TEST", margin + U(10), U(36), 0, {GOLD_TOP, GOLD_BOTTOM, EDGE, U(4), 1, U(4)});
+
+    // What to do now
+    int y = U(150);
+    if (gun_step_) {
+        text(TITLE, U(48), gun_step_ == 1 ? L"FIRE PLAYER 1'S GUN" : L"FIRE PLAYER 2'S GUN", margin + U(10), y, 0,
+             {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820u : 0x20B8D8u, INK, U(3)});
+        y += U(64);
+        text(BODY, U(23), gun_step_ == 1 ? L"Pull its trigger, wherever it points.  RELOAD (or ESC): leave the guns as they were"
+                                         : L"Now the other gun.  RELOAD (or ESC): only one gun, player 2 joins with the next mouse to fire",
+             margin + U(10), y, 0, {0xD8D1BD, 0xD8D1BD});
+    } else {
+        text(BODY, U(23), L"Move and fire each gun: its mark follows it, and its row lights up.  "
+                          L"Each gun should move only its own mark.", margin + U(10), y + U(10), 0, {0xD8D1BD, 0xD8D1BD});
+    }
+
+    // The devices
+    int list0 = margin, list1 = std::min(w - margin, list0 + U(1100));
+    int row_h = U(86), top = U(270), bottom = h - U(250);
+    int shown = std::max(1, (bottom - top) / row_h);
+    for (int i = 0; i < int(guns.size()) && i < shown; i++) {
+        const GunView& g = guns[i];
+        bool picked = false;
+        int pl = gun_player(g, picked);
+        uint32_t col = pl == 0 ? P1_COLOUR : pl == 1 ? P2_COLOUR : NO_PLAYER;
+        int ry = top + i * row_h;
+        if (g.active) hgrad(list0, ry, list1, ry + row_h - U(8), col, 0.22f, 0.04f);
+        else fill(list0, ry, list1, ry + row_h - U(8), PANEL, 0.6f);
+        fill(list0, ry, list0 + std::max(3, U(5)), ry + row_h - U(8), col, g.active ? 1.0f : 0.5f);
+        int cy = ry + (row_h - U(8)) / 2;
+        // its number, as on its mark
+        pill(list0 + U(22), cy - U(22), list0 + U(66), cy + U(22), col, 1);
+        text(ITEM, U(26), std::to_wstring(i + 1), list0 + U(44), cy - U(15), 1, {0x111111, 0x111111});
+        std::wstring name = g.name.size() > 40 ? g.name.substr(0, 39) + L"..." : g.name;
+        text(ITEM, U(28), name, list0 + U(86), ry + U(8), 0,
+             g.active ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2)} : Style{PALE_TOP, PALE_BOTTOM, INK, U(2), 0.9f});
+        std::wstring kind = g.absolute ? L"POINTS AT THE SCREEN (LIGHT GUN)" : L"MOVES THE POINTER (MOUSE)";
+        if (!g.active) kind += L"  ·  IDLE";
+        text(BODY, U(19), kind, list0 + U(86), ry + U(46), 0, {HINT, HINT});
+        // its buttons and its player, at the right
+        int x = list1 - U(24);
+        std::wstring who = pl < 0 ? L"NO PLAYER" : std::wstring(pl ? L"PLAYER 2" : L"PLAYER 1") + (picked ? L"" : L" (AUTO)");
+        int ww = measure(ITEM, U(24), who);
+        text(ITEM, U(24), who, x, cy - U(14), 2, pl < 0 ? Style{DIM, DIM} : Style{col, col, INK, U(2)});
+        x -= ww + U(36);
+        for (int b = 1; b >= 0; b--) {   // TRIGGER, then RELOAD at its right
+            const wchar_t* label = b ? L"RELOAD" : L"TRIGGER";
+            bool on = b ? g.reload : g.trigger;
+            int bw = measure(ITEM, U(19), label) + U(28);
+            if (on) pill(x - bw, cy - U(17), x, cy + U(17), b ? 0xE8655A : 0x6FD17A, 1);
+            else frame(x - bw, cy - U(17), x, cy + U(17), std::max(1, U(1.5f)), 0x5A574E, 1);
+            text(ITEM, U(19), label, x - bw / 2, cy - U(11), 1, on ? Style{0x111111, 0x111111} : Style{DIM, DIM});
+            x -= bw + U(12);
+        }
+    }
+    if (guns.size() > size_t(shown))
+        text(BODY, U(20), L"+ " + std::to_wstring(guns.size() - shown) + L" more", list0 + U(22), top + shown * row_h, 0,
+             {HINT, HINT});
+
+    // What it means: a single mouse, the option off, and how player 2 joins otherwise
+    std::vector<std::wstring> notes;
+    if (guns_pinned)
+        notes.push_back(L"The players' guns are set by LightgunHID.ini (1 - Light Gun Setup.exe): each gun belongs to its player.  "
+                        L"Run the setup again to change them.");
+    else if (!settings.second_mouse) notes.push_back(L"SECOND MOUSE is OFF: every mouse and gun moves player 1's sight.");
+    int count = int(guns.size());
+    if (count == 0)
+        notes.push_back(L"Nothing has moved yet: move a mouse or point a gun at the screen.");
+    else if (count == 1)
+        notes.push_back(L"Only one mouse has moved so far.  If two guns move this same mark, they reach the game as one: "
+                        L"set each gun as a mouse of its own in its software.");
+    else if (!guns_pinned && settings.gun_p1.empty() && settings.gun_p2.empty())
+        notes.push_back(L"Nothing picked: in a game, the second mouse to fire becomes player 2's gun.  "
+                        L"ENTER picks them here once and for all.");
+    if (quiet_mice)
+        notes.push_back(std::to_wstring(quiet_mice) + (quiet_mice == 1 ? L" more device Windows lists as a mouse has" : L" more devices Windows lists as mice have") +
+                        (quiet_mice == 1 ? L" sent nothing (often a keyboard or a receiver): it shows up here once it moves."
+                                         : L" sent nothing (often a keyboard or a receiver): they show up here once they move."));
+    int ny = std::max(top + std::min(count, shown) * row_h + U(20), bottom - U(10));
+    for (const std::wstring& note : notes)
+        for (const std::wstring& line : wrap(BODY, U(22), note, list1 - list0 - U(20))) {
+            text(BODY, U(22), line, list0 + U(10), ny, 0, {0xE8C890, 0xE8C890});
+            ny += U(32);
+        }
+
+    // Key help
+    vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
+    int x = U(80), py = h - U(64);
+    if (!gun_step_) {
+        if (!guns_pinned) {
+            prompt(x, py, L"A", L"ENTER", L"PICK THE GUNS");
+            if (!settings.gun_p1.empty() || !settings.gun_p2.empty()) prompt(x, py, L"Y", L"R", L"AUTOMATIC");
+        }
+        back_rect_ = prompt(x, py, L"B", L"RELOAD", L"BACK");
+    } else {
+        prompt(x, py, L"B", L"RELOAD", gun_step_ == 1 ? L"CANCEL" : L"ONLY ONE GUN");
+    }
 }

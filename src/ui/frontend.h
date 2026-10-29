@@ -32,6 +32,8 @@ struct FrontendSettings {
     bool half_rate = false;   // above 100 Hz the 3D is drawn every other refresh
     int frame_cap = 0;        // pictures a second at most: 0 off (the monitor's refresh rate), 30, 60, 120
     static constexpr int FRAME_CAPS[4] = {0, 30, 60, 120};
+    bool vsync = true;        // off: images go out without waiting for the monitor's refresh
+    int aspect = 1;    // widest 3D view: 0 4:3 (original), 1 16:9, 2 21:9 (ultrawide, up to 2.4:1)
     bool haze = true;  // distance haze
     int bloom = 2;     // glow around bright things: 0 off, 1 low, 2 medium, 3 high
     bool ao = true;    // ambient occlusion
@@ -65,6 +67,7 @@ struct FrontendSettings {
     int vibration = 2;      // gamepad vibration: 0 off, 1 low, 2 medium, 3 high
     int aim_assist = 2;     // gamepad aim assist: 0 off, 1 low, 2 medium, 3 high
     bool menu_music = true; // ui/menu_music.h, when there is a music file
+    std::string gun_p1, gun_p2; // the guns picked in GUN TEST: device paths ("" = the first and second to fire)
 
     // save/settings.ini; missing keys keep their current value
     void load(const char* path);
@@ -80,7 +83,7 @@ struct FrontendSettings {
 
 class Frontend {
 public:
-    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival };
+    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
                         CrosshairChanged };   // a new crosshair picture (crosshair_pick)
@@ -93,7 +96,7 @@ public:
     bool active() const { return screen_ != Screen::None; }
     // A menu over the paused game (the pause menu, its settings, the boss list from it)
     bool over_game() const {
-        return screen_ == Screen::Pause || (screen_ == Screen::Options && options_from_pause_) ||
+        return screen_ == Screen::Pause || ((screen_ == Screen::Options || screen_ == Screen::GunTest) && options_from_pause_) ||
                (screen_ == Screen::Boss && boss_over_game_);
     }
 
@@ -118,15 +121,40 @@ public:
     std::vector<int> boss_status;
     int boss_choice = 0;
     int survival_choice = 0;   // StartSurvival: index in SURVIVAL_ZONES (runtime/survival.h)
+    bool random_spawns = false;   // StartArcade: CLASSIC > RANDOM SPAWNS (runtime/random_spawns.h)
     bool boss_mode = false;   // a boss fight is on: the pause menu offers retry and the list
     // The list of bosses, over the game (from the pause menu or after a fight) or on the menu backdrop
     void open_boss_list(bool over_game);
+
+    // GUN TEST (Controls): every mouse and light gun Windows lists, kept up to
+    // date by the window while the screen is open (runtime/raw_mice.h)
+    struct GunView {
+        std::string path;      // what settings.ini keeps
+        std::wstring name;
+        bool absolute = false; // reports positions over the screen: a light gun (or a tablet)
+        bool active = false;   // reported in the last second
+        bool has_pos = false;
+        int x = 0, y = 0;      // client pixels
+        bool trigger = false, reload = false;
+        int player = -1;       // whose gun it is now (0, 1; -1 none)
+    };
+    std::vector<GunView> guns;   // those that have reported something since the start
+    int quiet_mice = 0;          // and how many others Windows lists that never did
+    bool guns_pinned = false;    // LightgunHID.ini decides the players' guns: GUN TEST only shows them
+    bool gun_test_open() const { return screen_ == Screen::GunTest; }
+    bool picking_guns() const { return screen_ == Screen::GunTest && gun_step_ > 0; }
+    void gun_fired(int index);   // a left button press from guns[index]
 
     // RECORDS screen (runtime/stats.h): the window keeps this copy up to date while it is open
     StatsView records;
 
     // Redraws into `out` when something changed (or the size did); true if it did
     bool draw(int w, int h, std::vector<uint32_t>& out);
+    // After draw: only rows y0..y1-1 changed (GUN TEST's marks moving)
+    bool partial_rows(int& y0, int& y1) const {
+        y0 = partial_y0_, y1 = partial_y1_;
+        return partial_;
+    }
     bool locked_notice_ = false;   // SURVIVAL: every arena locked, the notice saying how they unlock
     void draw_locked_notice();
     void invalidate() { dirty_ = true; }
@@ -134,11 +162,11 @@ public:
 private:
     enum Id {
         PLAY, OPTIONS, QUIT, ARCADE, BOSS, BACK, RESUME, SETTINGS, QUIT_TO_MENU, TABS,
-        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
+        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY, CLASSIC, RANDOM,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
-        OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START,
+        OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP, OPT_VSYNC,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ASPECT, OPT_GUN_TEST,
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
@@ -197,6 +225,18 @@ private:
     void draw_menu(bool over_game, const std::vector<Item>& list);
     void draw_options(bool over_game, const std::vector<Item>& list);
     void draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h);
+    void draw_gun_test(bool over_game);
+    int gun_step_ = 0;   // GUN TEST: 0 watching, 1 waiting for player 1's gun to fire, 2 for player 2's
+    int gun_player(const GunView& g, bool& picked) const;   // whose gun it is, and whether GUN TEST picked it
+    // The marks move every refresh: the page without them is kept, and only
+    // where they were and are is drawn again
+    std::string gun_key() const;   // all the page shows but the marks' places
+    void draw_gun_marks();
+    std::vector<uint32_t> gun_page_;
+    std::string gun_page_key_;
+    std::vector<RECT> gun_marks_;   // where the marks are drawn now
+    bool partial_ = false;
+    int partial_y0_ = 0, partial_y1_ = 0;
     // Key help along the bottom: button (or key) and what it does; returns its rectangle
     RECT prompt(int& x, int y, const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);
     int prompt_width(const wchar_t* pad_button, const wchar_t* key, const wchar_t* what);   // how far it moves x

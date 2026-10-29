@@ -24,3 +24,11 @@ ref out/sky/1fa6eee789c61d0a.png
 ref out/sky/64977630aeae96e4.png
 20 180 137 17 white ShareTechMono-Regular.ttf > system shutdown.
 22 206 128 18 green Orbitron[wght].ttf:900 beginner
+# The chosen difficulty alone with OK: CREDITS and INSERT COIN below it are
+# the game's own (they change with the credits)
+ref out/sky/4eed32e7363112ae.png
+keep 0 336 512 48
+ref out/sky/0070e4bc76b257c9.png
+keep 0 336 512 48
+ref out/sky/e87cb93fa956dbd6.png
+keep 0 336 512 48

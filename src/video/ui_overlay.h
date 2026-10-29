@@ -13,6 +13,8 @@ public:
 
     // New picture (w x h BGRA, premultiplied); uploaded with the next record
     void set_image(const uint32_t* bgra, uint32_t w, uint32_t h);
+    // Only rows y0..y1-1 of the same picture changed (a new size: the whole picture)
+    void update_rows(const uint32_t* bgra, uint32_t w, uint32_t h, uint32_t y0, uint32_t y1);
     void hide() { visible_ = false; }
     // The menu pointer, drawn as player 1's crosshair over the picture (window pixels)
     void set_cursor(bool visible, float x, float y) {
@@ -42,6 +44,8 @@ private:
     bool dirty_ = false, visible_ = false;
     bool cursor_visible_ = false;
     float cursor_x_ = 0, cursor_y_ = 0;
+    uint32_t dirty_y0_ = 0, dirty_y1_ = 0;   // rows to upload
+    bool filled_ = false;   // the image holds a picture (a partial upload keeps the rest)
 
     VkSampler sampler_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;

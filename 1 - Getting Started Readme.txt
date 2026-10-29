@@ -38,6 +38,8 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
  mouse joins as player 2 by clicking during a game).
 
  Guns must be in mouse mode (absolute position), as for MAME.
+ To check them: Options > CONTROLS > GUN TEST shows every gun and
+ where it points.
 
 
 ---------------------------------------------------------------------
@@ -95,6 +97,10 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
  transparent 4:3 opening in the middle). Without it the game uses
  4x3\bezel-default.png. Updates never replace your bezel.png.
 
+ The .bat files also set WIDESCREEN (Options > DISPLAY), which can be
+ changed in the game too: 4:3, 16:9 or 21:9 (ultrawide monitors). The
+ bezel only shows with the 4:3 picture.
+
 
 ---------------------------------------------------------------------
  5. QUICK SETTINGS (close the game first)
@@ -111,7 +117,9 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
 
  Everything else is in the game: Options (main menu) or the pause
  menu > Settings. FREE PLAY and TRIGGER STARTS are in the GAME tab;
- FRAME CAP (Off, 30, 60, 120 FPS) is in the DISPLAY tab.
+ FRAME CAP (Off, 30, 60, 120 FPS), VSYNC and WIDESCREEN are in the
+ DISPLAY tab. PLAY > CLASSIC ARCADE > RANDOM SPAWNS shuffles where
+ and when the dinosaurs come.
 
 
 ---------------------------------------------------------------------

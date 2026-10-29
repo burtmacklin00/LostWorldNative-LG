@@ -31,6 +31,7 @@ struct Options {
     bool interp = true;              // --no-interp: show game frames as they are
     bool half_rate = false;          // --half-rate: above 100 Hz the 3D is drawn every other refresh
     int frame_cap = 0;               // --frame-cap N: at most N pictures a second (0 = the monitor's refresh rate)
+    bool vsync = true;               // --no-vsync: images go out without waiting for the refresh (tearing)
     bool dump_textures = false;      // --dump-textures: write new textures to out/textures
     float light_gain = 1.0f;         // --light-gain: light multiplier on the sun and the ambient
     float bloom = 1;                 // --bloom [N] / --no-bloom: glow around bright things
@@ -64,7 +65,6 @@ struct Options {
     bool several_mice = true;        // a second mouse is player 2's gun (--one-mouse: all move player 1's)
     bool free_play = true;           // --no-free-play: coins needed (free play: 1 / 2 insert the credit themselves)
     bool outputs = true;             // --no-outputs: no Hook of the Reaper outputs (TCP port 8000)
-    bool wide_aim = true;            // --no-wide-aim / display.ini WideAim = 0: in widescreen, side-area shots stay at the 4:3 edge
     bool gamepads = false;           // --gamepads: controllers play too (off: light guns, or the mouse without them)
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
