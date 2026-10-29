@@ -271,6 +271,23 @@ saved games and are not versioned.
   sample interpolation like the original chip. Default is cubic
   (SMOOTH), with less harshness in low sounds and voices.
 
+## Random spawns
+
+PLAY > CLASSIC ARCADE opens ARCADE (the original game) and RANDOM SPAWNS:
+the arcade game, every stage and stop the same, with its encounters
+shuffled differently every game. Raptors come out of other spawn points
+of the same zone (only ones the camera is already looking towards) and
+sometimes as another raptor type of that zone, the river enemies of stage
+2 come out a little to the side, every enemy comes a little sooner or later,
+and runs of plain stops (camera turn, dinosaurs, wait for them) can come in
+another order. Each boss starts with 70 % to 150 % of its arcade life.
+Also from the command line: `--random-spawns`.
+
+It changes the encounter scripts in place without adding or removing
+anything, so the camera walks the stage path as in the arcade. The
+opening of stage 2 and the bosses' own attacks stay as they are. The
+Carnotaurus and the T-Rex only get the life of their first phase changed.
+
 ## Survival mode
 
 In the menu, PLAY > SURVIVAL shows the working arenas (stage 1: the
@@ -458,6 +475,8 @@ normal behaviour when unset):
 | LW_RAIN=amount | Fixes the rain amount (0 to 1) even if the game isn't raining |
 | LW_RAINDBG | Prints per frame the game's rain streaks, their direction and the camera |
 | LW_BOSS=N | Starts the boss mode fight with boss N (1-4) directly |
+| LW_BOSS_LIFE=PCT | Random spawns: every boss gets PCT % of its life instead of a random share |
+| LW_HIT_PROBE=file | Writes RAM 0x100000-0x200000 to the file after every scoring hit and every 120 frames (to find what hits change) |
 | LW_SNDDBG | Sound board trace (68000 and SCSP) |
 | LW_SNDLOG | Each SCSP note to out/voices.csv (registers, duration, direct and effects peaks) and the per-second level of the direct mix and effects return to out/mix.csv |
 | LW_SURV_TRACE=path | File for the --trace-survival trace (default out/survival_trace.txt) |

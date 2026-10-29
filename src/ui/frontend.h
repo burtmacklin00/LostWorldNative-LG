@@ -79,7 +79,7 @@ struct FrontendSettings {
 
 class Frontend {
 public:
-    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival };
+    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
                         CrosshairChanged };   // a new crosshair picture (crosshair_pick)
@@ -117,6 +117,7 @@ public:
     std::vector<int> boss_status;
     int boss_choice = 0;
     int survival_choice = 0;   // StartSurvival: index in SURVIVAL_ZONES (runtime/survival.h)
+    bool random_spawns = false;   // StartArcade: CLASSIC > RANDOM SPAWNS (runtime/random_spawns.h)
     bool boss_mode = false;   // a boss fight is on: the pause menu offers retry and the list
     // The list of bosses, over the game (from the pause menu or after a fight) or on the menu backdrop
     void open_boss_list(bool over_game);
@@ -133,7 +134,7 @@ public:
 private:
     enum Id {
         PLAY, OPTIONS, QUIT, ARCADE, BOSS, BACK, RESUME, SETTINGS, QUIT_TO_MENU, TABS,
-        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY,
+        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY, CLASSIC, RANDOM,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_VSYNC,
