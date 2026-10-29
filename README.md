@@ -86,6 +86,8 @@ its software running for the white border. The guns aim over the whole widescree
 bands included, and shooting off the picture reloads. **Options >
 Game > Free play** lets 1 / 2 (a gun's start button) start and continue without a coin, and
 **Controls > Hide idle crosshair** clears a crosshair whose gun has not been used for a few seconds.
+**Controls > Gun test** shows every mouse and gun Windows sees and what each one does; fire player 1's
+gun and then player 2's there to keep them as those players' guns from then on.
 
 Want your own crosshair? Drop a `crosshair.png` (with transparency) next to `LostWorld.exe`, and
 `crosshair_p2.png` for player 2 if you want a different one. It is centred on the gun, and its size

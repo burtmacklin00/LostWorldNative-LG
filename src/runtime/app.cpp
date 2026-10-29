@@ -18,6 +18,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1072,6 +1073,7 @@ int main(int argc, char** argv) {
     // The menus are being driven with a gamepad: no mouse pointer until the mouse moves
     bool pad_in_menu = false;
     raw_mice::init(presenter.hwnd());   // a second mouse can be player 2's gun
+    if (g_opt.several_mice) raw_mice::set_saved(ini.gun_p1, ini.gun_p2);   // the guns picked in GUN TEST
     presenter.raw_input = raw_mice::on_input;
     UiOverlay ui;
     std::vector<uint32_t> ui_pixels;
@@ -1128,6 +1130,8 @@ int main(int argc, char** argv) {
         s.free_play = g_opt.free_play;
         s.smooth = g_opt.interp;
         s.second_mouse = g_opt.several_mice;
+        s.gun_p1 = ini.gun_p1;
+        s.gun_p2 = ini.gun_p2;
         s.saturation = std::clamp(int(g_opt.saturation * 100 + 0.5f), 0, 200);
         s.gamma = std::clamp(int(g_opt.gamma * 100 + 0.5f), 50, 150);
         frontend.aa_at_launch = s.aa;
@@ -1166,7 +1170,9 @@ int main(int argc, char** argv) {
                 return true;
             }
             case WM_LBUTTONDOWN: frontend.click(x, y); return true;
-            case WM_RBUTTONDOWN: frontend.key(VK_ESCAPE); return true;   // right button: back
+            case WM_RBUTTONDOWN:   // right button: back (not in GUN TEST, where it is a gun reloading)
+                if (!frontend.gun_test_open()) frontend.key(VK_ESCAPE);
+                return true;
             case WM_MOUSEWHEEL: {
                 POINT p{x, y};   // screen coordinates for this one
                 ScreenToClient(presenter.hwnd(), &p);
@@ -1728,6 +1734,7 @@ int main(int argc, char** argv) {
                     }
                     g_opt.several_mice = s.second_mouse;
                     if (!s.second_mouse) raw_mice::reset();
+                    else raw_mice::set_saved(s.gun_p1, s.gun_p2);
                     g_subtitles = s.subtitles;
                     renderer.set_picture(s.saturation / 100.0f, s.gamma / 100.0f);
                     g_pad_settings = {s.pad_speed, s.gyro, s.gyro_speed, s.vibration, s.aim_assist};
@@ -1841,6 +1848,41 @@ int main(int argc, char** argv) {
                 frontend.records = stats_view();   // the game stands still while the menu is open
                 frontend.invalidate();
             }
+            // GUN TEST: what every mouse and gun does, and a press from one of
+            // them while the players' guns are being picked
+            static std::map<std::string, unsigned> gun_presses;
+            if (frontend.gun_test_open()) {
+                static ULONGLONG gun_drawn = 0;
+                ULONGLONG now = GetTickCount64();
+                std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
+                std::vector<Frontend::GunView> view;
+                int hidden = 0;
+                for (size_t i = 0; i < devs.size(); i++) {
+                    const raw_mice::Device& d = devs[i];
+                    auto known = gun_presses.find(d.path);
+                    bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
+                    gun_presses[d.path] = d.presses;
+                    if (fired && frontend.picking_guns()) {
+                        frontend.guns = {{d.path, d.name}};
+                        frontend.gun_fired(0);
+                    }
+                    if (!d.last_input) {   // nothing from it yet: the pointer side of a keyboard, say, unless it moves
+                        hidden++;
+                        continue;
+                    }
+                    Frontend::GunView g{d.path, d.name, d.absolute, d.last_input && now - d.last_input < 1000, d.has_pos,
+                                        int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
+                    view.push_back(g);
+                }
+                frontend.guns = view;
+                frontend.quiet_mice = hidden;
+                if (now - gun_drawn >= 33) {   // about 30 times a second
+                    gun_drawn = now;
+                    frontend.invalidate();
+                }
+            } else {
+                gun_presses.clear();
+            }
             menu_was = frontend.screen();
             {
                 double t = qpc_seconds();
@@ -1849,7 +1891,7 @@ int main(int argc, char** argv) {
                 music_time = t;
             }
             if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
-            presenter.set_cursor_visible(frontend.active() && !pad_in_menu);
+            presenter.set_cursor_visible(frontend.active() && !pad_in_menu && !frontend.gun_test_open());
             static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
             if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
                 frontend.pad_prompts = pad_in_menu || menu_pad;
