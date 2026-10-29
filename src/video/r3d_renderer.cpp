@@ -1357,7 +1357,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         if (strike.id >= 0 && strike.flash > 0.005f) {
             // Where it strikes: picked when it begins, a little to either side
             // of where the camera looks then, and kept for the whole strike
-            if (strike.id != bolt_id_) {
+            if (strike.id != bolt_id_ || force_flash) {   // (LW_FLASH: kept where the camera looks)
                 bolt_id_ = strike.id;
                 const float* a = w->world_axes;
                 float yaw = std::atan2(-a[8], -a[2]);   // the view direction in the world frame
