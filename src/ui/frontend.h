@@ -318,12 +318,12 @@ private:
     Picture crosshair_[2];
     bool crosshair_loaded_ = false;
     void crosshair_preview(int x0, int y0, int x1, int y1);
-    // Optional picture behind the menus (third_party/menu/background.png or .jpg):
+    // Picture behind the menus (third_party/menu/background.png or .jpg, else res/menu/background.png):
     // the menus go to the right, the poster's logo above them; blurred behind
     // the options
     Picture backdrop_;
     Picture sega_;   // optional third_party/menu/sega.png: the credit at the bottom left of the menus
-    Picture logo_;   // optional third_party/menu/logo.png: the title over the backdrop, its own transparency kept
+    Picture logo_;   // third_party/menu/logo.png, else res/menu/logo.png: the title over the backdrop, its own transparency kept
     bool has_logo() const { return logo_.w > 0 && has_backdrop(); }
     bool has_backdrop() const { return backdrop_.w > 0; }
     void backdrop_background();

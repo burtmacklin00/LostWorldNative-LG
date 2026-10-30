@@ -219,9 +219,13 @@ bool Frontend::init(const std::string& font_dir) {
             break;
         }
     load_image(L"third_party/menu/sega.png", sega_.px, sega_.w, sega_.h);
-    if (load_image(L"third_party/menu/logo.png", logo_.px, logo_.w, logo_.h))
-        printf("[menu] logo third_party/menu/logo.png (%dx%d)\n", logo_.w, logo_.h);
-    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
+    // logo and background: your own in third_party/menu/ first, else the ones in res/menu/
+    for (const wchar_t* p : {L"third_party/menu/logo.png", L"res/menu/logo.png"})
+        if (load_image(p, logo_.px, logo_.w, logo_.h)) {
+            printf("[menu] logo %ls (%dx%d)\n", p, logo_.w, logo_.h);
+            break;
+        }
+    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg", L"res/menu/background.png"})
         if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
             printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
             break;
