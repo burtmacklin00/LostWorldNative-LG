@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #include "ao.frag.h"
 #include "ao_rt.frag.h"
@@ -72,7 +73,8 @@ VkShaderModule make_module(VkDevice dev, const uint32_t* code, size_t bytes) {
     ci.codeSize = bytes;
     ci.pCode = code;
     VkShaderModule m = VK_NULL_HANDLE;
-    vkCreateShaderModule(dev, &ci, nullptr, &m);
+    if (VkResult r = vkCreateShaderModule(dev, &ci, nullptr, &m); r != VK_SUCCESS)
+        fprintf(stderr, "[vulkan] vkCreateShaderModule failed (%d)\n", int(r));
     return m;
 }
 
@@ -94,14 +96,26 @@ bool R3DRenderer::create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = size;
     bi.usage = usage;
-    if (vkCreateBuffer(dev_, &bi, nullptr, &b.buffer) != VK_SUCCESS) return false;
+    if (VkResult r = vkCreateBuffer(dev_, &bi, nullptr, &b.buffer); r != VK_SUCCESS) {
+        fprintf(stderr, "[vulkan] vkCreateBuffer of %zu bytes failed (%d)\n", size, int(r));
+        return false;
+    }
     VkMemoryRequirements req;
     vkGetBufferMemoryRequirements(dev_, b.buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits,
                                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (vkAllocateMemory(dev_, &ai, nullptr, &b.memory) != VK_SUCCESS) return false;
+    if (ai.memoryTypeIndex == UINT32_MAX) {
+        fprintf(stderr, "[vulkan] no host-visible memory for a buffer of %zu bytes (types %x)\n", size,
+                req.memoryTypeBits);
+        return false;
+    }
+    if (VkResult r = vkAllocateMemory(dev_, &ai, nullptr, &b.memory); r != VK_SUCCESS) {
+        fprintf(stderr, "[vulkan] vkAllocateMemory of %llu bytes for a buffer failed (%d)\n",
+                (unsigned long long)req.size, int(r));
+        return false;
+    }
     vkBindBufferMemory(dev_, b.buffer, b.memory, 0);
     vkMapMemory(dev_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
     b.size = size;
@@ -124,13 +138,26 @@ bool R3DRenderer::create_image(Image& img, uint32_t w, uint32_t h, VkFormat form
     ii.samples = samples;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     ii.usage = usage;
-    if (vkCreateImage(dev_, &ii, nullptr, &img.image) != VK_SUCCESS) return false;
+    if (VkResult r = vkCreateImage(dev_, &ii, nullptr, &img.image); r != VK_SUCCESS) {
+        fprintf(stderr, "[vulkan] vkCreateImage %ux%u format %d usage %x failed (%d)\n", w, h, int(format), usage,
+                int(r));
+        return false;
+    }
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(dev_, img.image, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(dev_, &ai, nullptr, &img.memory) != VK_SUCCESS) return false;
+    if (ai.memoryTypeIndex == UINT32_MAX) {
+        fprintf(stderr, "[vulkan] no device-local memory for a %ux%u image format %d (types %x)\n", w, h,
+                int(format), req.memoryTypeBits);
+        return false;
+    }
+    if (VkResult r = vkAllocateMemory(dev_, &ai, nullptr, &img.memory); r != VK_SUCCESS) {
+        fprintf(stderr, "[vulkan] vkAllocateMemory of %llu bytes for a %ux%u image failed (%d)\n",
+                (unsigned long long)req.size, w, h, int(r));
+        return false;
+    }
     vkBindImageMemory(dev_, img.image, img.memory, 0);
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     vi.image = img.image;
@@ -517,8 +544,8 @@ VkPipeline R3DRenderer::make_pipeline(const PipelineDesc& d) {
     gp.pDynamicState = &dy;
     gp.layout = d.layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(dev_, VK_NULL_HANDLE, 1, &gp, nullptr, &p) != VK_SUCCESS)
-        fprintf(stderr, "[vulkan] could not create a pipeline\n");
+    if (VkResult r = vkCreateGraphicsPipelines(dev_, VK_NULL_HANDLE, 1, &gp, nullptr, &p); r != VK_SUCCESS)
+        fprintf(stderr, "[vulkan] vkCreateGraphicsPipelines failed (%d)\n", int(r));
     return p;
 }
 
@@ -570,7 +597,16 @@ bool R3DRenderer::create_pipelines() {
     ao_apply_ = make_pipeline({.vs = c_vs, .fs = aoa_fs, .layout = ao_layout_, .color = VK_FORMAT_R16G16B16A16_SFLOAT,
                                .samples = samples_, .multiply = true});
     for (auto m : {r3d_vs, r3d_fs, c_vs, c_fs, b_fs, rays_fs, ao_fs, aoa_fs}) vkDestroyShaderModule(dev_, m, nullptr);
-    return opaque_ && translucent_ && trans_depth_ && shadow_ && rays_ && compose_measure_ && compose_ && bloom_ && ao_pass_ && ao_apply_;
+    // Name the ones missing, so a report says which pass this GPU could not build
+    bool ok = true;
+    for (auto [p, name] : {std::pair{opaque_, "opaque"}, {translucent_, "translucent"}, {trans_depth_, "trans_depth"},
+                           {shadow_, "shadow"}, {rays_, "rays"}, {compose_measure_, "compose_measure"},
+                           {compose_, "compose"}, {bloom_, "bloom"}, {ao_pass_, "ao"}, {ao_apply_, "ao_apply"}})
+        if (!p) {
+            fprintf(stderr, "[vulkan] no %s pipeline%s\n", name, rt_.ready() ? " (ray tracing on)" : "");
+            ok = false;
+        }
+    return ok;
 }
 
 void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
