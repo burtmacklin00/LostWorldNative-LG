@@ -101,6 +101,9 @@ constexpr uint64_t FADE_FRAMES = 40;        // the fade to black at the end of a
 constexpr int32_t COUNTDOWN_FRAMES = int32_t(SURVIVAL_COUNTDOWN * 57.5);   // the countdown, as a -21 wait
 constexpr int WAVE_MIN = 8, WAVE_MAX = 30;  // dinosaurs in a wave: at least as many as the arena's first (the game's own)
 constexpr uint32_t FN_RAPTOR = 0x00053BB4;  // (slot 1..5, type, group of spawn positions)
+// The dead triceratops of the arcade's story (task 0x5B830, only in encounter 3,
+// the Jungle shack): survival's first wave runs that encounter, so it is left out
+constexpr uint32_t FN_DEAD_TRICERATOPS = 0x0005B758;
 constexpr float NEAR_LOOK = 120;            // another stop's section joins a wave if it looks this near one of this stop's
 constexpr int AMBUSH_CHANCE = 35;           // % of the walks with an ambush on the way
 constexpr int BONUS_CHANCE = 50;            // % of the walks with a golden BONUS target
@@ -443,6 +446,11 @@ struct Survival {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
                 std::vector<int32_t> item;
                 for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+                if (uint32_t(item[1]) == FN_DEAD_TRICERATOPS) {   // its delay is kept as a wait
+                    if (item[0] > 0) out.push_back(-21), out.push_back(item[0]);
+                    i += 3 + nargs;
+                    continue;
+                }
                 if (is_enemy_fn(uint32_t(item[1]))) {
                     if (!counted) {
                         out.push_back(-21), out.push_back(std::max(0, COUNTDOWN_FRAMES - waited));
