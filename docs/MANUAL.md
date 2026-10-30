@@ -93,8 +93,9 @@ folder. If none is found, a message says where it looked and how to give it the 
 
 Finally it runs the tests in `tests/` (ctest): 2D composition against reference
 hashes, the C++ and Python FNV-1a hash against the same vectors, the
-audio queue (click-free resampling with mismatched clocks) and the encounter
-script reader shared by survival and random spawns.
+audio queue (click-free resampling with mismatched clocks), the encounter
+script reader shared by survival and random spawns, and the sound chips' part
+of the game states.
 `-DLW_TESTS=OFF` in CMake disables them; `tilegen_test tests\tilegen_expected.txt
 --write` regenerates the reference after an intentional change to the composition.
 

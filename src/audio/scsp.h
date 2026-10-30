@@ -1,7 +1,9 @@
 // Yamaha SCSP (YMF292): 32 PCM slots with envelopes, LFOs and FM, plus the
 // effects DSP. Behaviour follows docs/sound_spec.md sections 3 and 4.
 #pragma once
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 class Scsp {
 public:
@@ -30,14 +32,17 @@ public:
     void midi_in(uint8_t b);
     bool midi_pending() const { return midi_r_ != midi_w_; }
 
-    // Game states (sound_board.cpp): all of `from` but this chip's RAM and DSP switch
-    void load_state(const Scsp& from) {
-        uint8_t* ram = ram_;
-        bool dsp = dsp_on_;
-        *this = from;
-        ram_ = ram;
-        dsp_on_ = dsp;
-    }
+    // Game states (sound_board.cpp): the registers, slots, timers, MIDI and
+    // DSP, field by field (not this chip's RAM, its DSP switch or what init
+    // set): state_size() bytes, which save_state appends to `out` and
+    // load_state reads from p on, moving it past them
+    static size_t state_size();
+    void save_state(std::vector<uint8_t>& out) const;
+    void load_state(const uint8_t*& p);
+    // States saved before the sound had its own version kept each chip byte
+    // for byte, as the class was laid out then (64-bit build)
+    static size_t legacy_size();
+    void load_legacy(const uint8_t* p);
 
 private:
     enum EgState { ATTACK, DECAY1, DECAY2, RELEASE };
@@ -67,8 +72,10 @@ private:
     uint16_t ram16(uint32_t byte_addr) const;
     void dsp_step();
     void write_common(int word, uint16_t v);
+    template <class F>
+    void state_fields(F& f);
 
-    static inline bool cubic_ = false;   // outside the state: game states keep their size
+    static inline bool cubic_ = false;   // a setting, not part of game states
     static inline uint32_t restarted_ = 0;
 
     uint8_t* ram_ = nullptr;

@@ -60,31 +60,57 @@ bool SoundBoard::init(std::vector<uint8_t> program, std::vector<uint8_t> samples
     return true;
 }
 
-// Layout: both RAMs, both SCSPs, the 68000 context, ctrl_. The SCSPs keep
+// Layout: a header (magic, version), both RAMs, both SCSPs field by field
+// (Scsp::save_state), the 68000 context with its size, ctrl_. The SCSPs keep
 // their own RAM pointers; the 68000 context carries pointers into this
-// program (cycle tables, callbacks), set again after it is put back.
+// program (cycle tables, callbacks), set again after it is put back. States
+// from before the header kept the SCSPs byte for byte and no context size.
+constexpr uint32_t STATE_MAGIC = 0x53444E53;   // "SNDS"
+constexpr uint32_t STATE_VERSION = 1;
+
 void SoundBoard::save_state(std::vector<uint8_t>& out) const {
     out.clear();
     if (!ready_) return;
-    size_t ctx = m68k_context_size();
-    out.resize(2 * kRamSize + 2 * sizeof(Scsp) + ctx + 1);
-    uint8_t* p = out.data();
-    for (int i = 0; i < 2; i++, p += kRamSize) memcpy(p, ram_[i].data(), kRamSize);
-    for (int i = 0; i < 2; i++, p += sizeof(Scsp)) memcpy(p, &scsp_[i], sizeof(Scsp));
-    m68k_get_context(p);
-    p[ctx] = ctrl_;
+    auto put32 = [&](uint32_t v) { out.insert(out.end(), reinterpret_cast<uint8_t*>(&v), reinterpret_cast<uint8_t*>(&v) + 4); };
+    put32(STATE_MAGIC);
+    put32(STATE_VERSION);
+    for (int i = 0; i < 2; i++) out.insert(out.end(), ram_[i].begin(), ram_[i].end());
+    for (int i = 0; i < 2; i++) scsp_[i].save_state(out);
+    uint32_t ctx = uint32_t(m68k_context_size());
+    put32(ctx);
+    size_t at = out.size();
+    out.resize(at + ctx + 1);
+    m68k_get_context(out.data() + at);
+    out[at + ctx] = ctrl_;
 }
 
 bool SoundBoard::load_state(const std::vector<uint8_t>& in) {
+    if (!ready_) return false;
     size_t ctx = m68k_context_size();
-    if (!ready_ || in.size() != 2 * kRamSize + 2 * sizeof(Scsp) + ctx + 1) return false;
     const uint8_t* p = in.data();
-    for (int i = 0; i < 2; i++, p += kRamSize) memcpy(ram_[i].data(), p, kRamSize);
-    for (int i = 0; i < 2; i++, p += sizeof(Scsp)) {
-        Scsp chip;
-        memcpy(static_cast<void*>(&chip), p, sizeof(Scsp));
-        scsp_[i].load_state(chip);
+    auto get32 = [&] {
+        uint32_t v;
+        memcpy(&v, p, 4);
+        p += 4;
+        return v;
+    };
+    bool legacy = !(in.size() >= 8 && get32() == STATE_MAGIC);
+    if (legacy) {
+        if (in.size() != 2 * kRamSize + 2 * Scsp::legacy_size() + ctx + 1) return false;
+        p = in.data();
+    } else {
+        // Checked before anything changes
+        if (in.size() != 8 + 2 * kRamSize + 2 * Scsp::state_size() + 4 + ctx + 1 || get32() != STATE_VERSION) return false;
+        uint32_t saved_ctx;
+        memcpy(&saved_ctx, p + 2 * kRamSize + 2 * Scsp::state_size(), 4);
+        if (saved_ctx != ctx) return false;
     }
+    for (int i = 0; i < 2; i++, p += kRamSize) memcpy(ram_[i].data(), p, kRamSize);
+    for (int i = 0; i < 2; i++) {
+        if (legacy) scsp_[i].load_legacy(p), p += Scsp::legacy_size();
+        else scsp_[i].load_state(p);
+    }
+    if (!legacy) p += 4;   // the context size, checked above
     std::vector<uint8_t> cpu(p, p + ctx);
     m68k_set_context(cpu.data());
     m68k_set_cpu_type(M68K_CPU_TYPE_68000);   // the cycle tables of this run
