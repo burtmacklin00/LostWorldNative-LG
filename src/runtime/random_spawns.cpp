@@ -17,6 +17,7 @@
 #include <set>
 #include <vector>
 
+#include "../common/random_seed.h"
 #include "encounter_script.h"
 #include "ppc_rt.h"
 #include "weather.h"
@@ -267,7 +268,7 @@ void random_spawns_frame() {
 }
 
 void random_spawns_set(bool on) {
-    if (on && !g_on) g_rng = script::seed() | 1;
+    if (on && !g_on) g_rng = random_seed() | 1;
     g_boss = {};
     g_on = on;
 }

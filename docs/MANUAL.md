@@ -496,7 +496,7 @@ normal behaviour when unset):
 | LW_RAINDBG | Prints per frame the game's rain streaks, their direction and the camera |
 | LW_BOSS=N | Starts the boss mode fight with boss N (1-4) directly |
 | LW_BOSS_LIFE=PCT | Random spawns: every boss gets PCT % of its life instead of a random share |
-| LW_SEED=N | Survival and random spawns: the same random numbers every run (N instead of the clock) |
+| LW_SEED=N | Survival, random spawns and random weather: the same random numbers every run (N instead of the clock) |
 | LW_HIT_PROBE=file | Writes RAM 0x100000-0x200000 to the file after every scoring hit and every 120 frames (to find what hits change) |
 | LW_SNDDBG | Sound board trace (68000 and SCSP) |
 | LW_SNDLOG | Each SCSP note to out/voices.csv (registers, duration, direct and effects peaks) and the per-second level of the direct mix and effects return to out/mix.csv |
