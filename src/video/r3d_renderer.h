@@ -115,10 +115,7 @@ public:
     // (SkyMotion). camera: the 3D frame drawn is that of the 2D layers'
     // vblank, so the world camera's turn to it is the sky's motion in this
     // frame. 0, false: as composed (no interpolation)
-    void set_back_shift(float vblanks, bool camera) {
-        back_shift_ = vblanks;
-        back_shift_camera_ = camera;
-    }
+    void set_back_shift(float vblanks, bool camera);
     // Distance haze (not in the original): the scenery takes the colour of the
     // horizon with distance and fades into the 2D backdrop before it stops
     // being drawn; 0 = off, 1 = default strength
@@ -390,7 +387,8 @@ private:
     // is first drawn, with the camera's turn when the 3D frame drawn is its own
     SkyMotion sky_motion_;
     uint64_t sky_motion_serial_ = 0;
-    void update_sky_motion();
+    void solve_sky_motion();    // the frame fed last, if not solved yet
+    void update_sky_motion();   // solve_sky_motion and its texels to the staging buffer
     // The sun drawn in the sky, carried along with the sky picture's scroll
     uint64_t sky_sun_serial_ = 0;
     bool sky_sun_carried_ = false;

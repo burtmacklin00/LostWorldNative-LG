@@ -788,10 +788,18 @@ void R3DRenderer::set_sky_coords(const uint32_t* coords) {
 
 void R3DRenderer::set_sky_rows(uint64_t frame, const int32_t* rows) { sky_motion_.feed(frame, rows); }
 
+// (the motion is solved here, once the frame's layers, scene and shift are
+// all in, so that the caller can read it before the frame is drawn)
+void R3DRenderer::set_back_shift(float vblanks, bool camera) {
+    back_shift_ = vblanks;
+    back_shift_camera_ = camera;
+    solve_sky_motion();
+}
+
 // The motion of the back layers for the 2D frame fed last (SkyMotion), with
 // the world camera's turn from the previous 3D frame when the one drawn is
 // of the same vblank; its texels go to the sky coordinates' last two rows
-void R3DRenderer::update_sky_motion() {
+void R3DRenderer::solve_sky_motion() {
     if (sky_motion_.pending()) {
         const R3DViewport* w = nullptr;
         if (scene_)
@@ -811,6 +819,10 @@ void R3DRenderer::update_sky_motion() {
         sky_motion_serial_++;
         layers_dirty_ = true;
     }
+}
+
+void R3DRenderer::update_sky_motion() {
+    solve_sky_motion();
     if (layers_dirty_)
         memcpy(static_cast<uint8_t*>(layer_staging_.mapped) + (BACK_W + SCREEN_W) * SCREEN_H * 4 + TEXT_CELLS_BYTES +
                    size_t(SCREEN_H + 1) * TileGen::SKY_COORDS_W * 4,
