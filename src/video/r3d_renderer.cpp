@@ -1829,10 +1829,11 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     weather_light(w, ao_sun, ao_ambient, ao_fog, ao_fog_color);
     bool full = w.x <= 0.5f && w.w >= SCREEN_W - 0.5f;
     float vx = full ? 0.0f : w.x + lay.game_x0, vw = full ? lay.view_w : w.w;
+    static const bool rt_split = getenv("LW_RTSPLIT");   // debugging aid, as in the shadow pass
     float ap[20] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
                     w.proj[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
                     12.0f, std::min(ao_strength_, 1.0f) * 0.85f, ao_fog, w.fog_start,
-                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, getenv("LW_RTSPLIT") ? 1.0f : 0.0f,
+                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, rt_split ? 1.0f : 0.0f,
                     shadow_up_[0], shadow_up_[1], shadow_up_[2], shadow_height_};
     auto fullscreen = [&](VkPipeline pipe, Image& target, VkImageView view, uint32_t tw, uint32_t th) {
         VkRenderingAttachmentInfo at{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};

@@ -478,6 +478,17 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
     return all;
 }
 
+const std::wstring& Frontend::default_value(int id) {
+    if (defaults_.empty() || defaults_rt_ != rt_available) {
+        defaults_ = option_items(FrontendSettings{});
+        defaults_rt_ = rt_available;
+    }
+    static const std::wstring none;
+    for (const Item& d : defaults_)
+        if (d.id == id) return d.value;
+    return none;
+}
+
 // How a row shows its value, from the setting behind it
 void Frontend::describe(Item& it, const FrontendSettings& s) {
     auto toggle = [&](bool on) { it.kind = TOGGLE, it.pos = on ? 1 : 0, it.count = 2; };
@@ -2072,9 +2083,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
         }
     if (option && cur->enabled && cur->id != OPT_DISPLAY && cur->kind != BUTTON) {   // its default and when it takes effect
         y += U(18);
-        std::wstring def;
-        for (const Item& d : option_items(FrontendSettings{}))
-            if (d.id == cur->id) def = d.value;
+        const std::wstring& def = default_value(cur->id);
         auto meta = [&](const wchar_t* label, const std::wstring& value) {
             text(ITEM, U(21), label, px0, y, 0, {FOOT, FOOT});
             text(ITEM, U(21), value, px0 + U(130), y, 0, {PALE_TOP, PALE_BOTTOM});
