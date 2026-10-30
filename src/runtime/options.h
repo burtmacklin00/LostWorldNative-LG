@@ -71,6 +71,7 @@ struct Options {
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
     uint64_t shot_frame = 0;         // --shot N: screenshot of frame N, then exit
+    int snap_every = 0;              // --snap-every N: a debug snapshot (as F9) every N seconds of play (60 at most)
     std::string replay;              // --replay: a debug snapshot (or a folder of them) instead of the game
     std::vector<std::string> auto_scripts;   // --auto coin@F,start@F (each occurrence)
     bool fixed_aim = false;          // --aim X,Y: fixed raw gun ADC values

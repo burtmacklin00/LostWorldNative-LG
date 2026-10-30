@@ -2178,7 +2178,19 @@ int main(int argc, char** argv) {
         if (f12 && !f12_was_down) capture_2d = true;
         f12_was_down = f12;
         bool f9 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F9) & 0x8000);
-        if (f9 && !f9_was_down && built) {   // debug snapshot of the scene on screen
+        // --snap-every N: the same snapshot every N seconds while someone
+        // plays (not in the menus), 60 at most, for reports without a keyboard
+        bool auto_snap = false;
+        if (g_opt.snap_every > 0 && !frontend.active() && (g_inputs.p[0].playing || g_inputs.p[1].playing)) {
+            static double last_snap = qpc_seconds();
+            static int snaps = 0;
+            if (snaps < 60 && qpc_seconds() - last_snap >= g_opt.snap_every) {
+                last_snap = qpc_seconds();
+                snaps++;
+                auto_snap = true;
+            }
+        }
+        if (((f9 && !f9_was_down) || auto_snap) && built) {   // debug snapshot of the scene on screen
             CreateDirectoryA("out/snap", nullptr);
             std::string base = "out/snap/snap_" + std::to_string(built->frame);
             save_snapshot((base + ".bin").c_str(), *built, layers_shown->vram);
