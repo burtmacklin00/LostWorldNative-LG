@@ -104,6 +104,9 @@ constexpr uint32_t FN_RAPTOR = 0x00053BB4;  // (slot 1..5, type, group of spawn 
 // The dead triceratops of the arcade's story (task 0x5B830, only in encounter 3,
 // the Jungle shack): survival's first wave runs that encounter, so it is left out
 constexpr uint32_t FN_DEAD_TRICERATOPS = 0x0005B758;
+// Its raptors (encounter 3, group 1) stand on it; without it they would stand
+// in the air, so they come from the next group of that stop, on the ground
+constexpr int TRICERATOPS_ENCOUNTER = 3, TRICERATOPS_GROUP = 1, GROUND_GROUP = 2;
 constexpr float NEAR_LOOK = 120;            // another stop's section joins a wave if it looks this near one of this stop's
 constexpr int AMBUSH_CHANCE = 35;           // % of the walks with an ambush on the way
 constexpr int BONUS_CHANCE = 50;            // % of the walks with a golden BONUS target
@@ -305,6 +308,16 @@ namespace {
 uint32_t script_addr(uint32_t pc) { return SCRIPT + 4 * pc; }
 uint32_t script_pc(uint32_t addr) { return (addr - SCRIPT) / 4; }
 
+// The call at word i of encounter `id`'s script (delay, function, nargs, args), as survival runs it
+std::vector<int32_t> script_call(uint32_t i, int id) {
+    std::vector<int32_t> item;
+    for (uint32_t k = 0; k < 3 + rd32(script_addr(i + 2)); k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+    if (id == TRICERATOPS_ENCOUNTER && uint32_t(item[1]) == FN_RAPTOR && item.size() >= 6 &&
+        item[5] == TRICERATOPS_GROUP)
+        item[5] = GROUND_GROUP;
+    return item;
+}
+
 // Calls of known enemies in encounter `id` (for the trace: which zones can be arenas)
 int encounter_enemies(int id) {
     uint32_t i = 0;
@@ -475,8 +488,7 @@ struct Survival {
                 i += 1 + n;
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+                std::vector<int32_t> item = script_call(i, encounter);
                 if (uint32_t(item[1]) == FN_DEAD_TRICERATOPS) {   // its delay is kept as a wait
                     if (item[0] > 0) out.push_back(-21), out.push_back(item[0]);
                     i += 3 + nargs;
@@ -532,8 +544,7 @@ struct Survival {
                 i += 1 + uint32_t(n);
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
+                std::vector<int32_t> item = script_call(i, id);
                 if (is_enemy_fn(uint32_t(item[1]))) e.push_back(item);
                 i += 3 + uint32_t(nargs);
             }
@@ -578,8 +589,7 @@ struct Survival {
                 i += 1 + uint32_t(n);
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
+                std::vector<int32_t> item = script_call(i, id);
                 if (is_enemy_fn(uint32_t(item[1]))) cur.calls.push_back(item);
                 i += 3 + uint32_t(nargs);
             }
