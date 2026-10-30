@@ -29,33 +29,11 @@ constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
 constexpr uint32_t COFFEE_INK = 0x0D0C22;   // their dark blue-black
 constexpr const wchar_t* COFFEE_HINT = L"Support the port: opens buymeacoffee.com in your browser";
 
-float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
-
-uint32_t mix(uint32_t a, uint32_t b, float t) {
-    uint32_t r = 0;
-    for (int s = 0; s <= 16; s += 8) {
-        float v = chan(a, s) + (chan(b, s) - chan(a, s)) * t;
-        r |= uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f) << s;
-    }
-    return r;
-}
-
-std::vector<char> read_file(const std::string& path) {
-    std::vector<char> data;
-    if (FILE* f = fopen(path.c_str(), "rb")) {
-        fseek(f, 0, SEEK_END);
-        data.resize(size_t(ftell(f)));
-        fseek(f, 0, SEEK_SET);
-        if (fread(data.data(), 1, data.size(), f) != data.size()) data.clear();
-        fclose(f);
-    }
-    return data;
-}
+using ui::chan;
+using ui::mix;
+using ui::over;
 
 bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out);
-
-const wchar_t* const FACES[5] = {L"Saira ExtraCondensed ExCond", L"Barlow Condensed", L"Share Tech Mono",
-                                 L"Jurassic Park", L"Arimo"};
 
 }  // namespace
 
@@ -394,25 +372,14 @@ int FrontendSettings::quality() const {
 // ---- Setup ----
 
 bool Frontend::init(const std::string& font_dir) {
-    // Jurassic Park is optional (free for personal use, not in the repository);
-    // without Arimo the descriptions fall back on Windows' own sans-serif
-    static const char* const FILES[5] = {"SairaExtraCondensed-Bold.ttf", "BarlowCondensed-Bold.ttf",
-                                         "ShareTechMono-Regular.ttf", "Jurassic_Park.ttf", "Arimo[wght].ttf"};
-    bool ok = true;
-    for (const char* name : FILES) {
-        font_data_.push_back(read_file(font_dir + "/" + name));
-        auto& data = font_data_.back();
-        DWORD count = 0;
-        HANDLE h = data.empty() ? nullptr : AddFontMemResourceEx(data.data(), DWORD(data.size()), nullptr, &count);
-        if (h) {
-            font_handles_.push_back(h);
-            if (name == FILES[3]) jurassic_ = true;
-        } else if (name != FILES[3] && name != FILES[4]) {
-            fprintf(stderr, "[menu] could not load the font %s/%s\n", font_dir.c_str(), name);
+    gdi_ = &GdiText::acquire(font_dir);
+    bool ok = gdi_->ready();
+    for (GdiText::Face f : {GdiText::SAIRA, GdiText::BARLOW, GdiText::MONO})   // the others are optional
+        if (!gdi_->loaded(f)) {
+            fprintf(stderr, "[menu] could not load the font %s/%s\n", font_dir.c_str(), GdiText::file(f));
             ok = false;
         }
-    }
-    dc_ = CreateCompatibleDC(nullptr);
+    jurassic_ = gdi_->loaded(GdiText::JURASSIC);
     for (const wchar_t* p : {L"third_party/menu/cover.png", L"third_party/menu/cover.jpg", L"third_party/menu/lw_poster.jpg"})
         if (load_poster(p)) {
             printf("[menu] poster %ls (%dx%d)\n", p, poster_w_, poster_h_);
@@ -472,12 +439,8 @@ bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out,
 bool Frontend::load_poster(const std::wstring& path) { return load_image(path, poster_, poster_w_, poster_h_); }
 
 void Frontend::shutdown() {
-    for (auto& [key, f] : fonts_) DeleteObject(f);
-    fonts_.clear();
-    for (HANDLE h : font_handles_) RemoveFontMemResourceEx(h);
-    font_handles_.clear();
-    if (dc_) DeleteDC(dc_);
-    dc_ = nullptr;
+    if (gdi_) gdi_->release();
+    gdi_ = nullptr;
 }
 
 // The picture of an option, if there is one
@@ -1124,30 +1087,6 @@ void Frontend::draw_records(int x0, int x1, int y0, int row_h) {
 
 // ---- Drawing primitives (premultiplied BGRA canvas) ----
 
-// Integer "over" on premultiplied BGRA (it runs for every pixel of panels and text)
-static inline uint32_t over(uint32_t d, uint32_t rgb, int a) {   // a: 0..256
-    int k = 256 - a;
-    uint32_t rb = (((rgb & 0xFF00FFu) * a + (d & 0xFF00FFu) * k) >> 8) & 0xFF00FFu;
-    uint32_t g = (((rgb & 0x00FF00u) * a + (d & 0x00FF00u) * k) >> 8) & 0x00FF00u;
-    uint32_t da = ((255u * a + (d >> 24) * k) >> 8);
-    return rb | g | (da << 24);
-}
-
-void Frontend::blend(int x, int y, uint32_t rgb, float a) {
-    if (x < 0 || y < 0 || x >= w_ || y >= h_ || a <= 0) return;
-    uint32_t& d = px_[size_t(y) * w_ + x];
-    d = over(d, rgb, int(std::min(a, 1.0f) * 256.0f + 0.5f));
-}
-
-void Frontend::fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha) {
-    x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, w_), y1 = std::min(y1, h_);
-    int a = int(std::clamp(alpha, 0.0f, 1.0f) * 256.0f + 0.5f);
-    for (int y = y0; y < y1; y++) {
-        uint32_t* row = px_ + size_t(y) * w_;
-        for (int x = x0; x < x1; x++) row[x] = over(row[x], rgb, a);
-    }
-}
-
 // Horizontal band that fades out towards both ends
 void Frontend::band(int cx, int y0, int y1, int half_w, uint32_t rgb, float alpha) {
     for (int x = std::max(cx - half_w, 0); x < std::min(cx + half_w, w_); x++) {
@@ -1263,90 +1202,12 @@ void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
         }
 }
 
-HFONT Frontend::font(Family f, int px) {
-    auto key = std::make_pair(int(f), px);
-    auto it = fonts_.find(key);
-    if (it != fonts_.end()) return it->second;
-    HFONT h = CreateFontW(-px, 0, 0, 0, f == MONO || f == JURASSIC || f == BODY ? FW_NORMAL : FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                          OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, FACES[f]);
-    fonts_[key] = h;
-    return h;
-}
-
-const Frontend::Mask& Frontend::mask(Family f, int px, const std::wstring& s, int edge_px) {
-    std::wstring key = std::to_wstring(int(f)) + L"|" + std::to_wstring(px) + L"|" + std::to_wstring(edge_px) + L"|" + s;
-    auto it = masks_.find(key);
-    if (it != masks_.end()) return it->second;
-    if (masks_.size() > 400) masks_.clear();   // window resized many times
-    Mask& m = masks_[key];
-    SelectObject(dc_, font(f, px));
-    std::wstring t = s;   // the Jurassic font's space is very narrow: words ran together
-    if (f == JURASSIC) {
-        t.clear();
-        for (wchar_t c : s) t += c == L' ' ? std::wstring(L"   ") : std::wstring(1, c);
-    }
-    SIZE sz{};
-    GetTextExtentPoint32W(dc_, t.c_str(), int(t.size()), &sz);
-    TEXTMETRICW tm{};
-    GetTextMetricsW(dc_, &tm);
-    m.pad = edge_px + 2 + px / 6;   // room for the outline and overhanging letters
-    m.text_w = sz.cx;
-    m.text_h = sz.cy;
-    m.w = sz.cx + 2 * m.pad;
-    m.h = sz.cy + 2 * m.pad;
-    m.grad0 = m.pad + tm.tmInternalLeading + (tm.tmAscent - tm.tmInternalLeading) / 8;
-    m.grad1 = m.pad + tm.tmAscent;
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
-    bi.bmiHeader.biWidth = m.w;
-    bi.bmiHeader.biHeight = -m.h;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr;
-    HBITMAP bmp = CreateDIBSection(dc_, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!bmp) return m;
-    HGDIOBJ old = SelectObject(dc_, bmp);
-    memset(bits, 0, size_t(m.w) * m.h * 4);
-    SetBkMode(dc_, TRANSPARENT);
-    SetTextColor(dc_, RGB(255, 255, 255));
-    TextOutW(dc_, m.pad, m.pad, t.c_str(), int(t.size()));
-    GdiFlush();
-    m.a.resize(size_t(m.w) * m.h);
-    const uint8_t* p = static_cast<const uint8_t*>(bits);
-    for (size_t i = 0; i < m.a.size(); i++) m.a[i] = p[i * 4 + 1];
-    SelectObject(dc_, old);
-    DeleteObject(bmp);
-    if (edge_px > 0) {   // outline: the letters grown by a round brush
-        m.e.assign(m.a.size(), 0);
-        float r = float(edge_px);
-        for (int dy = -edge_px - 1; dy <= edge_px + 1; dy++)
-            for (int dx = -edge_px - 1; dx <= edge_px + 1; dx++) {
-                float wgt = std::clamp(r + 1 - std::sqrt(float(dx * dx + dy * dy)), 0.0f, 1.0f);
-                if (wgt <= 0) continue;
-                for (int y = std::max(0, -dy); y < std::min(m.h, m.h - dy); y++) {
-                    const uint8_t* src = &m.a[size_t(y + dy) * m.w];
-                    uint8_t* dst = &m.e[size_t(y) * m.w];
-                    for (int x = std::max(0, -dx); x < std::min(m.w, m.w - dx); x++) {
-                        uint8_t v = uint8_t(float(src[x + dx]) * wgt);
-                        if (v > dst[x]) dst[x] = v;
-                    }
-                }
-            }
-    }
-    return m;
-}
-
 int Frontend::measure(Family f, int px, const std::wstring& s) {
     if (f == JURASSIC) px = int(px * 1.34f + 0.5f);   // as text() draws it
     return mask(f, px, s, 0).text_w;
 }
 
-int Frontend::extent(Family f, int px, const std::wstring& s) {
-    SelectObject(dc_, font(f, px));
-    SIZE sz{};
-    GetTextExtentPoint32W(dc_, s.c_str(), int(s.size()), &sz);
-    return sz.cx;
-}
+int Frontend::extent(Family f, int px, const std::wstring& s) { return gdi_->extent(GdiText::Face(f), px, s); }
 
 // Lines of at most max_w pixels, broken between words
 std::vector<std::wstring> Frontend::wrap(Family f, int px, const std::wstring& s, int max_w) {
