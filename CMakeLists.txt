@@ -102,6 +102,7 @@ add_executable(LostWorld
     src/runtime/scsi53c810.cpp
     src/runtime/survival.cpp
     src/runtime/random_spawns.cpp
+    src/runtime/weather.cpp
     src/runtime/stats.cpp
     src/ui/survival_ui.cpp
     src/ui/achievement_toast.cpp
@@ -177,7 +178,7 @@ if(LW_TESTS)
     enable_testing()
     add_executable(tilegen_test tests/tilegen_test.cpp tests/stubs.cpp src/video/tilegen.cpp)
     add_executable(fnv_test tests/fnv_test.cpp)
-    add_executable(options_test tests/options_test.cpp src/runtime/options.cpp)
+    add_executable(options_test tests/options_test.cpp src/runtime/options.cpp src/runtime/weather.cpp)
     add_executable(sky_motion_test tests/sky_motion_test.cpp src/video/sky_motion.cpp)
     add_executable(audio_stream_test tests/audio_stream_test.cpp src/audio/audio_stream.cpp)
     add_executable(rom_zip_test tests/rom_zip_test.cpp src/runtime/rom_zip.cpp ${MINIZ_DIR}/miniz.c)

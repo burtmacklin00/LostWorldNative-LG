@@ -40,6 +40,7 @@ layout(set = 0, binding = ATMOSPHERE_BINDING) uniform Atmosphere {
     vec4 sky_sun;    // the sun drawn in the sky and its light shafts: direction in view space (R3DRenderer::step_sky_sun)
     vec4 rt;         // ray traced sun shadows: x 1 = on (2: left half only), y size of the sun (tangent of its radius),
                      // z rays per point, w noise seed (changes every image with DLAA)
+    vec4 weather;    // the weather (r3d_weather.h): x how much the backdrop turns to a cloud grey, yzw that grey
 } atm;
 
 // Spotlight lobe across the view (spec 7.1) for a view direction given as

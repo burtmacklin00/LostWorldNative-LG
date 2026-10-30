@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "ppc_rt.h"
+#include "weather.h"
 
 extern int g_boss_maker;   // runtime.cpp: --make-boss-state plays by itself
 bool survival_enabled();
@@ -68,6 +69,7 @@ struct Boss {
 Boss g_boss;
 
 std::atomic<bool> g_on{false};
+std::atomic<bool> g_playing{false};   // a shuffled arcade game is being played
 uint32_t g_rng = 1;
 bool g_patched = true;    // the script in RAM may not be the ROM's (a game state loaded)
 
@@ -301,7 +303,12 @@ void random_spawns_hooks() {
 void random_spawns_frame() {
     g_probe_frame++;
     static uint8_t stage = 0xFF;   // a new stage, a new boss (the next one may be put where the last one was)
-    if (rd8(STAGE) != stage) stage = rd8(STAGE), g_boss = {};
+    bool new_stage = rd8(STAGE) != stage;
+    if (new_stage) stage = rd8(STAGE), g_boss = {};
+    // ... and new weather (weather.h), also when the game starts
+    bool playing = g_on && rd32(COURSE_SELECT) == 0xC && !survival_enabled() && g_boss_maker < 0;
+    if (playing && (new_stage || !g_playing)) weather_roll();
+    g_playing = playing;
     if (!g_probe || g_probe_count >= PROBE_MAX) return;
     if (g_probe_hits == g_probe_dumped && g_probe_frame % 120) return;
     uint32_t head[2] = {uint32_t(g_probe_frame), g_probe_hits};
@@ -319,6 +326,7 @@ void random_spawns_set(bool on) {
 }
 
 bool random_spawns_on() { return g_on; }
+bool random_spawns_playing() { return g_playing; }
 
 void random_spawns_enter(Ctx& c, uint32_t fn) {
     if (fn == FN_ADD_SCORE && g_probe) {

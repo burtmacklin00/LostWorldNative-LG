@@ -90,6 +90,7 @@ void FrontendSettings::load(const char* path) {
         else if (k == "light_shafts") shafts = on;
         else if (k == "soft_particles") soft = on;
         else if (k == "lightning") lightning = on;
+        else if (k == "random_weather") random_weather = on;
         else if (k == "rain") rain = v == "light" ? 1 : v == "heavy" ? 2 : on ? 2 : 0;
         else if (k == "hdr") hdr = on;
         else if (k == "rim_light") rim = on;
@@ -136,6 +137,7 @@ void FrontendSettings::save(const char* path) const {
             gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
             pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
             crosshair_style ? "custom" : "default", crosshair_hide, free_play, menu_music, scale, half_rate, vsync, ASPECTS[aspect]);
+    fprintf(f, "random_weather = %d\n", random_weather);
     fprintf(f, "gun_p1 = %s\ngun_p2 = %s\n", gun_p1.empty() ? "none" : gun_p1.c_str(), gun_p2.empty() ? "none" : gun_p2.c_str());
     fclose(f);
 }
@@ -319,7 +321,7 @@ const Frontend::OptionTab Frontend::OPTION_TABS[] = {
     {OPT_SUN, LIGHTING_TAB}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_RT, LIGHTING_TAB}, {OPT_SHAFTS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB},
     {OPT_AO, LIGHTING_TAB}, {OPT_BLOOM, LIGHTING_TAB}, {OPT_RIM, LIGHTING_TAB}, {OPT_RELIEF, LIGHTING_TAB}, {OPT_TORCH, LIGHTING_TAB},
     {OPT_SKY, ATMOSPHERE_TAB}, {OPT_HAZE, ATMOSPHERE_TAB}, {OPT_LIGHTNING, ATMOSPHERE_TAB},
-    {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
+    {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_WEATHER, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
     {OPT_VOLUME, AUDIO_TAB}, {OPT_MUSIC, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
     {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
     {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
@@ -430,6 +432,8 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
              L"Flashes of lightning in stormy fog, with the trees standing out against it"},
             {OPT_RAIN, L"RAIN", RAIN_LEVELS[s.rain],
              L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
+            {OPT_WEATHER, L"RANDOM WEATHER", on_off(s.random_weather),
+             L"RANDOM SPAWNS and SURVIVAL: sun, clouds, fog, rain or a storm, new every stage and every run"},
             {OPT_SAT, L"COLOR SATURATION", std::to_wstring(s.saturation) + L"%",
              L"How vivid the colours are (100% = original, 80% by default)"},
             {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
@@ -511,6 +515,7 @@ void Frontend::describe(Item& it, const FrontendSettings& s) {
     case OPT_TORCH: choice(s.torch ? 1 : 0, 2, false); break;
     case OPT_LIGHTNING: toggle(s.lightning); break;
     case OPT_RAIN: choice(s.rain, 3, true); break;
+    case OPT_WEATHER: toggle(s.random_weather); break;
     case OPT_TEXT: toggle(s.hd_text); break;
     case OPT_CROSS: toggle(s.crosshair); break;
     case OPT_CROSS_HIDE:
@@ -563,6 +568,7 @@ void Frontend::reset_tab() {
         case OPT_TORCH: settings.torch = d.torch; break;
         case OPT_LIGHTNING: settings.lightning = d.lightning; break;
         case OPT_RAIN: settings.rain = d.rain; break;
+        case OPT_WEATHER: settings.random_weather = d.random_weather; break;
         case OPT_TEXT: settings.hd_text = d.hd_text; break;
         case OPT_CROSS: settings.crosshair = d.crosshair; break;
         case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
@@ -779,6 +785,7 @@ void Frontend::activate(const Item& it, int dir) {
     case OPT_TORCH: settings.torch = !settings.torch; push(Action::SettingsChanged); break;
     case OPT_LIGHTNING: settings.lightning = !settings.lightning; push(Action::SettingsChanged); break;
     case OPT_RAIN: settings.rain = (settings.rain + dir + 3) % 3; push(Action::SettingsChanged); break;
+    case OPT_WEATHER: settings.random_weather = !settings.random_weather; push(Action::SettingsChanged); break;
     case OPT_TEXT: settings.hd_text = !settings.hd_text; push(Action::SettingsChanged); break;
     case OPT_CROSS: settings.crosshair = !settings.crosshair; push(Action::SettingsChanged); break;
     case OPT_MOTION: settings.smooth = !settings.smooth; push(Action::SettingsChanged); break;

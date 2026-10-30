@@ -14,6 +14,7 @@
 #include "r3d_rain.h"
 #include "r3d_raytrace.h"
 #include "r3d_scene.h"
+#include "r3d_weather.h"
 #include "pack2d.h"
 #include "sky_motion.h"
 #include "sky_pack.h"
@@ -54,7 +55,10 @@ public:
     void set_scene(const R3DScene* scene) {
         scene_ = scene;
         scene_serial_++;
-        if (scene) rain_.observe(*scene);
+        if (scene) {
+            step_weather(*scene);
+            rain_.observe(*scene);
+        }
     }
     void set_layers(const uint32_t* back, const uint32_t* front);   // 496x384 BGRA each
     // High-resolution text: the glyph atlas (once) and, with every set_layers,
@@ -169,6 +173,8 @@ public:
     void set_lightning(bool on) { lightning_ = on; }
     // Rain where the game has its own (not in the original): 0 = off, 1 = light, 2 = heavy
     void set_rain(int level) { rain_.set_level(level); }
+    // Weather over the game's light (r3d_weather.h); it changes over a few seconds
+    void set_weather(const R3DWeather& w) { weather_target_ = w; }
 
 private:
     struct Buffer {
@@ -317,6 +323,11 @@ private:
     float bolt_azimuth_ = 0;
     float bolt_seg_[BOLT_SEGMENTS * 4] = {};
     R3DRain rain_;
+    R3DWeather weather_target_, weather_;   // asked for, and shown (eased towards it)
+    float outdoor_ = 0;   // 0..1: how much the weather shows (daylight, a backdrop behind the world)
+    void step_weather(const R3DScene& scene);
+    // The weather's light and fog on a viewport of the world
+    void weather_light(const R3DViewport& v, float& sun, float& ambient, float& fog_density, float fog_color[4]) const;
     std::vector<R3DVertex> rain_vertices_;   // this image's drops, after the scene's vertices
     Image exposure_;   // 1x1 R16F: average log brightness of the 3D image, eased from frame to frame
     VkPipeline compose_measure_ = VK_NULL_HANDLE;   // the composition in measure mode, blended into exposure_
