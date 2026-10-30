@@ -849,7 +849,8 @@ std::unique_ptr<GameState> g_home;   // the arcade game as it was before the fir
 std::unique_ptr<GameState> g_mark;   // survival: the arena's first stop, where each lap starts again
 bool g_state_keep_home = false;
 std::atomic<int> g_state_result{0};  // 1 done, -1 failed
-int g_state_waits = 0;
+uint64_t g_state_since = 0;   // the frame a load was asked at (it gives up 600 frames later)
+bool g_logo_up = false;       // the boot has reached the SEGA logo (the game's main loop) once
 
 // Return addresses saved on the PowerPC stack, innermost first
 std::vector<uint32_t> call_chain(const uint8_t* ram, uint32_t sp) {
@@ -996,7 +997,7 @@ static bool start_load(std::unique_ptr<GameState> st, bool keep_home) {
     if (!st) return false;
     g_state = std::move(st);
     g_state_keep_home = keep_home;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 2;
     return true;
 }
@@ -1011,18 +1012,23 @@ bool game_state_load_home() {
     }
     return st && start_load(std::move(st), false);
 }
-// The game as it is becomes the home state (survival mode starts from it)
+// The game as it is becomes the home state (survival mode starts from it).
+// Only the first time: with a home already kept it would only replace a load
+// still waiting (QUIT TO MAIN MENU puts the home back when the menu closes,
+// and CLASSIC ARCADE right after it used to cancel that load: the game went on
+// from where it was left, stuck when that was a survival arena)
 void game_state_keep_home() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
+    if (g_home || g_state_op == 2) return;
     g_state_result = 0;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 3;
 }
 // The game as it is becomes the mark (replacing the last one); load_mark puts it back
 void game_state_mark() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state_result = 0;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 4;
 }
 bool game_state_load_mark() {
@@ -1055,13 +1061,16 @@ void rt_state_point(Ctx& c) {
         g_state_op = 0;
     } else if (g_state_op == 2 && g_state) {
         // Only from the same chain of calls (the main loop); anywhere else
-        // (a loading screen waiting in a nested loop) it tries again later
+        // (a loading screen waiting in a nested loop) it tries again later.
+        // Counted in frames: a nested wait goes round its loop thousands of
+        // times a frame, and 600 of those made a load fail now and then (QUIT
+        // TO MAIN MENU leaving the game in the survival arena)
         if (call_chain(g_ram, c.r[1]) == g_state->chain) {
             if (g_state_keep_home && !g_home) g_home = capture_state(c);
             apply_state(c, *g_state);
             stats_state_loaded();
             g_state_result = 1;
-        } else if (g_boot_skip || ++g_state_waits < 600) {
+        } else if (g_boot_skip || g_frame - g_state_since < 600) {
             return;
         } else {
             g_state_result = -1;
@@ -1069,6 +1078,10 @@ void rt_state_point(Ctx& c) {
         g_state.reset();
         g_state_op = 0;
     } else if (g_state_op == 3) {
+        // Not before the SEGA logo: the boot screens wait in nested loops, and
+        // a home kept in one of them could never be loaded again (the game
+        // does not come back to that chain of calls)
+        if (!g_logo_up) return;
         if (!g_home) g_home = capture_state(c);
         g_state_result = 1;
         g_state_op = 0;
@@ -1205,11 +1218,16 @@ void rt_event(Ctx& c) {
             random_spawns_frame();
             if (g_boss_maker >= 0) boss_maker_frame();
             video_snapshot();
+            if (!g_logo_up && ((g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000)) g_logo_up = true;
             // Survival mode: on to the chosen stage at full speed, behind its loading screen
             bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 200000   // (survival gives up first)
                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
             if (g_boot_skip && boot_done) {
                 g_boot_skip = g_fast_idle = false;
+                // The arcade game at its SEGA logo: the home state, also when
+                // CLASSIC ARCADE was picked before the boot got here (it keeps
+                // it only once the boot is over)
+                if (!survival_enabled()) game_state_keep_home();
                 g_sound.set_dsp_enabled(true);
                 g_sound.set_muted(false);   // fades in from silence
                 printf("[boot] start screens skipped in %.1f s (frame %llu)\n",
