@@ -35,7 +35,8 @@ float traced_open(vec3 p, vec3 n, float noise) {
         float a = (float(i) * 0.618034 + noise) * 6.2831853;
         float r = sqrt(u);
         vec3 dir = normalize(t * (r * cos(a)) + b * (r * sin(a)) + n * sqrt(1.0 - u));
-        float hit = rt_trace(origin, dir, radius, RT_LOW | RT_HIGH, false);
+        // Only what stands near the ground (ao_low): not the canopies above
+        float hit = rt_trace(origin, dir, radius, RT_LOW, false);
         if (hit >= 0.0) hidden += (1.0 - hit / radius) * (1.0 - hit / radius);
     }
     return 1.0 - clamp(hidden / float(rays) * 2.0, 0.0, 1.0);
@@ -47,7 +48,9 @@ layout(location = 0) out vec4 out_ao;
 void main() {
     vec2 frag = floor(gl_FragCoord.xy) * 2.0 + 0.5;   // the full-resolution pixel
     vec3 p = ao_view_pos(frag);
-    if (p.z >= 0.0) {   // no 3D here (2D backdrop)
+    // No 3D here (2D backdrop), or high above the ground
+    float low = p.z < 0.0 ? ao_low(p) : 0.0;
+    if (low <= 0.0) {
         out_ao = vec4(1.0);
         return;
     }
@@ -61,8 +64,9 @@ void main() {
 
     // Rotated per pixel (and per frame with DLAA, which averages it out)
     float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + ao.misc.x);
-    // Fogged surfaces lose their shading, so they lose the occlusion too
-    float fog = clamp(ao.params.w + (-p.z) * ao.params.z, 0.0, 1.0);
+    // Fogged surfaces lose their shading, so they lose the occlusion too;
+    // so do those fading out high up
+    float fog = 1.0 - (1.0 - clamp(ao.params.w + (-p.z) * ao.params.z, 0.0, 1.0)) * low;
 #ifdef RAY_TRACING
     // misc.w 1: traced on the left half only, for comparing (LW_RTSPLIT)
     if (ao.misc.z > 0.0 && (ao.misc.w == 0.0 || frag.x < ao.rect.x + ao.rect.z * 0.5)) {
@@ -91,7 +95,7 @@ void main() {
             float d2 = dot(h, h);
             float elevation = dot(n, h) * inversesqrt(d2 + 1e-6);
             float falloff = clamp(1.0 - d2 / (radius * radius), 0.0, 1.0);
-            horizon = max(horizon, (elevation - 0.3) * falloff);
+            horizon = max(horizon, (elevation - 0.3) * falloff * ao_low(q));
         }
         occlusion += horizon;
     }

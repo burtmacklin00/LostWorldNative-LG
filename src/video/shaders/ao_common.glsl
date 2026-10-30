@@ -10,9 +10,24 @@ layout(push_constant) uniform AmbientOcclusion {
     vec4 params;   // radius (view units), strength, fog density, fog start
     vec4 misc;     // x: noise seed, y: largest radius in pixels, z: rays per pixel when traced (0 = from the depth),
                    // w: 1 = traced on the left half only (LW_RTSPLIT)
+    vec4 up;       // world up in view space, camera height above the ground (0, 0, 0, 0: unknown)
 } ao;
 
 const float AO_NEAR = 1e-3;   // r3d_scene.cpp projection
+
+// High above the ground the scenery is a stage set: a flat ceiling of foliage
+// over the forest, the tops of painted backdrop walls. Occlusion there (and
+// from there) traces the corners where those planes meet, so it fades out
+// from AO_LOW to AO_HIGH above the ground (AO_HIGH: the height the sun
+// shadows and the traced rays split at, r3d_renderer.cpp)
+const float AO_LOW = 25.0, AO_HIGH = 35.0;
+
+// 1 where a point of the world (view space) may take part in the occlusion,
+// fading to 0 high up
+float ao_low(vec3 p) {
+    if (dot(ao.up.xyz, ao.up.xyz) < 0.5) return 1.0;
+    return 1.0 - smoothstep(AO_LOW, AO_HIGH, dot(p, ao.up.xyz) + ao.up.w);
+}
 
 // View-space position of the surface at a target pixel; z >= 0: no surface
 vec3 ao_view_pos(vec2 frag) {
