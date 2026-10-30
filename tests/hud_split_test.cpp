@@ -66,6 +66,15 @@ int main() {
         check(r[20] == 0, "the score band is left to its own handling");
         check(l1(r[210]) <= MIDDLE_X0 && r0(r[210]) >= MIDDLE_X1, "nothing moves across the middle");
     }
+    {   // A shot's popup under the scores (1 ECHO, 2 LONG RANGE): number and word stay together
+        Screen s;
+        s.text(140, 70, 8, 12);      // P1's number
+        s.text(165, 70, 60, 12);     // ECHO, wide enough to be a prompt
+        s.text(350, 70, 8, 12);      // P2's
+        s.text(375, 70, 100, 12);    // LONG RANGE
+        std::vector<uint32_t> r = s.rows();
+        check(r[75] == 0, "a shot's popup stays where the game puts it");
+    }
     {   // A message across the middle (STAGE CLEAR) stays whole
         Screen s;
         s.text(150, 180, 200, 20);

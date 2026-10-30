@@ -19,6 +19,12 @@ constexpr int SCREEN_W = 496, SCREEN_H = 384;
 constexpr int TOP_ROWS = 32;            // compose.frag HUD_TOP_ROWS: the score band, handled on its own
 constexpr int MIDDLE_X0 = 244, MIDDLE_X1 = 252;   // a group touching these columns belongs to both players
 constexpr int MIN_WIDTH = 48;           // narrower groups are the points popped up at a hit
+// Above this row (under the scores) the game pops up what a shot was worth:
+// a player's number and a word (HIT!, ECHO, LONG RANGE, SNIPE SHOT!, BINGO!!)
+// drawn apart, the word flashing. They stay where the game puts them: moving
+// only the word would pull it off its number. The prompts are all lower
+// (SHOOT OUTSIDE OF THE SCREEN! from row ~200, RELOAD, CONTINUE, the lives)
+constexpr int POPUP_ROWS = 120;
 constexpr int LIVES_ROW = 320;          // the lives row at the bottom: a single heart (32 px) still moves
 constexpr int MIN_WIDTH_LIVES = 16;
 constexpr int JOIN_X = 16, JOIN_Y = 8;  // gaps that still make one group (letters, lines of one prompt)
