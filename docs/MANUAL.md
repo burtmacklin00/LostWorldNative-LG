@@ -355,7 +355,7 @@ PNG to the textures/ folder with the same name and edit it: it can be any
 resolution (for example 4x upscaled with an AI) and have its own alpha channel. At
 startup, the game uses those in textures/ with trilinear and anisotropic filtering.
 `python tools/texture_sheet.py` makes a sheet with all the dumped ones, numbered.
-textures/ is not versioned.
+The repository ships with the replacements made so far (HD 2D, skies, text font).
 
 2D graphics (for example the route map) are replaced separately: F12 during
 play (or --shot N) saves the 2D layer to out/2d/capture_<frame>.png, and
