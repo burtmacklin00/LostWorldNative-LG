@@ -50,69 +50,65 @@ constexpr const char* ACHIEVEMENTS_FILE = "save/achievements.ini";
 
 int64_t frames_of(double seconds) { return int64_t(seconds * FRAME_HZ); }
 
-const std::vector<AchievementInfo> TABLE = {
-    {"first_blood", L"FIRST BLOOD", L"Bring down your first dinosaur", 1},
-    {"hunter", L"HUNTER", L"Bring down 100 dinosaurs", 100},
-    {"big_game_hunter", L"BIG GAME HUNTER", L"Bring down 1,000 dinosaurs", 1000},
-    {"stage1", L"INTO THE JUNGLE", L"Clear stage 1", 1},
-    {"stage2", L"KING OF THE LAKESIDE", L"Clear stage 2", 1},
-    {"stage3", L"STAGE 3 CLEARED", L"Clear stage 3", 1},
-    {"stage4", L"STAGE 4 CLEARED", L"Clear stage 4", 1},
-    {"finish", L"THE END OF THE LOST WORLD", L"Finish the game", 1},
-    {"finish_expert", L"EXPERT TRACKER", L"Finish the game on the Expert course", 1},
-    {"finish_shuffle", L"SHUFFLE SURVIVOR", L"Finish the game on the Shuffle course", 1},
-    {"one_credit", L"ONE CREDIT WONDER", L"Finish the game without continuing", 1},
-    {"untouchable", L"UNTOUCHABLE", L"Clear a stage without losing a life", 1},
-    {"sharpshooter", L"SHARPSHOOTER", L"Clear a stage with a hit rate of 80% or more", 1},
-    {"dead_eye", L"DEAD EYE", L"Clear a stage with a hit rate of 95% or more", 1},
-    {"technician", L"TECHNICIAN", L"15 technical shots in one stage", 15},
-    {"trigger_happy", L"TRIGGER HAPPY", L"Fire 10,000 shots", 10000},
-    {"high_roller", L"HIGH ROLLER", L"Score 100,000 points in one game", 100000},
-    {"boss1", L"MOTHER'S WRATH", L"Defeat the female T-Rex in boss mode", 1},
-    {"boss2", L"CROC HUNTER", L"Defeat the Deinosuchus in boss mode", 1},
-    {"boss3", L"CARNOTAURUS DOWN", L"Defeat the Carnotaurus in boss mode", 1},
-    {"boss4", L"KING OF SAN DIEGO", L"Defeat the T-Rex in boss mode", 1},
-    {"flawless_boss", L"FLAWLESS", L"Defeat a boss without losing a life", 1},
-    {"speed_hunter", L"SPEED HUNTER", L"Defeat a boss in less than 60 seconds", 1},
-    {"wave5", L"WAVE RIDER", L"Reach wave 5 in survival", 5},
-    {"wave10", L"LAST STAND", L"Reach wave 10 in survival", 10},
-    {"wave20", L"ENDLESS", L"Reach wave 20 in survival", 20},
-    {"veteran", L"VETERAN", L"Play for 5 hours", frames_of(5 * 3600)},
-};
-
-int64_t raw_progress(const Stats& s, const std::string& k) {
-    auto any_stage = [&](auto pred) {
-        for (const Stats::Stage& st : s.stage)
-            if (pred(st)) return int64_t(1);
-        return int64_t(0);
-    };
-    if (k == "first_blood" || k == "hunter" || k == "big_game_hunter") return s.kills;
-    if (k.rfind("stage", 0) == 0) return s.stage[k[5] - '1'].clears;
-    if (k == "finish") return s.games_finished;
-    if (k == "finish_expert") return s.finished_course[1];
-    if (k == "finish_shuffle") return s.finished_course[2];
-    if (k == "one_credit") return s.one_credit_finishes;
-    if (k == "untouchable") return s.untouched_stages;
-    if (k == "sharpshooter") return any_stage([](const Stats::Stage& st) { return st.best_accuracy >= 800; });
-    if (k == "dead_eye") return any_stage([](const Stats::Stage& st) { return st.best_accuracy >= 950; });
-    if (k == "technician") return s.best_stage_technical;
-    if (k == "trigger_happy") return s.shots;
-    if (k == "high_roller") return *std::max_element(std::begin(s.best_score), std::end(s.best_score));
-    if (k.rfind("boss", 0) == 0 && k.size() == 5) return s.boss[k[4] - '1'].wins;
-    if (k == "flawless_boss") {
-        int n = 0;
-        for (const Stats::Boss& b : s.boss) n += b.flawless;
-        return n;
-    }
-    if (k == "speed_hunter") {
-        for (const Stats::Boss& b : s.boss)
-            if (b.best_frames > 0 && b.best_frames < frames_of(60)) return 1;
-        return 0;
-    }
-    if (k.rfind("wave", 0) == 0) return s.best_wave;
-    if (k == "veteran") return s.play_frames;
+// What each achievement counts, read from the totals (one function per
+// achievement, so checking them at every vblank is a call, not a search)
+int64_t kills(const Stats& s) { return s.kills; }
+template <int N> int64_t stage_clears(const Stats& s) { return s.stage[N].clears; }
+int64_t games_finished(const Stats& s) { return s.games_finished; }
+template <int N> int64_t course_finished(const Stats& s) { return s.finished_course[N]; }
+int64_t one_credit(const Stats& s) { return s.one_credit_finishes; }
+int64_t untouched(const Stats& s) { return s.untouched_stages; }
+template <int PER_MILLE> int64_t stage_accuracy(const Stats& s) {   // 1 once a stage was cleared that well
+    for (const Stats::Stage& st : s.stage)
+        if (st.best_accuracy >= PER_MILLE) return 1;
     return 0;
 }
+int64_t technical(const Stats& s) { return s.best_stage_technical; }
+int64_t shots(const Stats& s) { return s.shots; }
+int64_t best_score(const Stats& s) { return *std::max_element(std::begin(s.best_score), std::end(s.best_score)); }
+template <int N> int64_t boss_wins(const Stats& s) { return s.boss[N].wins; }
+int64_t flawless_bosses(const Stats& s) {
+    int n = 0;
+    for (const Stats::Boss& b : s.boss) n += b.flawless;
+    return n;
+}
+int64_t fast_boss(const Stats& s) {   // 1 once a boss went down in under a minute
+    for (const Stats::Boss& b : s.boss)
+        if (b.best_frames > 0 && b.best_frames < frames_of(60)) return 1;
+    return 0;
+}
+int64_t best_wave(const Stats& s) { return s.best_wave; }
+int64_t play_frames(const Stats& s) { return s.play_frames; }
+
+const std::vector<AchievementInfo> TABLE = {
+    {"first_blood", L"FIRST BLOOD", L"Bring down your first dinosaur", 1, kills},
+    {"hunter", L"HUNTER", L"Bring down 100 dinosaurs", 100, kills},
+    {"big_game_hunter", L"BIG GAME HUNTER", L"Bring down 1,000 dinosaurs", 1000, kills},
+    {"stage1", L"INTO THE JUNGLE", L"Clear stage 1", 1, stage_clears<0>},
+    {"stage2", L"KING OF THE LAKESIDE", L"Clear stage 2", 1, stage_clears<1>},
+    {"stage3", L"STAGE 3 CLEARED", L"Clear stage 3", 1, stage_clears<2>},
+    {"stage4", L"STAGE 4 CLEARED", L"Clear stage 4", 1, stage_clears<3>},
+    {"finish", L"THE END OF THE LOST WORLD", L"Finish the game", 1, games_finished},
+    {"finish_expert", L"EXPERT TRACKER", L"Finish the game on the Expert course", 1, course_finished<1>},
+    {"finish_shuffle", L"SHUFFLE SURVIVOR", L"Finish the game on the Shuffle course", 1, course_finished<2>},
+    {"one_credit", L"ONE CREDIT WONDER", L"Finish the game without continuing", 1, one_credit},
+    {"untouchable", L"UNTOUCHABLE", L"Clear a stage without losing a life", 1, untouched},
+    {"sharpshooter", L"SHARPSHOOTER", L"Clear a stage with a hit rate of 80% or more", 1, stage_accuracy<800>},
+    {"dead_eye", L"DEAD EYE", L"Clear a stage with a hit rate of 95% or more", 1, stage_accuracy<950>},
+    {"technician", L"TECHNICIAN", L"15 technical shots in one stage", 15, technical},
+    {"trigger_happy", L"TRIGGER HAPPY", L"Fire 10,000 shots", 10000, shots},
+    {"high_roller", L"HIGH ROLLER", L"Score 100,000 points in one game", 100000, best_score},
+    {"boss1", L"MOTHER'S WRATH", L"Defeat the female T-Rex in boss mode", 1, boss_wins<0>},
+    {"boss2", L"CROC HUNTER", L"Defeat the Deinosuchus in boss mode", 1, boss_wins<1>},
+    {"boss3", L"CARNOTAURUS DOWN", L"Defeat the Carnotaurus in boss mode", 1, boss_wins<2>},
+    {"boss4", L"KING OF SAN DIEGO", L"Defeat the T-Rex in boss mode", 1, boss_wins<3>},
+    {"flawless_boss", L"FLAWLESS", L"Defeat a boss without losing a life", 1, flawless_bosses},
+    {"speed_hunter", L"SPEED HUNTER", L"Defeat a boss in less than 60 seconds", 1, fast_boss},
+    {"wave5", L"WAVE RIDER", L"Reach wave 5 in survival", 5, best_wave},
+    {"wave10", L"LAST STAND", L"Reach wave 10 in survival", 10, best_wave},
+    {"wave20", L"ENDLESS", L"Reach wave 20 in survival", 20, best_wave},
+    {"veteran", L"VETERAN", L"Play for 5 hours", frames_of(5 * 3600), play_frames},
+};
 
 // ---- Files: "key = value" lines ----
 
@@ -238,7 +234,7 @@ struct Tracker {
     // With the mutex held
     void check_achievements() {
         for (size_t i = 0; i < TABLE.size(); i++)
-            if (!unlocked[i] && raw_progress(stats, TABLE[i].key) >= TABLE[i].goal) {
+            if (!unlocked[i] && TABLE[i].progress(stats) >= TABLE[i].goal) {
                 unlocked[i] = int64_t(time(nullptr));
                 fresh.push_back(int(i));
                 dirty = true;
@@ -353,7 +349,7 @@ const std::vector<AchievementInfo>& achievement_table() { return TABLE; }
 
 int64_t achievement_progress(const Stats& s, int index) {
     const AchievementInfo& a = TABLE[size_t(index)];
-    return std::clamp<int64_t>(raw_progress(s, a.key), 0, a.goal);
+    return std::clamp<int64_t>(a.progress(s), 0, a.goal);
 }
 
 void stats_init() {

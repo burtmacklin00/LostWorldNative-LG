@@ -61,6 +61,7 @@ struct AtmosphereUniform {
     float relief[4];
     float sky_sun[4];
     float rt[4];
+    float weather[4];
 };
 
 constexpr uint32_t SHADOW_SIZE = 2048;   // shadow map, square
@@ -395,7 +396,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     pli.pSetLayouts = &bloom_set_layout_;
     pli.pPushConstantRanges = &bpr;
     vkCreatePipelineLayout(dev_, &pli, nullptr, &bloom_layout_);
-    VkPushConstantRange apr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
+    VkPushConstantRange apr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 80};
     // Traced, the ambient occlusion also sees the 3D pass's set (the world's rays)
     VkDescriptorSetLayout ao_sets[2] = {ao_set_layout_, r3d_set_layout_};
     pli.setLayoutCount = rt_.ready() ? 2 : 1;
@@ -783,9 +784,51 @@ void R3DRenderer::set_text_cells(const uint32_t* cells) {
 void R3DRenderer::set_sky_coords(const uint32_t* coords) {
     memcpy(static_cast<uint8_t*>(layer_staging_.mapped) + (BACK_W + SCREEN_W) * SCREEN_H * 4 + TEXT_CELLS_BYTES, coords,
            SKY_COORDS_BYTES);
-    const uint32_t* shift = coords + (SCREEN_H + 1) * TileGen::SKY_COORDS_W;   // see set_back_shift
-    sky_shift_.assign(shift, shift + SCREEN_H);
-    sky_shift_serial_++;
+}
+
+void R3DRenderer::set_sky_rows(uint64_t frame, const int32_t* rows) { sky_motion_.feed(frame, rows); }
+
+// (the motion is solved here, once the frame's layers, scene and shift are
+// all in, so that the caller can read it before the frame is drawn)
+void R3DRenderer::set_back_shift(float vblanks, bool camera) {
+    back_shift_ = vblanks;
+    back_shift_camera_ = camera;
+    solve_sky_motion();
+}
+
+// The motion of the back layers for the 2D frame fed last (SkyMotion), with
+// the world camera's turn from the previous 3D frame when the one drawn is
+// of the same vblank; its texels go to the sky coordinates' last two rows
+void R3DRenderer::solve_sky_motion() {
+    if (sky_motion_.pending()) {
+        const R3DViewport* w = nullptr;
+        if (scene_)
+            for (const R3DViewport& v : scene_->viewports)
+                if (v.world) w = &v;
+        refresh_pose(w);
+        bool camera = back_shift_camera_ && !pose_cut_;
+        float turn[2] = {0, 0};
+        if (camera) {   // yaw and pitch of the camera's forward axis (the world's -z in view space)
+            auto yaw = [](const float* a) { return std::atan2(-a[2], -a[8]); };
+            auto pitch = [](const float* a) { return std::asin(std::clamp(-a[5], -1.0f, 1.0f)); };
+            float dyaw = std::remainder(yaw(pose_now_.axes) - yaw(pose_prev_.axes), 6.2831853f);
+            turn[0] = SkyMotion::PX_PER_RADIAN * dyaw;
+            turn[1] = -SkyMotion::PX_PER_RADIAN * (pitch(pose_now_.axes) - pitch(pose_prev_.axes));
+        }
+        sky_motion_.solve(camera, turn[0], turn[1]);
+        sky_motion_serial_++;
+        layers_dirty_ = true;
+    }
+}
+
+void R3DRenderer::update_sky_motion() {
+    solve_sky_motion();
+    if (layers_dirty_) {   // x on the first of its rows, y on the next (compose.frag reads them there)
+        uint8_t* rows = static_cast<uint8_t*>(layer_staging_.mapped) + (BACK_W + SCREEN_W) * SCREEN_H * 4 +
+                        TEXT_CELLS_BYTES + size_t(SCREEN_H + 1) * TileGen::SKY_COORDS_W * 4;
+        memcpy(rows, sky_motion_.texels(), SCREEN_H * 4);
+        memcpy(rows + size_t(TileGen::SKY_COORDS_W) * 4, sky_motion_.texels() + SCREEN_H, SCREEN_H * 4);
+    }
 }
 
 void R3DRenderer::set_text_atlas(const TextHD& text) {
@@ -1034,7 +1077,7 @@ static int lightning_channel(int id, float* seg, int& count) {
 // The world viewport's camera between the previous game frame and the latest
 // one, as the scenery is drawn (the interpolation); as in the latest frame
 // after a cut (a jump of the camera, a sudden turn)
-R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
+void R3DRenderer::refresh_pose(const R3DViewport* w) {
     if (pose_serial_ != scene_serial_) {
         pose_serial_ = scene_serial_;
         pose_prev_ = pose_now_;
@@ -1051,6 +1094,12 @@ R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
     float d[3] = {b.camera[0] - a.camera[0], b.camera[1] - a.camera[1], b.camera[2] - a.camera[2]};
     pose_cut_ = !a.valid || !b.valid || dot(d, d) > 10.0f * 10.0f || dot(a.axes + 6, b.axes + 6) < 0.9f ||
                 dot(a.axes + 3, b.axes + 3) < 0.9f;
+}
+
+R3DRenderer::WorldPose R3DRenderer::world_pose(const R3DViewport* w) {
+    refresh_pose(w);
+    const WorldPose &a = pose_prev_, &b = pose_now_;
+    auto dot = [](const float* p, const float* q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; };
     if (pose_cut_ || interp_ >= 1.0f) return b;
     WorldPose p = b;
     float t = interp_;
@@ -1082,20 +1131,20 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
         light_uv[1] = (view[1] * L[1] / -L[2] - view[3]) * 0.5f + 0.5f;
     }
     if (pose_cut_) sky_sun_carried_ = false;
-    if (sky_sun_serial_ != sky_shift_serial_) {   // once per 2D frame
-        sky_sun_serial_ = sky_shift_serial_;
-        sky_sun_step_[0] = sky_sun_step_[1] = 0;
+    if (sky_sun_serial_ != sky_motion_serial_) {   // once per 2D frame
+        sky_sun_serial_ = sky_motion_serial_;
+        sky_sun_rate_[0] = sky_sun_rate_[1] = 0;
         if (sky_sun_carried_) {
             int row = std::clamp(int(sky_sun_uv_[1] * SCREEN_H), 0, SCREEN_H - 1);
-            uint32_t s = row < int(sky_shift_.size()) ? sky_shift_[row] : 0;
-            if (s) {   // the picture moves left as the scroll goes up
-                sky_sun_step_[0] = -float(int((s >> 16) & 0xFF) - 128) / view_w;
-                sky_sun_step_[1] = -float(int((s >> 8) & 0xFF) - 128) / float(SCREEN_H);
-                sky_sun_uv_[0] += sky_sun_step_[0];
-                sky_sun_uv_[1] += sky_sun_step_[1];
+            SkyMotion::Row mx = sky_motion_.row(row, 0), my = sky_motion_.row(row, 1);
+            if (mx.known) {   // the picture moves left as the scroll goes up
+                sky_sun_uv_[0] -= mx.move / view_w;
+                sky_sun_uv_[1] -= my.move / float(SCREEN_H);
+                sky_sun_rate_[0] = -mx.velocity / view_w;
+                sky_sun_rate_[1] = -my.velocity / float(SCREEN_H);
             }
             float outside = std::max({-sky_sun_uv_[0], sky_sun_uv_[0] - 1.0f, -sky_sun_uv_[1], sky_sun_uv_[1] - 1.0f});
-            sky_sun_carried_ = s && outside < 0.5f;
+            sky_sun_carried_ = mx.known && outside < 0.5f;
         }
         if (!sky_sun_carried_ && in_front) {
             sky_sun_carried_ = true;
@@ -1108,11 +1157,57 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
         return;
     }
     // Between 2D frames moved on like the sky (set_back_shift)
-    float x = (sky_sun_uv_[0] - sky_sun_step_[0] * back_shift_) * 2.0f - 1.0f;
-    float y = (sky_sun_uv_[1] - sky_sun_step_[1] * back_shift_) * 2.0f - 1.0f;
+    float x = (sky_sun_uv_[0] + sky_sun_rate_[0] * back_shift_) * 2.0f - 1.0f;
+    float y = (sky_sun_uv_[1] + sky_sun_rate_[1] * back_shift_) * 2.0f - 1.0f;
     float d[3] = {(x + view[2]) / view[0], (y + view[3]) / view[1], -1.0f};
     float l = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     for (int i = 0; i < 3; i++) out[i] = d[i] / l;
+}
+
+// The weather (r3d_weather.h), once per game frame: the shown one moves
+// towards the one asked for over a few seconds, and it shows only outdoors
+// in daylight, with a backdrop behind the world (not in the caves, the
+// corridors or the night, where the backdrop is black)
+void R3DRenderer::step_weather(const R3DScene& scene) {
+    const R3DViewport* w = nullptr;
+    for (const R3DViewport& v : scene.viewports)
+        if (v.world) w = &v;
+    float outdoor = w && !back_black_ && w->sun_intensity > 0.15f ? 1.0f : 0.0f;
+    outdoor_ += 0.02f * (outdoor - outdoor_);
+    const float k = 0.01f;   // about four seconds to change
+    R3DWeather& a = weather_;
+    const R3DWeather& b = weather_target_;
+    auto ease = [&](float& x, float to) { x += k * (to - x); };
+    ease(a.sun, b.sun);
+    ease(a.ambient, b.ambient);
+    ease(a.overcast, b.overcast);
+    ease(a.fog, b.fog);
+    ease(a.rain, b.rain);
+    ease(a.storm, b.storm);
+    for (int i = 0; i < 3; i++) ease(a.sky[i], b.sky[i]), ease(a.fog_color[i], b.fog_color[i]);
+    rain_.set_forced(a.rain * outdoor_);
+}
+
+void R3DRenderer::weather_light(const R3DViewport& v, float& sun, float& ambient, float& fog_density,
+                                float fog_color[4]) const {
+    sun = v.sun_intensity;
+    ambient = v.ambient;
+    fog_density = v.fog_density;
+    for (int i = 0; i < 3; i++) fog_color[i] = v.fog_color[i];
+    fog_color[3] = v.fog_ambient;
+    if (!v.world || outdoor_ <= 0.001f) return;
+    const R3DWeather& wx = weather_;
+    sun *= 1.0f + (wx.sun - 1.0f) * outdoor_;
+    ambient *= 1.0f + (wx.ambient - 1.0f) * outdoor_;
+    // The weather's fog where it is thicker than the game's, taking its colour
+    // as it does (the game's fog colour times its own ambient)
+    float fog = wx.fog * outdoor_;
+    if (fog > fog_density) {
+        float t = fog_density > 0 ? 1.0f - fog_density / fog : 1.0f;
+        for (int i = 0; i < 3; i++) fog_color[i] = v.fog_color[i] * v.fog_ambient * (1 - t) + wx.fog_color[i] * t;
+        fog_color[3] = 1;
+        fog_density = fog;
+    }
 }
 
 // Atmosphere parameters for this frame (atmosphere.glsl)
@@ -1148,8 +1243,14 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         u.camera[1] = pose.camera[1];
         u.camera[2] = pose.camera[2];
         u.camera[3] = time;
+        // The game's light and fog with the weather's
+        float w_sun, w_ambient, w_fog, w_fog_color[4];
+        weather_light(*w, w_sun, w_ambient, w_fog, w_fog_color);
+        const float overcast = weather_.overcast * outdoor_;
+        u.weather[0] = overcast;
+        for (int i = 0; i < 3; i++) u.weather[1 + i] = weather_.sky[i];
         for (int i = 0; i < 3; i++) u.sun[i] = pose.sun[i];
-        u.sun[3] = w->sun_intensity;
+        u.sun[3] = w_sun;
         static const char* force_sun = getenv("LW_FOGSUN");   // debugging aid: "x,y,z" in view space
         if (force_sun) {
             float f[3] = {0, 0, -1};
@@ -1187,6 +1288,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
                     target[i] = 0.3f * sky + 0.7f * haze[i];
                 }
         }
+        for (int i = 0; i < 3; i++) target[i] += (weather_.sky[i] - target[i]) * overcast;   // a grey sky
         for (int i = 0; i < 3; i++) haze_color_[i] += 0.05f * (target[i] - haze_color_[i]);
         for (int i = 0; i < 3; i++) u.haze[i] = haze_color_[i];
         u.haze[3] = haze_strength_;
@@ -1249,7 +1351,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
             m[14] = -zmin / zr;
             m[15] = 1;
             memcpy(u.shadow_matrix, m, sizeof(u.shadow_matrix));
-            u.shadow[0] = std::min(shadow_strength_, 1.0f) * 0.75f;
+            u.shadow[0] = std::min(shadow_strength_, 1.0f) * 0.75f * (1.0f + (std::min(weather_.sun, 1.0f) - 1.0f) * outdoor_);
             u.shadow[1] = 1.0f / float(SHADOW_SIZE);
             u.shadow[2] = 2.5f * texel;   // normal offset
             u.shadow[3] = 1.5f * texel / zr;   // depth bias
@@ -1283,7 +1385,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         u.soft[1] = 2.0f;
         // Light in the game's fog, with the distance haze: strength, brighter
         // upwards, drifting banks
-        if (w->fog_density > 0) {
+        if (w_fog > 0) {
             u.mist[0] = std::min(haze_strength_, 1.0f);
             u.mist[1] = 0.45f;
             u.mist[2] = 0.12f;
@@ -1294,31 +1396,33 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
         // fog lights up for a moment, so the trees stand out against it
         float fc[3], lo = 1, hi = 0;
         for (int i = 0; i < 3; i++) {
-            fc[i] = w->fog_color[i] * w->fog_ambient;
+            fc[i] = w_fog_color[i] * w_fog_color[3];
             lo = std::min(lo, fc[i]);
             hi = std::max(hi, fc[i]);
         }
         float luma = 0.2126f * fc[0] + 0.7152f * fc[1] + 0.0722f * fc[2];
         LightningStrike strike;
         // A storm: the game's rain (the whole T-Rex stretch, the cave and the
-        // jeep included), or its dark grey fog
-        bool grey_fog = w->fog_density > 0.003f && luma > 0.05f && luma < 0.4f && hi - lo < 0.08f;
-        if (lightning_ && (grey_fog || rain_.game_rain() > 0.5f)) strike = lightning_strike(time);
+        // jeep included), its dark grey fog, or the weather's storm
+        bool grey_fog = w_fog > 0.003f && luma > 0.05f && luma < 0.4f && hi - lo < 0.08f;
+        bool storm = weather_.storm * outdoor_ > 0.5f;
+        if (lightning_ && (grey_fog || storm || rain_.game_rain() > 0.5f)) strike = lightning_strike(time);
         static const char* force_flash = getenv("LW_FLASH");   // debugging aid: fixed brightness, channel shown
         if (force_flash) strike.flash = float(atof(force_flash)), strike.bolt = 1, strike.id = 1;
         u.mist[3] = strike.flash;
         if (strike.id >= 0 && strike.flash > 0.005f) {
             // Where it strikes: picked when it begins, a little to either side
             // of where the camera looks then, and kept for the whole strike
-            if (strike.id != bolt_id_) {
+            if (strike.id != bolt_id_ || force_flash) {   // (LW_FLASH: kept where the camera looks)
                 bolt_id_ = strike.id;
                 const float* a = w->world_axes;
                 float yaw = std::atan2(-a[8], -a[2]);   // the view direction in the world frame
                 bolt_azimuth_ = yaw + (lightning_hash(uint32_t(strike.id) * 31u + 5u) - 0.5f) * 1.6f;
+                if (force_flash) bolt_azimuth_ = yaw;   // in the middle of the picture, to judge it
                 bolt_main_ = lightning_channel(strike.id, bolt_seg_, bolt_count_);
             }
-            // The channel only where the fog hides the backdrop (painted foliage elsewhere)
-            u.bolt[0] = grey_fog || force_flash ? strike.bolt : 0.0f;
+            // The channel only where the fog or the weather's grey sky hides the backdrop (painted foliage elsewhere)
+            u.bolt[0] = grey_fog || storm || force_flash ? strike.bolt : 0.0f;
             u.bolt[1] = float(bolt_count_);
             u.bolt[2] = bolt_azimuth_;
             u.bolt[3] = float(bolt_main_);
@@ -1338,8 +1442,9 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
     u.soft[2] = hdr_ ? 1.0f : 0.0f;
     // SUN: more contrast in clear outdoor scenes (sunlit, little of the game's
     // own fog); the fogged, dark and indoor scenes keep the game's light
-    if (w && sun_ && w->sun_intensity > 0.3f) {
-        float fogged = std::clamp(w->scroll_fog * 2.0f + w->fog_density * 300.0f, 0.0f, 1.0f);
+    if (w && sun_ && u.sun[3] > 0.3f) {
+        float fogged = std::clamp(w->scroll_fog * 2.0f + std::max(w->fog_density, weather_.fog * outdoor_) * 300.0f +
+                                  weather_.overcast * outdoor_, 0.0f, 1.0f);
         float k = 1.0f - fogged;
         u.sunlight[0] = 1.0f + 0.45f * k;
         u.sunlight[1] = 1.0f - 0.4f * k;
@@ -1390,6 +1495,7 @@ void R3DRenderer::record_uploads(const Frame& f) {
         transition(cmd, texture_ram_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         tex_y0_ = tex_y1_ = 0;
     }
+    update_sky_motion();
     if (layers_dirty_) {
         Image* imgs[2] = {&back_, &front_};
         for (int i = 0; i < 2; i++) {
@@ -1450,7 +1556,9 @@ void R3DRenderer::record_uploads(const Frame& f) {
 // descriptors, which may have to point at a new cut-out buffer
 void R3DRenderer::record_ray_tracing(const Frame& f) {
     if (!rt_frame_ || !rt_world_) return;
-    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, 35.0f, rt_ao_);
+    // Nothing traces what is higher up any more: the ambient occlusion leaves
+    // the canopies out too (ao_common.glsl, AO_HIGH)
+    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, 35.0f, false);
     if (rt_.generation() != rt_generation_) {
         rt_generation_ = rt_.generation();
         VkDescriptorBufferInfo cut{rt_.cutouts(), 0, VK_WHOLE_SIZE};
@@ -1661,13 +1769,11 @@ void R3DRenderer::record_world(const Frame& f) {
                     // The --light-gain knob: more light on the sun and on the ambient. It lands here
                     // rather than in the push block because that block is exactly 128 bytes,
                     // the guaranteed minimum, and there is no room left in it.
-                    pc.sun[3] = v.sun_intensity * light_gain_;
-                    pc.fog_color[0] = v.fog_color[0];
-                    pc.fog_color[1] = v.fog_color[1];
-                    pc.fog_color[2] = v.fog_color[2];
-                    pc.fog_color[3] = v.fog_ambient;
-                    pc.params[0] = v.ambient * light_gain_;
-                    pc.params[1] = v.fog_density;
+                    float sun, ambient, fog_density;
+                    weather_light(v, sun, ambient, fog_density, pc.fog_color);
+                    pc.sun[3] = sun * light_gain_;
+                    pc.params[0] = ambient * light_gain_;
+                    pc.params[1] = fog_density;
                     pc.params[2] = v.fog_start;
                     pc.params[3] = before;
                     pc.quality[0] = pass == 0 ? float(samples_) + alpha_seed : -float(samples_);
@@ -1728,12 +1834,17 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     Image& dsrc = depth_resolved_;
     transition(cmd, dsrc, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     if (ao_on) {
+    // The occlusion fades with the fog actually drawn, the weather's included
+    float ao_sun, ao_ambient, ao_fog, ao_fog_color[4];
+    weather_light(w, ao_sun, ao_ambient, ao_fog, ao_fog_color);
     bool full = w.x <= 0.5f && w.w >= SCREEN_W - 0.5f;
     float vx = full ? 0.0f : w.x + lay.game_x0, vw = full ? lay.view_w : w.w;
-    float ap[16] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
+    static const bool rt_split = getenv("LW_RTSPLIT");   // debugging aid, as in the shadow pass
+    float ap[20] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
                     w.proj[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
-                    12.0f, std::min(ao_strength_, 1.0f) * 0.85f, w.fog_density, w.fog_start,
-                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, getenv("LW_RTSPLIT") ? 1.0f : 0.0f};
+                    12.0f, std::min(ao_strength_, 1.0f) * 0.85f, ao_fog, w.fog_start,
+                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, rt_split ? 1.0f : 0.0f,
+                    shadow_up_[0], shadow_up_[1], shadow_up_[2], shadow_height_};
     auto fullscreen = [&](VkPipeline pipe, Image& target, VkImageView view, uint32_t tw, uint32_t th) {
         VkRenderingAttachmentInfo at{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         at.imageView = view;
@@ -1818,7 +1929,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
                    .filter2d = {smooth_2d_ ? 1.0f : 0.0f, lay.scale},
                    .hud = {hud_edges_ && hud_band_ ? lay.game_x0 : 0.0f, hdr_ ? 1.0f : 0.0f, overlay_brightness_,
                            extend_back ? 1.0f : 0.0f},
-                   .sky = {seconds, 0, sun_ ? 1.0f : 0.0f, 0},
+                   .sky = {seconds, 0, sun_ && weather_.overcast * outdoor_ < 0.5f ? 1.0f : 0.0f, 0},
                    .effects = {bloom_strength_, saturation_, gamma_, 0},
                    .motion = {back_shift_, (crosshair_picture_[0] ? 1.0f : 0.0f) + (crosshair_picture_[1] ? 2.0f : 0.0f) + (bezel_ && max_aspect_ < 1.4f ? 4.0f : 0.0f),
                               hud_edges_ ? lay.game_x0 : 0.0f, 0},

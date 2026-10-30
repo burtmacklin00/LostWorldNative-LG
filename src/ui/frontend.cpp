@@ -29,35 +29,281 @@ constexpr const wchar_t* COFFEE_LABEL = L"BUY ME A COFFEE";
 constexpr uint32_t COFFEE_INK = 0x0D0C22;   // their dark blue-black
 constexpr const wchar_t* COFFEE_HINT = L"Support the port: opens buymeacoffee.com in your browser";
 
-float chan(uint32_t rgb, int shift) { return float((rgb >> shift) & 0xFF) / 255.0f; }
-
-uint32_t mix(uint32_t a, uint32_t b, float t) {
-    uint32_t r = 0;
-    for (int s = 0; s <= 16; s += 8) {
-        float v = chan(a, s) + (chan(b, s) - chan(a, s)) * t;
-        r |= uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f) << s;
-    }
-    return r;
-}
-
-std::vector<char> read_file(const std::string& path) {
-    std::vector<char> data;
-    if (FILE* f = fopen(path.c_str(), "rb")) {
-        fseek(f, 0, SEEK_END);
-        data.resize(size_t(ftell(f)));
-        fseek(f, 0, SEEK_SET);
-        if (fread(data.data(), 1, data.size(), f) != data.size()) data.clear();
-        fclose(f);
-    }
-    return data;
-}
+using ui::chan;
+using ui::mix;
+using ui::over;
 
 bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out);
 
-const wchar_t* const FACES[5] = {L"Saira ExtraCondensed ExCond", L"Barlow Condensed", L"Share Tech Mono",
-                                 L"Jurassic Park", L"Arimo"};
-
 }  // namespace
+
+// ---- The settings ----
+
+// One setting: how save/settings.ini keeps it, and its row in the options
+// (the tab, how it shows and how Left / Right change it). The table is the one
+// place to put a new option; app.cpp then hands it to the game
+// (options_from_settings) and back (settings_from_options).
+struct Frontend::Setting {
+    Id id;                    // its row (NO_ROW: only kept in the file)
+    int tab = GAME_TAB;
+    const wchar_t* label = L"";
+    const char* key = nullptr;                        // in the file (nullptr: not kept)
+    bool FrontendSettings::*flag = nullptr;           // what it sets: on / off,
+    int FrontendSettings::*number = nullptr;          // a number
+    std::string FrontendSettings::*path = nullptr;    // or a device path ("none" in the file when empty)
+    // In the file a flag is 0 / 1 and a number is itself, unless there are
+    // words: then false / true or 0, 1, 2... A word not among them reads as
+    // `other`, or as one of `also` (older or looser spellings)
+    std::vector<const char*> words = {};
+    int other = 0;
+    std::vector<std::pair<const char*, int>> also = {};
+    int lo = 0, hi = 0;       // a number's range
+    int grain = 1;            // and the steps it is read in (REAR BOOST: 3 dB)
+    bool hundredths = false;  // kept as a decimal (GAMMA 1.00)
+    // The row
+    Kind kind = PLAIN;
+    std::vector<const wchar_t*> shown = {};   // CHOICE: each value's name; BUTTON: what it says
+    std::vector<int> steps = {};              // CHOICE or SLIDER over these numbers
+    int step = 1;                             // SLIDER: how far Left / Right go
+    bool levels = false;                      // CHOICE: OFF, then higher and higher
+    std::wstring (*text)(int) = nullptr;      // how the number reads (instead of `shown` or the number)
+    const wchar_t* hint = L"";
+    std::vector<const wchar_t*> hints = {};   // a hint for each value instead
+
+    int get(const FrontendSettings& s) const { return flag ? int(s.*flag) : number ? s.*number : 0; }
+    void set(FrontendSettings& s, int v) const {
+        if (flag) s.*flag = v != 0;
+        else if (number) s.*number = v;
+    }
+    // CHOICE: how many values, and which one is on
+    int count() const { return int(steps.empty() ? shown.size() : steps.size()); }
+    int pos(const FrontendSettings& s) const {
+        if (steps.empty()) return get(s);
+        return int(std::find(steps.begin(), steps.end(), get(s)) - steps.begin()) % count();
+    }
+
+    void read(FrontendSettings& s, const std::string& v) const {
+        if (path) {
+            s.*path = v == "none" ? "" : v;
+        } else if (!words.empty()) {
+            int n = other;
+            auto w = std::find_if(words.begin(), words.end(), [&](const char* x) { return v == x; });
+            if (w != words.end()) n = int(w - words.begin());
+            else
+                for (const auto& [word, value] : also)
+                    if (v == word) n = value;
+            set(s, n);
+        } else if (flag) {
+            s.*flag = v == "1" || v == "on" || v == "true";
+        } else if (hundredths) {
+            s.*number = std::clamp(int(atof(v.c_str()) * 100 + 0.5), lo, hi);
+        } else {
+            s.*number = std::clamp(atoi(v.c_str()) / grain * grain, lo, hi);
+        }
+    }
+    std::string write(const FrontendSettings& s) const {
+        if (path) return (s.*path).empty() ? "none" : s.*path;
+        if (!words.empty()) return words[std::clamp(get(s), 0, int(words.size()) - 1)];
+        char out[32];
+        if (hundredths) snprintf(out, sizeof(out), "%.2f", get(s) / 100.0);
+        else snprintf(out, sizeof(out), "%d", get(s));
+        return out;
+    }
+
+    // Left (-1) or Right (+1) on the row; `wrap`: a click on the label, which
+    // goes round past the top of a slider
+    void change(FrontendSettings& s, int dir, bool wrap) const {
+        int v = get(s);
+        if (kind == TOGGLE) {
+            set(s, !v);
+        } else if (kind == CHOICE) {
+            int p = (pos(s) + dir + count()) % count();
+            set(s, steps.empty() ? p : steps[p]);
+        } else if (kind == SLIDER && !steps.empty()) {   // the next step from the nearest one at or below, round
+            int n = int(steps.size()), i = 0;
+            while (i < n - 1 && steps[i + 1] <= v) i++;
+            set(s, steps[(i + dir + n) % n]);
+        } else if (kind == SLIDER) {
+            set(s, dir > 0 && v >= hi && wrap ? lo : std::clamp(v + step * dir, lo, hi));
+        }
+    }
+};
+
+namespace {
+std::wstring percent(int v) { return std::to_wstring(v) + L"%"; }
+std::wstring decimal(int v) {   // GAMMA
+    wchar_t text[16];
+    swprintf(text, 16, L"%.2f", v / 100.0);
+    return text;
+}
+std::wstring decibels(int v) { return v ? L"+" + std::to_wstring(v) + L" DB" : std::wstring(L"OFF"); }
+std::wstring seconds(int v) { return v ? L"AFTER " + std::to_wstring(v) + L" S" : std::wstring(L"NEVER"); }
+std::wstring fps(int v) { return v ? std::to_wstring(v) + L" FPS" : std::wstring(L"OFF"); }   // FRAME CAP
+
+using FS = FrontendSettings;
+const std::vector<const char*> LEVEL_WORDS = {"off", "low", "medium", "high"};
+const std::vector<const wchar_t*> LEVELS = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
+const std::vector<std::pair<const char*, int>> ON_IS_2 = {{"1", 2}, {"on", 2}, {"true", 2}};   // once a switch
+}  // namespace
+
+// In each tab the rows are shown in this order
+const std::vector<Frontend::Setting>& Frontend::setting_table() {
+    static const std::vector<Setting> table = {
+        // DISPLAY
+        {.id = OPT_QUALITY, .tab = DISPLAY_TAB, .label = L"QUALITY", .kind = CHOICE,   // FrontendSettings::quality()
+         .shown = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"},
+         .hints = {L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
+                   L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
+                   L"Fast cards: ray traced sun shadows and every effect",
+                   L"Everything on: ray traced sun shadows and ambient occlusion",
+                   L"Your own mix of the options.  Pick a level to set the costly ones at once"}},
+        {.id = OPT_DISPLAY, .tab = DISPLAY_TAB, .label = L"DISPLAY", .key = "fullscreen", .flag = &FS::fullscreen,
+         .kind = CHOICE, .shown = {L"WINDOW", L"FULLSCREEN"}, .hint = L"Window or full screen (also F11 or Alt+Enter)"},
+        {.id = OPT_ASPECT, .tab = DISPLAY_TAB, .label = L"WIDESCREEN", .key = "aspect", .number = &FS::aspect,
+         .words = {"4:3", "16:9", "21:9"}, .other = 1, .kind = CHOICE, .shown = {L"4:3 (ORIGINAL)", L"16:9", L"21:9"},
+         .hint = L"Widest 3D view: 21:9 fills ultrawide monitors (2560x1080, 3440x1440); 4:3 is the arcade's own"},
+        {.id = OPT_SCALE, .tab = DISPLAY_TAB, .label = L"RENDER RESOLUTION", .key = "resolution_3d", .number = &FS::scale,
+         .lo = FS::SCALES[0], .hi = 100, .kind = SLIDER, .steps = {std::begin(FS::SCALES), std::end(FS::SCALES)},
+         .text = percent, .hint = L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
+        {.id = OPT_HALF_RATE, .tab = DISPLAY_TAB, .label = L"FRAME RATE", .key = "half_rate", .flag = &FS::half_rate,
+         .kind = CHOICE, .shown = {L"FULL", L"HALF"},
+         .hint = L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
+        {.id = OPT_VSYNC, .tab = DISPLAY_TAB, .label = L"VSYNC", .key = "vsync", .flag = &FS::vsync, .kind = TOGGLE,
+         .hint = L"Off: each image goes out as soon as it is drawn, without waiting for the monitor (may tear)"},
+        {.id = OPT_FRAME_CAP, .tab = DISPLAY_TAB, .label = L"FRAME CAP", .key = "frame_cap", .number = &FS::frame_cap,
+         .lo = 0, .hi = 500, .kind = CHOICE, .steps = {std::begin(FS::FRAME_CAPS), std::end(FS::FRAME_CAPS)}, .levels = true,
+         .text = fps,
+         .hint = L"At most this many pictures a second (Off: your monitor's refresh rate).  The game itself always runs at arcade speed"},
+        {.id = OPT_MOTION, .tab = DISPLAY_TAB, .label = L"MOTION", .key = "motion", .flag = &FS::smooth,
+         .words = {"original", "smooth"}, .other = 1, .kind = CHOICE, .shown = {L"ORIGINAL", L"SMOOTH"},
+         .hint = L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
+        {.id = OPT_AA, .tab = DISPLAY_TAB, .label = L"ANTI-ALIASING", .key = "aa", .number = &FS::aa,
+         .words = {"msaa", "dlaa", "none"}, .also = {{"off", 2}}, .kind = CHOICE, .shown = {L"MSAA 4X", L"DLAA", L"OFF"},
+         .hint = L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start"},
+        {.id = OPT_TEXT, .tab = DISPLAY_TAB, .label = L"HD TEXT", .key = "hd_text", .flag = &FS::hd_text, .kind = TOGGLE,
+         .hint = L"Sharp fonts for menus, captions and score instead of the original pixels"},
+        {.id = OPT_SAT, .tab = DISPLAY_TAB, .label = L"COLOR SATURATION", .key = "saturation", .number = &FS::saturation,
+         .lo = 0, .hi = 200, .kind = SLIDER, .step = 10, .text = percent,
+         .hint = L"How vivid the colours are (100% = original, 80% by default)"},
+        {.id = OPT_GAMMA, .tab = DISPLAY_TAB, .label = L"GAMMA", .key = "gamma", .number = &FS::gamma, .lo = 50, .hi = 150,
+         .hundredths = true, .kind = SLIDER, .step = 5, .text = decimal,
+         .hint = L"Brightness of the mid-tones (1.00 = original)"},
+        {.id = OPT_SHARPEN, .tab = DISPLAY_TAB, .label = L"SHARPEN", .key = "sharpen", .flag = &FS::sharpen, .kind = TOGGLE,
+         .hint = L"Brings back texture detail after the edge smoothing, without halos"},
+        // LIGHTING
+        {.id = OPT_SUN, .tab = LIGHTING_TAB, .label = L"SUN", .key = "sun", .flag = &FS::sun, .kind = TOGGLE,
+         .hint = L"A sun in the sky and stronger, warmer sunlight outdoors"},
+        {.id = OPT_SHADOWS, .tab = LIGHTING_TAB, .label = L"SUN SHADOWS", .key = "shadows", .flag = &FS::shadows,
+         .kind = TOGGLE, .hint = L"Dinosaurs, trees and buildings cast shadows away from the sun"},
+        {.id = OPT_RT, .tab = LIGHTING_TAB, .label = L"RAY TRACING", .key = "ray_tracing", .number = &FS::ray_tracing,
+         .words = {"off", "shadows", "ao"}, .other = 2, .also = {{"0", 0}}, .kind = CHOICE,
+         .shown = {L"OFF", L"SHADOWS", L"SHADOWS + AO"}, .levels = true,
+         .hints = {L"Shadows from a shadow map and occlusion from the depth, as without ray tracing",
+                   L"Sun shadows traced through the world: every tree and dinosaur, soft with distance",
+                   L"Also the ambient occlusion: corners and the ground under things, even off screen"}},
+        {.id = OPT_SHAFTS, .tab = LIGHTING_TAB, .label = L"LIGHT SHAFTS", .key = "light_shafts", .flag = &FS::shafts,
+         .kind = TOGGLE, .hint = L"Rays of sunlight streaming between trees and silhouettes"},
+        {.id = OPT_HDR, .tab = LIGHTING_TAB, .label = L"HDR LIGHTING", .key = "hdr", .flag = &FS::hdr, .kind = TOGGLE,
+         .hint = L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
+        {.id = OPT_AO, .tab = LIGHTING_TAB, .label = L"AMBIENT OCCLUSION", .key = "ao", .flag = &FS::ao, .kind = TOGGLE,
+         .hint = L"Soft shadows in corners, creases and on the ground around things"},
+        {.id = OPT_BLOOM, .tab = LIGHTING_TAB, .label = L"BLOOM", .key = "bloom", .number = &FS::bloom,
+         .words = LEVEL_WORDS, .also = ON_IS_2, .kind = CHOICE, .shown = LEVELS, .levels = true,
+         .hint = L"Soft glow around fire, lights, the sky and sunlit surfaces"},
+        {.id = OPT_RIM, .tab = LIGHTING_TAB, .label = L"RIM LIGHT", .key = "rim_light", .flag = &FS::rim, .kind = TOGGLE,
+         .hint = L"A soft edge of light around dinosaurs and people, lifting them off the background"},
+        {.id = OPT_RELIEF, .tab = LIGHTING_TAB, .label = L"SURFACE DETAIL", .key = "surface_detail", .flag = &FS::relief,
+         .kind = TOGGLE, .hint = L"Light and shadow bring out the grain of stone, bark, metal and skin"},
+        {.id = OPT_TORCH, .tab = LIGHTING_TAB, .label = L"FLASHLIGHT", .key = "flashlight", .flag = &FS::torch,
+         .words = {"original", "modern"}, .other = 1, .kind = CHOICE, .shown = {L"ORIGINAL", L"MODERN"},
+         .hint = L"At night: a soft beam with real shading and a glow in the air, or the original spot"},
+        // ATMOSPHERE
+        {.id = OPT_SKY, .tab = ATMOSPHERE_TAB, .label = L"SKY", .key = "sky", .flag = &FS::sky,
+         .words = {"original", "procedural"}, .kind = CHOICE, .shown = {L"ORIGINAL", L"PROCEDURAL"},
+         .hint = L"Smooth drifting clouds drawn at full resolution, or the original picture"},
+        {.id = OPT_HAZE, .tab = ATMOSPHERE_TAB, .label = L"DISTANCE HAZE", .key = "haze", .flag = &FS::haze, .kind = TOGGLE,
+         .hint = L"Far scenery fades into the sky instead of appearing suddenly"},
+        {.id = OPT_LIGHTNING, .tab = ATMOSPHERE_TAB, .label = L"LIGHTNING", .key = "lightning", .flag = &FS::lightning,
+         .kind = TOGGLE, .hint = L"Flashes of lightning in stormy fog, with the trees standing out against it"},
+        {.id = OPT_RAIN, .tab = ATMOSPHERE_TAB, .label = L"RAIN", .key = "rain", .number = &FS::rain,
+         .words = {"off", "light", "heavy"}, .also = ON_IS_2, .kind = CHOICE, .shown = {L"OFF", L"LIGHT", L"HEAVY"},
+         .levels = true, .hint = L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
+        {.id = OPT_WEATHER, .tab = ATMOSPHERE_TAB, .label = L"RANDOM WEATHER", .key = "random_weather",
+         .flag = &FS::random_weather, .kind = TOGGLE,
+         .hint = L"RANDOM SPAWNS and SURVIVAL: sun, clouds, fog, rain or a storm, new every stage and every run"},
+        {.id = OPT_SOFT, .tab = ATMOSPHERE_TAB, .label = L"SOFT PARTICLES", .key = "soft_particles", .flag = &FS::soft,
+         .kind = TOGGLE, .hint = L"Smoke, fire and explosions blend softly where they touch the ground and walls"},
+        // AUDIO
+        {.id = OPT_VOLUME, .tab = AUDIO_TAB, .label = L"VOLUME", .key = "volume", .number = &FS::volume, .lo = 0, .hi = 10,
+         .kind = SLIDER, .hint = L"Sound volume"},
+        {.id = OPT_MUSIC, .tab = AUDIO_TAB, .label = L"MENU MUSIC", .key = "menu_music", .flag = &FS::menu_music,
+         .kind = TOGGLE, .hint = L"Music in the menus (third_party/menu/music.mp3), at the sound volume"},
+        {.id = OPT_SPEAKERS, .tab = AUDIO_TAB, .label = L"SPEAKERS", .key = "speakers", .number = &FS::speakers,
+         .words = {"stereo", "surround", "headphones"}, .kind = CHOICE,
+         .shown = {L"STEREO", L"SURROUND 4.0", L"HEADPHONES"},
+         .hints = {L"Front and rear sound mixed on two speakers",
+                   L"Rear sound on your rear speakers, as on the cabinet (4.0, 5.1 or 7.1)",
+                   L"Two ears: gentle crossfeed, and the rear sound placed behind you"}},
+        {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR BOOST", .key = "rear_boost", .number = &FS::rear_boost, .lo = 0,
+         .hi = 12, .grain = 3, .kind = CHOICE, .steps = {0, 3, 6, 9, 12}, .levels = true, .text = decibels,
+         .hint = L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
+        {.id = OPT_SAMPLES, .tab = AUDIO_TAB, .label = L"SAMPLE QUALITY", .key = "sample_interpolation",
+         .flag = &FS::cubic_samples, .words = {"linear", "cubic"}, .other = 1, .kind = CHOICE,
+         .shown = {L"ORIGINAL", L"SMOOTH"},
+         .hint = L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
+        // CONTROLS
+        {.id = OPT_PAD_SPEED, .tab = CONTROLS_TAB, .label = L"STICK SPEED", .key = "pad_speed", .number = &FS::pad_speed,
+         .lo = 1, .hi = 10, .kind = SLIDER, .hint = L"How fast the gamepad's sticks move the sight.  "},   // + the pads
+        {.id = OPT_GYRO, .tab = CONTROLS_TAB, .label = L"GYRO AIM", .key = "gyro", .flag = &FS::gyro, .kind = TOGGLE,
+         .hint = L"Point the gamepad to aim, together with the sticks"},   // option_items: without a gyroscope
+        {.id = OPT_GYRO_SPEED, .tab = CONTROLS_TAB, .label = L"GYRO SPEED", .key = "gyro_speed", .number = &FS::gyro_speed,
+         .lo = 1, .hi = 10, .kind = SLIDER, .hint = L"How far the sight moves when you turn the gamepad"},
+        {.id = OPT_VIBRATION, .tab = CONTROLS_TAB, .label = L"VIBRATION", .key = "vibration", .number = &FS::vibration,
+         .words = LEVEL_WORDS, .kind = CHOICE, .shown = LEVELS, .levels = true,
+         .hint = L"The gamepad rumbles when you shoot and when you are hit"},
+        {.id = OPT_ASSIST, .tab = CONTROLS_TAB, .label = L"AIM ASSIST", .key = "aim_assist", .number = &FS::aim_assist,
+         .words = LEVEL_WORDS, .kind = CHOICE, .shown = LEVELS, .levels = true,
+         .hint = L"With a gamepad the sight slows down over the dinosaurs and follows them a little"},
+        {.id = OPT_CROSS, .tab = CONTROLS_TAB, .label = L"CROSSHAIR", .key = "crosshair", .flag = &FS::crosshair,
+         .kind = TOGGLE, .hint = L"Extra crosshair where the mouse points"},
+        {.id = OPT_CROSS_STYLE, .tab = CONTROLS_TAB, .label = L"CROSSHAIR STYLE", .key = "crosshair_style",
+         .number = &FS::crosshair_style, .words = {"default", "custom"}, .other = 1, .kind = CHOICE,
+         .shown = {L"DEFAULT", L"CUSTOM"},
+         .hint = L"The drawn rings, or your own pictures (crosshair.png and crosshair_p2.png beside the game)"},
+        {.id = OPT_CROSS_P1, .tab = CONTROLS_TAB, .label = L"PLAYER 1 PICTURE", .kind = BUTTON, .shown = {L"CHOOSE PNG..."},
+         .hint = L"Pick a PNG for player 1's crosshair.  It is copied beside the game as crosshair.png, at its own size in pixels at 1080p"},
+        {.id = OPT_CROSS_P2, .tab = CONTROLS_TAB, .label = L"PLAYER 2 PICTURE", .kind = BUTTON, .shown = {L"CHOOSE PNG..."},
+         .hint = L"Pick a PNG for player 2's crosshair (crosshair_p2.png).  Without one, player 2 uses player 1's picture"},
+        {.id = OPT_CROSS_HIDE, .tab = CONTROLS_TAB, .label = L"HIDE IDLE CROSSHAIR", .key = "crosshair_hide",
+         .number = &FS::crosshair_hide, .lo = 0, .hi = 10, .kind = CHOICE, .steps = {0, 3, 5, 10}, .text = seconds,
+         .hint = L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
+        {.id = OPT_MICE, .tab = CONTROLS_TAB, .label = L"SECOND MOUSE", .key = "second_mouse", .flag = &FS::second_mouse,
+         .kind = CHOICE, .shown = {L"OFF", L"PLAYER 2"},
+         .hint = L"A second mouse joins as player 2 with a click while player 1 plays"},
+        {.id = OPT_GUN_TEST, .tab = CONTROLS_TAB, .label = L"GUN TEST", .kind = BUTTON, .shown = {L"OPEN..."},
+         .hint = L"Every mouse and light gun Windows sees, what each one is doing and which player it is.  "
+                 L"Fire each gun to make it player 1's or player 2's for good"},
+        // GAME
+        {.id = OPT_FREE_PLAY, .tab = GAME_TAB, .label = L"FREE PLAY", .key = "free_play", .flag = &FS::free_play,
+         .kind = TOGGLE, .hint = L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
+        {.id = OPT_TRIGGER_START, .tab = GAME_TAB, .label = L"TRIGGER STARTS", .key = "trigger_start",
+         .flag = &FS::trigger_start, .kind = TOGGLE,
+         .hint = L"Pulling a gun's trigger starts or continues that player's game, like their start button"},
+        {.id = OPT_SUBS, .tab = GAME_TAB, .label = L"SUBTITLES", .key = "subtitles", .number = &FS::subtitles,
+         .words = {"off", "english", "japanese"}, .kind = CHOICE, .shown = {L"OFF", L"ENGLISH", L"JAPANESE"},
+         .hint = L"Captions of what the characters say"},
+        // Only in the file: the guns picked in GUN TEST
+        {.id = NO_ROW, .key = "gun_p1", .path = &FS::gun_p1},
+        {.id = NO_ROW, .key = "gun_p2", .path = &FS::gun_p2},
+    };
+    return table;
+}
+
+const Frontend::Setting* Frontend::setting_of(Id id) {
+    for (const Setting& d : setting_table())
+        if (d.id == id) return &d;
+    return nullptr;
+}
 
 // ---- Settings file ----
 
@@ -68,54 +314,8 @@ void FrontendSettings::load(const char* path) {
     while (fgets(line, sizeof(line), f)) {
         char key[64], value[400];   // device paths are long
         if (sscanf(line, " %63[^= ] = %399s", key, value) != 2) continue;
-        std::string k = key, v = value;
-        bool on = v == "1" || v == "on" || v == "true";
-        if (k == "fullscreen") fullscreen = on;
-        else if (k == "volume") volume = std::clamp(atoi(value), 0, 10);
-        else if (k == "speakers") speakers = v == "surround" ? 1 : v == "headphones" ? 2 : 0;
-        else if (k == "rear_boost") rear_boost = std::clamp(atoi(value) / 3 * 3, 0, 12);
-        else if (k == "sample_interpolation") cubic_samples = v != "linear";
-        else if (k == "aa") aa = v == "dlaa" ? 1 : (v == "none" || v == "off") ? 2 : 0;
-        else if (k == "resolution_3d") scale = std::clamp(atoi(value), SCALES[0], 100);
-        else if (k == "half_rate") half_rate = on;
-        else if (k == "frame_cap") frame_cap = std::clamp(atoi(value), 0, 500);
-        else if (k == "vsync") vsync = on;
-        else if (k == "aspect") aspect = v == "4:3" ? 0 : v == "21:9" ? 2 : 1;
-        else if (k == "haze") haze = on;
-        else if (k == "bloom") bloom = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : on ? 2 : 0;
-        else if (k == "ao") ao = on;
-        else if (k == "sky") sky = v == "procedural";
-        else if (k == "sun") sun = on;
-        else if (k == "shadows") shadows = on;
-        else if (k == "ray_tracing") ray_tracing = v == "shadows" ? 1 : v == "off" || v == "0" ? 0 : 2;
-        else if (k == "light_shafts") shafts = on;
-        else if (k == "soft_particles") soft = on;
-        else if (k == "lightning") lightning = on;
-        else if (k == "rain") rain = v == "light" ? 1 : v == "heavy" ? 2 : on ? 2 : 0;
-        else if (k == "hdr") hdr = on;
-        else if (k == "rim_light") rim = on;
-        else if (k == "surface_detail") relief = on;
-        else if (k == "sharpen") sharpen = on;
-        else if (k == "flashlight") torch = v != "original";
-        else if (k == "hd_text") hd_text = on;
-        else if (k == "crosshair") crosshair = on;
-        else if (k == "menu_music") menu_music = on;
-        else if (k == "crosshair_style") crosshair_style = v == "default" ? 0 : 1;
-        else if (k == "crosshair_hide") crosshair_hide = std::clamp(atoi(value), 0, 10);
-        else if (k == "free_play") free_play = on;
-        else if (k == "trigger_start") trigger_start = on;
-        else if (k == "motion") smooth = v != "original";
-        else if (k == "second_mouse") second_mouse = on;
-        else if (k == "subtitles") subtitles = v == "japanese" ? 2 : v == "english" ? 1 : 0;
-        else if (k == "saturation") saturation = std::clamp(atoi(value), 0, 200);
-        else if (k == "gamma") gamma = std::clamp(int(atof(value) * 100 + 0.5), 50, 150);
-        else if (k == "pad_speed") pad_speed = std::clamp(atoi(value), 1, 10);
-        else if (k == "gyro") gyro = on;
-        else if (k == "gyro_speed") gyro_speed = std::clamp(atoi(value), 1, 10);
-        else if (k == "vibration") vibration = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : 0;
-        else if (k == "aim_assist") aim_assist = v == "low" ? 1 : v == "medium" ? 2 : v == "high" ? 3 : 0;
-        else if (k == "gun_p1") gun_p1 = v == "none" ? "" : v;
-        else if (k == "gun_p2") gun_p2 = v == "none" ? "" : v;
+        for (const Frontend::Setting& d : Frontend::setting_table())
+            if (d.key && strcmp(d.key, key) == 0) d.read(*this, value);
     }
     fclose(f);
 }
@@ -123,22 +323,8 @@ void FrontendSettings::load(const char* path) {
 void FrontendSettings::save(const char* path) const {
     FILE* f = fopen(path, "w");
     if (!f) return;
-    static const char* const AA[3] = {"msaa", "dlaa", "none"};
-    static const char* const SUBS[3] = {"off", "english", "japanese"};
-    static const char* const BLOOM[4] = {"off", "low", "medium", "high"};   // also the vibration and aim assist levels
-    static const char* const RAIN[3] = {"off", "light", "heavy"};
-    static const char* const SPEAKERS[3] = {"stereo", "surround", "headphones"};
-    static const char* const RT_MODES[3] = {"off", "shadows", "ao"};
-    static const char* const ASPECTS[3] = {"4:3", "16:9", "21:9"};
-    fprintf(f, "fullscreen = %d\nvolume = %d\naa = %s\nhaze = %d\nbloom = %s\nao = %d\nsky = %s\nsun = %d\nshadows = %d\nlight_shafts = %d\nsoft_particles = %d\nhdr = %d\nrim_light = %d\nsurface_detail = %d\nsharpen = %d\nlightning = %d\nrain = %s\nhd_text = %d\ncrosshair = %d\n"
-               "second_mouse = %d\nsubtitles = %s\nsaturation = %d\ngamma = %.2f\nmotion = %s\nspeakers = %s\nrear_boost = %d\nsample_interpolation = %s\n"
-               "pad_speed = %d\ngyro = %d\ngyro_speed = %d\nvibration = %s\naim_assist = %s\nflashlight = %s\nray_tracing = %s\n"
-               "crosshair_style = %s\ncrosshair_hide = %d\nfree_play = %d\ntrigger_start = %d\nmenu_music = %d\nresolution_3d = %d\nhalf_rate = %d\nframe_cap = %d\nvsync = %d\naspect = %s\n",
-            fullscreen, volume, AA[aa], haze, BLOOM[bloom], ao, sky ? "procedural" : "original", sun, shadows, shafts, soft, hdr, rim, relief, sharpen, lightning, RAIN[rain], hd_text, crosshair, second_mouse, SUBS[subtitles], saturation,
-            gamma / 100.0, smooth ? "smooth" : "original", SPEAKERS[speakers], rear_boost, cubic_samples ? "cubic" : "linear",
-            pad_speed, gyro, gyro_speed, BLOOM[vibration], BLOOM[aim_assist], torch ? "modern" : "original", RT_MODES[ray_tracing],
-            crosshair_style ? "custom" : "default", crosshair_hide, free_play, trigger_start, menu_music, scale, half_rate, frame_cap, vsync, ASPECTS[aspect]);
-    fprintf(f, "gun_p1 = %s\ngun_p2 = %s\n", gun_p1.empty() ? "none" : gun_p1.c_str(), gun_p2.empty() ? "none" : gun_p2.c_str());
+    for (const Frontend::Setting& d : Frontend::setting_table())
+        if (d.key) fprintf(f, "%s = %s\n", d.key, d.write(*this).c_str());
     fclose(f);
 }
 
@@ -194,34 +380,27 @@ int FrontendSettings::quality() const {
 // ---- Setup ----
 
 bool Frontend::init(const std::string& font_dir) {
-    // Jurassic Park is optional (free for personal use, not in the repository);
-    // without Arimo the descriptions fall back on Windows' own sans-serif
-    static const char* const FILES[5] = {"SairaExtraCondensed-Bold.ttf", "BarlowCondensed-Bold.ttf",
-                                         "ShareTechMono-Regular.ttf", "Jurassic_Park.ttf", "Arimo[wght].ttf"};
-    bool ok = true;
-    for (const char* name : FILES) {
-        font_data_.push_back(read_file(font_dir + "/" + name));
-        auto& data = font_data_.back();
-        DWORD count = 0;
-        HANDLE h = data.empty() ? nullptr : AddFontMemResourceEx(data.data(), DWORD(data.size()), nullptr, &count);
-        if (h) {
-            font_handles_.push_back(h);
-            if (name == FILES[3]) jurassic_ = true;
-        } else if (name != FILES[3] && name != FILES[4]) {
-            fprintf(stderr, "[menu] could not load the font %s/%s\n", font_dir.c_str(), name);
+    gdi_ = &GdiText::acquire(font_dir);
+    bool ok = gdi_->ready();
+    for (GdiText::Face f : {GdiText::SAIRA, GdiText::BARLOW, GdiText::MONO})   // the others are optional
+        if (!gdi_->loaded(f)) {
+            fprintf(stderr, "[menu] could not load the font %s/%s\n", font_dir.c_str(), GdiText::file(f));
             ok = false;
         }
-    }
-    dc_ = CreateCompatibleDC(nullptr);
+    jurassic_ = gdi_->loaded(GdiText::JURASSIC);
     for (const wchar_t* p : {L"third_party/menu/cover.png", L"third_party/menu/cover.jpg", L"third_party/menu/lw_poster.jpg"})
         if (load_poster(p)) {
             printf("[menu] poster %ls (%dx%d)\n", p, poster_w_, poster_h_);
             break;
         }
     load_image(L"third_party/menu/sega.png", sega_.px, sega_.w, sega_.h);
-    if (load_image(L"third_party/menu/logo.png", logo_.px, logo_.w, logo_.h))
-        printf("[menu] logo third_party/menu/logo.png (%dx%d)\n", logo_.w, logo_.h);
-    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg"})
+    // logo and background: your own in third_party/menu/ first, else the ones in res/menu/
+    for (const wchar_t* p : {L"third_party/menu/logo.png", L"res/menu/logo.png"})
+        if (load_image(p, logo_.px, logo_.w, logo_.h)) {
+            printf("[menu] logo %ls (%dx%d)\n", p, logo_.w, logo_.h);
+            break;
+        }
+    for (const wchar_t* p : {L"third_party/menu/background.png", L"third_party/menu/background.jpg", L"res/menu/background.png"})
         if (load_image(p, backdrop_.px, backdrop_.w, backdrop_.h)) {
             printf("[menu] background %ls (%dx%d)\n", p, backdrop_.w, backdrop_.h);
             break;
@@ -268,12 +447,8 @@ bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out,
 bool Frontend::load_poster(const std::wstring& path) { return load_image(path, poster_, poster_w_, poster_h_); }
 
 void Frontend::shutdown() {
-    for (auto& [key, f] : fonts_) DeleteObject(f);
-    fonts_.clear();
-    for (HANDLE h : font_handles_) RemoveFontMemResourceEx(h);
-    font_handles_.clear();
-    if (dc_) DeleteDC(dc_);
-    dc_ = nullptr;
+    if (gdi_) gdi_->release();
+    gdi_ = nullptr;
 }
 
 // The picture of an option, if there is one
@@ -310,33 +485,7 @@ const Frontend::Picture& Frontend::pad_icon(const std::wstring& button) {
 const wchar_t* const Frontend::TAB_NAMES[Frontend::TAB_COUNT] = {L"DISPLAY", L"LIGHTING", L"ATMOSPHERE", L"AUDIO",
                                                                   L"CONTROLS", L"GAME"};
 
-// Every settings option: its tab and, within the tab, the order shown. This is
-// the one place to put a new option (besides `all` in items()); an option
-// missing here goes at the end of GAME. Tabs past VISIBLE_OPTIONS rows scroll.
-const Frontend::OptionTab Frontend::OPTION_TABS[] = {
-    {OPT_QUALITY, DISPLAY_TAB}, {OPT_DISPLAY, DISPLAY_TAB}, {OPT_ASPECT, DISPLAY_TAB}, {OPT_SCALE, DISPLAY_TAB}, {OPT_HALF_RATE, DISPLAY_TAB},
-    {OPT_VSYNC, DISPLAY_TAB}, {OPT_FRAME_CAP, DISPLAY_TAB},
-    {OPT_MOTION, DISPLAY_TAB}, {OPT_AA, DISPLAY_TAB}, {OPT_TEXT, DISPLAY_TAB},
-    {OPT_SAT, DISPLAY_TAB}, {OPT_GAMMA, DISPLAY_TAB}, {OPT_SHARPEN, DISPLAY_TAB},
-    {OPT_SUN, LIGHTING_TAB}, {OPT_SHADOWS, LIGHTING_TAB}, {OPT_RT, LIGHTING_TAB}, {OPT_SHAFTS, LIGHTING_TAB}, {OPT_HDR, LIGHTING_TAB},
-    {OPT_AO, LIGHTING_TAB}, {OPT_BLOOM, LIGHTING_TAB}, {OPT_RIM, LIGHTING_TAB}, {OPT_RELIEF, LIGHTING_TAB}, {OPT_TORCH, LIGHTING_TAB},
-    {OPT_SKY, ATMOSPHERE_TAB}, {OPT_HAZE, ATMOSPHERE_TAB}, {OPT_LIGHTNING, ATMOSPHERE_TAB},
-    {OPT_RAIN, ATMOSPHERE_TAB}, {OPT_SOFT, ATMOSPHERE_TAB},
-    {OPT_VOLUME, AUDIO_TAB}, {OPT_MUSIC, AUDIO_TAB}, {OPT_SPEAKERS, AUDIO_TAB}, {OPT_REAR, AUDIO_TAB}, {OPT_SAMPLES, AUDIO_TAB},
-    {OPT_PAD_SPEED, CONTROLS_TAB}, {OPT_GYRO, CONTROLS_TAB}, {OPT_GYRO_SPEED, CONTROLS_TAB},
-    {OPT_VIBRATION, CONTROLS_TAB}, {OPT_ASSIST, CONTROLS_TAB}, {OPT_CROSS, CONTROLS_TAB}, {OPT_CROSS_STYLE, CONTROLS_TAB},
-    {OPT_CROSS_P1, CONTROLS_TAB}, {OPT_CROSS_P2, CONTROLS_TAB}, {OPT_CROSS_HIDE, CONTROLS_TAB},
-    {OPT_MICE, CONTROLS_TAB}, {OPT_GUN_TEST, CONTROLS_TAB},
-    {OPT_FREE_PLAY, GAME_TAB}, {OPT_TRIGGER_START, GAME_TAB}, {OPT_SUBS, GAME_TAB},
-};
-
 const wchar_t* const Frontend::RECORD_TAB_NAMES[Frontend::RECORD_TAB_COUNT] = {L"ACHIEVEMENTS", L"STATS"};
-
-int Frontend::tab_of(Id id) {
-    for (const OptionTab& o : OPTION_TABS)
-        if (o.id == id) return o.tab;
-    return GAME_TAB;
-}
 
 void Frontend::set_tab(int t) {
     bool on_back = selected_ > 0 && selected_ == int(items().size()) - 1;
@@ -350,251 +499,72 @@ void Frontend::set_tab(int t) {
 }
 
 std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) const {
-    auto on_off = [](bool v) { return std::wstring(v ? L"ON" : L"OFF"); };
-    static const wchar_t* const AA[3] = {L"MSAA 4X", L"DLAA", L"OFF"};
-    static const wchar_t* const BLOOM_LEVELS[4] = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
-    static const wchar_t* const RAIN_LEVELS[3] = {L"OFF", L"LIGHT", L"HEAVY"};
-    static const wchar_t* const SUBS[3] = {L"OFF", L"ENGLISH", L"JAPANESE"};
-    static const wchar_t* const SPEAKERS[3] = {L"STEREO", L"SURROUND 4.0", L"HEADPHONES"};
-    static const wchar_t* const SPEAKER_HINTS[3] = {
-        L"Front and rear sound mixed on two speakers",
-        L"Rear sound on your rear speakers, as on the cabinet (4.0, 5.1 or 7.1)",
-        L"Two ears: gentle crossfeed, and the rear sound placed behind you"};
-    std::wstring aa_hint = s.aa != aa_at_launch
-                               ? L"Edge smoothing.  Takes effect the next time the game starts"
-                               : L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start";
-    wchar_t gamma_text[16];
-    swprintf(gamma_text, 16, L"%.2f", s.gamma / 100.0);
-    static const wchar_t* const RT_MODES[3] = {L"OFF", L"SHADOWS", L"SHADOWS + AO"};
-    static const wchar_t* const RT_HINTS[3] = {
-        L"Shadows from a shadow map and occlusion from the depth, as without ray tracing",
-        L"Sun shadows traced through the world: every tree and dinosaur, soft with distance",
-        L"Also the ambient occlusion: corners and the ground under things, even off screen"};
-    std::wstring pads = gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads;
-    static const wchar_t* const QUALITY[5] = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"};
-    static const wchar_t* const QUALITY_HINTS[5] = {
-        L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
-        L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
-        L"Fast cards: ray traced sun shadows and every effect",
-        L"Everything on: ray traced sun shadows and ambient occlusion",
-        L"Your own mix of the options.  Pick a level to set the costly ones at once"};
-    static const wchar_t* const ASPECTS[3] = {L"4:3 (ORIGINAL)", L"16:9", L"21:9"};
-    int quality = s.quality();
-    std::vector<Item> all = {{OPT_QUALITY, L"QUALITY", QUALITY[quality], QUALITY_HINTS[quality]},
-            {OPT_DISPLAY, L"DISPLAY", s.fullscreen ? L"FULLSCREEN" : L"WINDOW",
-             L"Window or full screen (also F11 or Alt+Enter)"},
-            {OPT_ASPECT, L"WIDESCREEN", ASPECTS[s.aspect],
-             L"Widest 3D view: 21:9 fills ultrawide monitors (2560x1080, 3440x1440); 4:3 is the arcade's own"},
-            {OPT_SCALE, L"RENDER RESOLUTION", std::to_wstring(s.scale) + L"%",
-             L"Resolution of the 3D picture: lower is faster.  The HUD and the text stay sharp"},
-            {OPT_HALF_RATE, L"FRAME RATE", s.half_rate ? L"HALF" : L"FULL",
-             L"Half: above 100 Hz the 3D is drawn every other refresh (72 at 144 Hz); the crosshair keeps up"},
-            {OPT_FRAME_CAP, L"FRAME CAP", s.frame_cap ? std::to_wstring(s.frame_cap) + L" FPS" : std::wstring(L"OFF"),
-             L"At most this many pictures a second (Off: your monitor's refresh rate).  The game itself always runs at arcade speed"},
-            {OPT_VSYNC, L"VSYNC", on_off(s.vsync),
-             L"Off: each image goes out as soon as it is drawn, without waiting for the monitor (may tear)"},
-            {OPT_MOTION, L"MOTION", s.smooth ? L"SMOOTH" : L"ORIGINAL",
-             L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
-            {OPT_VOLUME, L"VOLUME", std::to_wstring(s.volume), L"Sound volume"},
-            {OPT_MUSIC, L"MENU MUSIC", on_off(s.menu_music),
-             L"Music in the menus (third_party/menu/music.mp3), at the sound volume"},
-            {OPT_SPEAKERS, L"SPEAKERS", SPEAKERS[s.speakers], SPEAKER_HINTS[s.speakers]},
-            {OPT_REAR, L"REAR BOOST", s.rear_boost ? L"+" + std::to_wstring(s.rear_boost) + L" DB" : std::wstring(L"OFF"),
-             L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
-            {OPT_SAMPLES, L"SAMPLE QUALITY", s.cubic_samples ? L"SMOOTH" : L"ORIGINAL",
-             L"Smooth interpolation of the instrument and voice samples, or the original chip's"},
-            {OPT_AA, L"ANTI-ALIASING", AA[s.aa], aa_hint},
-            {OPT_HAZE, L"DISTANCE HAZE", on_off(s.haze),
-             L"Far scenery fades into the sky instead of appearing suddenly"},
-            {OPT_BLOOM, L"BLOOM", BLOOM_LEVELS[s.bloom], L"Soft glow around fire, lights, the sky and sunlit surfaces"},
-            {OPT_AO, L"AMBIENT OCCLUSION", on_off(s.ao),
-             L"Soft shadows in corners, creases and on the ground around things"},
-            {OPT_SKY, L"SKY", s.sky ? L"PROCEDURAL" : L"ORIGINAL",
-             L"Smooth drifting clouds drawn at full resolution, or the original picture"},
-            {OPT_SUN, L"SUN", on_off(s.sun), L"A sun in the sky and stronger, warmer sunlight outdoors"},
-            {OPT_SHADOWS, L"SUN SHADOWS", on_off(s.shadows),
-             L"Dinosaurs, trees and buildings cast shadows away from the sun"},
-            {OPT_RT, L"RAY TRACING", !rt_available ? L"N/A" : RT_MODES[s.ray_tracing],
-             !rt_available ? L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)"
-                           : RT_HINTS[s.ray_tracing],
-             rt_available},
-            {OPT_SHAFTS, L"LIGHT SHAFTS", on_off(s.shafts),
-             L"Rays of sunlight streaming between trees and silhouettes"},
-            {OPT_SOFT, L"SOFT PARTICLES", on_off(s.soft),
-             L"Smoke, fire and explosions blend softly where they touch the ground and walls"},
-            {OPT_HDR, L"HDR LIGHTING", on_off(s.hdr),
-             L"Bright light keeps its detail instead of clipping to white; exposure adapts gently"},
-            {OPT_RIM, L"RIM LIGHT", on_off(s.rim),
-             L"A soft edge of light around dinosaurs and people, lifting them off the background"},
-            {OPT_RELIEF, L"SURFACE DETAIL", on_off(s.relief),
-             L"Light and shadow bring out the grain of stone, bark, metal and skin"},
-            {OPT_TORCH, L"FLASHLIGHT", s.torch ? L"MODERN" : L"ORIGINAL",
-             L"At night: a soft beam with real shading and a glow in the air, or the original spot"},
-            {OPT_LIGHTNING, L"LIGHTNING", on_off(s.lightning),
-             L"Flashes of lightning in stormy fog, with the trees standing out against it"},
-            {OPT_RAIN, L"RAIN", RAIN_LEVELS[s.rain],
-             L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
-            {OPT_SAT, L"COLOR SATURATION", std::to_wstring(s.saturation) + L"%",
-             L"How vivid the colours are (100% = original, 80% by default)"},
-            {OPT_GAMMA, L"GAMMA", gamma_text, L"Brightness of the mid-tones (1.00 = original)"},
-            {OPT_SHARPEN, L"SHARPEN", on_off(s.sharpen),
-             L"Brings back texture detail after the edge smoothing, without halos"},
-            {OPT_TEXT, L"HD TEXT", on_off(s.hd_text),
-             L"Sharp fonts for menus, captions and score instead of the original pixels"},
-            {OPT_CROSS, L"CROSSHAIR", on_off(s.crosshair), L"Extra crosshair where the mouse points"},
-            {OPT_CROSS_STYLE, L"CROSSHAIR STYLE", s.crosshair_style ? L"CUSTOM" : L"DEFAULT",
-             L"The drawn rings, or your own pictures (crosshair.png and crosshair_p2.png beside the game)"},
-            {OPT_CROSS_P1, L"PLAYER 1 PICTURE", L"CHOOSE PNG...",
-             L"Pick a PNG for player 1's crosshair.  It is copied beside the game as crosshair.png, at its own size in pixels at 1080p"},
-            {OPT_CROSS_P2, L"PLAYER 2 PICTURE", L"CHOOSE PNG...",
-             L"Pick a PNG for player 2's crosshair (crosshair_p2.png).  Without one, player 2 uses player 1's picture"},
-            {OPT_CROSS_HIDE, L"HIDE IDLE CROSSHAIR",
-             s.crosshair_hide ? L"AFTER " + std::to_wstring(s.crosshair_hide) + L" S" : std::wstring(L"NEVER"),
-             L"A crosshair whose gun has not moved or fired for a while disappears until it moves again"},
-            {OPT_FREE_PLAY, L"FREE PLAY", on_off(s.free_play),
-             L"Start and continue with 1 / 2 or a light gun's start button, no coin needed"},
-            {OPT_TRIGGER_START, L"TRIGGER STARTS", on_off(s.trigger_start),
-             L"Pulling a gun's trigger starts or continues that player's game, like their start button"},
-            {OPT_MICE, L"SECOND MOUSE", s.second_mouse ? L"PLAYER 2" : L"OFF",
-             L"A second mouse joins as player 2 with a click while player 1 plays"},
-            {OPT_GUN_TEST, L"GUN TEST", L"OPEN...",
-             L"Every mouse and light gun Windows sees, what each one is doing and which player it is.  "
-             L"Fire each gun to make it player 1's or player 2's for good"},
-            {OPT_SUBS, L"SUBTITLES", SUBS[s.subtitles], L"Captions of what the characters say"},
-            {OPT_PAD_SPEED, L"STICK SPEED", std::to_wstring(s.pad_speed),
-             L"How fast the gamepad's sticks move the sight.  " + pads},
-            {OPT_GYRO, L"GYRO AIM", on_off(s.gyro),
-             gyro_pad ? L"Point the gamepad to aim, together with the sticks"
-                      : L"Point the gamepad to aim (DualSense, DualShock 4, Switch Pro).  None connected"},
-            {OPT_GYRO_SPEED, L"GYRO SPEED", std::to_wstring(s.gyro_speed),
-             L"How far the sight moves when you turn the gamepad"},
-            {OPT_VIBRATION, L"VIBRATION", BLOOM_LEVELS[s.vibration],
-             L"The gamepad rumbles when you shoot and when you are hit"},
-            {OPT_ASSIST, L"AIM ASSIST", BLOOM_LEVELS[s.aim_assist],
-             L"With a gamepad the sight slows down over the dinosaurs and follows them a little"}};
-    for (Item& it : all) describe(it, s);
+    std::vector<Item> all;
+    for (const Setting& d : setting_table()) {
+        if (d.id == NO_ROW) continue;
+        Item it{d.id, d.label, L"", d.hint};
+        it.kind = d.kind;
+        int v = d.get(s);
+        switch (d.kind) {
+        case TOGGLE: it.value = v ? L"ON" : L"OFF", it.pos = v ? 1 : 0, it.count = 2; break;
+        case CHOICE:
+            it.pos = d.pos(s), it.count = d.count(), it.levels = d.levels;
+            it.value = d.text ? d.text(v) : d.shown[it.pos];
+            break;
+        case SLIDER:
+            it.frac = float(v - d.lo) / float(d.hi - d.lo);
+            it.value = d.text ? d.text(v) : std::to_wstring(v);
+            break;
+        case BUTTON: it.value = d.shown[0]; break;
+        default: break;
+        }
+        if (!d.hints.empty()) it.hint = d.hints[it.pos];
+        all.push_back(it);
+    }
+    // What also depends on the rest of the settings and on this computer
+    for (Item& it : all) switch (it.id) {
+        case OPT_QUALITY: {   // a dot per level, none lit for a mix of them
+            int q = s.quality();
+            const Setting& d = *setting_of(OPT_QUALITY);
+            it.value = d.shown[q], it.hint = d.hints[q];
+            it.pos = q == FrontendSettings::CUSTOM ? -1 : q, it.count = 4;
+            break;
+        }
+        case OPT_AA:
+            if (s.aa != aa_at_launch) it.hint = L"Edge smoothing.  Takes effect the next time the game starts";
+            break;
+        case OPT_RT:
+            if (!rt_available) {
+                it.value = L"N/A";
+                it.hint = L"Needs a graphics card with ray tracing (NVIDIA RTX, AMD RX 6000 or newer)";
+                it.enabled = false;
+            }
+            break;
+        case OPT_PAD_SPEED: it.hint += gamepads.empty() ? L"No gamepad connected" : L"Connected: " + gamepads; break;
+        case OPT_GYRO:
+            if (!gyro_pad) it.hint = L"Point the gamepad to aim (DualSense, DualShock 4, Switch Pro).  None connected";
+            break;
+        default: break;
+        }
     return all;
 }
 
-// How a row shows its value, from the setting behind it
-void Frontend::describe(Item& it, const FrontendSettings& s) {
-    auto toggle = [&](bool on) { it.kind = TOGGLE, it.pos = on ? 1 : 0, it.count = 2; };
-    auto choice = [&](int pos, int count, bool levels) {   // levels: OFF and then higher and higher
-        it.kind = CHOICE, it.pos = pos, it.count = count, it.levels = levels;
-    };
-    auto slider = [&](int v, int lo, int hi) { it.kind = SLIDER, it.frac = float(v - lo) / float(hi - lo); };
-    static const int HIDE_STEPS[4] = {0, 3, 5, 10};
-    switch (it.id) {
-    case OPT_DISPLAY: choice(s.fullscreen ? 1 : 0, 2, false); break;
-    case OPT_QUALITY: {   // a dot per level, none lit for a mix of them
-        int q = s.quality();
-        choice(q == FrontendSettings::CUSTOM ? -1 : q, 4, false);
-        break;
+const std::wstring& Frontend::default_value(int id) {
+    if (defaults_.empty() || defaults_rt_ != rt_available) {
+        defaults_ = option_items(FrontendSettings{});
+        defaults_rt_ = rt_available;
     }
-    case OPT_ASPECT: choice(s.aspect, 3, false); break;
-    case OPT_SCALE: slider(s.scale, FrontendSettings::SCALES[0], 100); break;
-    case OPT_HALF_RATE: choice(s.half_rate ? 1 : 0, 2, false); break;
-    case OPT_FRAME_CAP: {
-        int i = int(std::find(std::begin(FrontendSettings::FRAME_CAPS), std::end(FrontendSettings::FRAME_CAPS), s.frame_cap) -
-                    std::begin(FrontendSettings::FRAME_CAPS));
-        choice(i % 4, 4, true);
-        break;
-    }
-    case OPT_VSYNC: toggle(s.vsync); break;
-    case OPT_MOTION: choice(s.smooth ? 1 : 0, 2, false); break;
-    case OPT_VOLUME: slider(s.volume, 0, 10); break;
-    case OPT_SPEAKERS: choice(s.speakers, 3, false); break;
-    case OPT_REAR: choice(s.rear_boost / 3, 5, true); break;
-    case OPT_SAMPLES: choice(s.cubic_samples ? 1 : 0, 2, false); break;
-    case OPT_AA: choice(s.aa, 3, false); break;
-    case OPT_HAZE: toggle(s.haze); break;
-    case OPT_BLOOM: choice(s.bloom, 4, true); break;
-    case OPT_AO: toggle(s.ao); break;
-    case OPT_SKY: choice(s.sky ? 1 : 0, 2, false); break;
-    case OPT_SUN: toggle(s.sun); break;
-    case OPT_SHADOWS: toggle(s.shadows); break;
-    case OPT_RT: choice(s.ray_tracing, 3, true); break;
-    case OPT_SHAFTS: toggle(s.shafts); break;
-    case OPT_SOFT: toggle(s.soft); break;
-    case OPT_HDR: toggle(s.hdr); break;
-    case OPT_RIM: toggle(s.rim); break;
-    case OPT_RELIEF: toggle(s.relief); break;
-    case OPT_SHARPEN: toggle(s.sharpen); break;
-    case OPT_TORCH: choice(s.torch ? 1 : 0, 2, false); break;
-    case OPT_LIGHTNING: toggle(s.lightning); break;
-    case OPT_RAIN: choice(s.rain, 3, true); break;
-    case OPT_TEXT: toggle(s.hd_text); break;
-    case OPT_CROSS: toggle(s.crosshair); break;
-    case OPT_CROSS_HIDE:
-        choice(int(std::find(std::begin(HIDE_STEPS), std::end(HIDE_STEPS), s.crosshair_hide) - std::begin(HIDE_STEPS)) % 4,
-               4, false);
-        break;
-    case OPT_FREE_PLAY: toggle(s.free_play); break;
-    case OPT_TRIGGER_START: toggle(s.trigger_start); break;
-    case OPT_MUSIC: toggle(s.menu_music); break;
-    case OPT_CROSS_STYLE: choice(s.crosshair_style, 2, false); break;
-    case OPT_CROSS_P1: case OPT_CROSS_P2: case OPT_GUN_TEST: it.kind = BUTTON; break;
-    case OPT_MICE: choice(s.second_mouse ? 1 : 0, 2, false); break;
-    case OPT_SUBS: choice(s.subtitles, 3, false); break;
-    case OPT_SAT: slider(s.saturation, 0, 200); break;
-    case OPT_GAMMA: slider(s.gamma, 50, 150); break;
-    case OPT_PAD_SPEED: slider(s.pad_speed, 1, 10); break;
-    case OPT_GYRO: toggle(s.gyro); break;
-    case OPT_GYRO_SPEED: slider(s.gyro_speed, 1, 10); break;
-    case OPT_VIBRATION: choice(s.vibration, 4, true); break;
-    case OPT_ASSIST: choice(s.aim_assist, 4, true); break;
-    default: break;
-    }
+    static const std::wstring none;
+    for (const Item& d : defaults_)
+        if (d.id == id) return d.value;
+    return none;
 }
 
 void Frontend::reset_tab() {
     const FrontendSettings d;
-    for (const Item& it : items()) switch (it.id) {
-        case OPT_ASPECT: settings.aspect = d.aspect; break;
-        case OPT_SCALE: settings.scale = d.scale; break;
-        case OPT_HALF_RATE: settings.half_rate = d.half_rate; break;
-        case OPT_FRAME_CAP: settings.frame_cap = d.frame_cap; break;
-        case OPT_VSYNC: settings.vsync = d.vsync; break;
-        case OPT_MOTION: settings.smooth = d.smooth; break;
-        case OPT_VOLUME: settings.volume = d.volume; break;
-        case OPT_SPEAKERS: settings.speakers = d.speakers; break;
-        case OPT_REAR: settings.rear_boost = d.rear_boost; break;
-        case OPT_SAMPLES: settings.cubic_samples = d.cubic_samples; break;
-        case OPT_AA: settings.aa = d.aa; break;
-        case OPT_HAZE: settings.haze = d.haze; break;
-        case OPT_BLOOM: settings.bloom = d.bloom; break;
-        case OPT_AO: settings.ao = d.ao; break;
-        case OPT_SKY: settings.sky = d.sky; break;
-        case OPT_SUN: settings.sun = d.sun; break;
-        case OPT_SHADOWS: settings.shadows = d.shadows; break;
-        case OPT_RT: settings.ray_tracing = d.ray_tracing; break;
-        case OPT_SHAFTS: settings.shafts = d.shafts; break;
-        case OPT_SOFT: settings.soft = d.soft; break;
-        case OPT_HDR: settings.hdr = d.hdr; break;
-        case OPT_RIM: settings.rim = d.rim; break;
-        case OPT_RELIEF: settings.relief = d.relief; break;
-        case OPT_SHARPEN: settings.sharpen = d.sharpen; break;
-        case OPT_TORCH: settings.torch = d.torch; break;
-        case OPT_LIGHTNING: settings.lightning = d.lightning; break;
-        case OPT_RAIN: settings.rain = d.rain; break;
-        case OPT_TEXT: settings.hd_text = d.hd_text; break;
-        case OPT_CROSS: settings.crosshair = d.crosshair; break;
-        case OPT_CROSS_HIDE: settings.crosshair_hide = d.crosshair_hide; break;
-        case OPT_CROSS_STYLE: settings.crosshair_style = d.crosshair_style; break;
-        case OPT_FREE_PLAY: settings.free_play = d.free_play; break;
-        case OPT_TRIGGER_START: settings.trigger_start = d.trigger_start; break;
-        case OPT_MUSIC: settings.menu_music = d.menu_music; break;
-        case OPT_MICE: settings.second_mouse = d.second_mouse; break;
-        case OPT_SUBS: settings.subtitles = d.subtitles; break;
-        case OPT_SAT: settings.saturation = d.saturation; break;
-        case OPT_GAMMA: settings.gamma = d.gamma; break;
-        case OPT_PAD_SPEED: settings.pad_speed = d.pad_speed; break;
-        case OPT_GYRO: settings.gyro = d.gyro; break;
-        case OPT_GYRO_SPEED: settings.gyro_speed = d.gyro_speed; break;
-        case OPT_VIBRATION: settings.vibration = d.vibration; break;
-        case OPT_ASSIST: settings.aim_assist = d.aim_assist; break;
-        default: break;   // DISPLAY: the window stays as it is; QUALITY follows the others
-        }
+    for (const Item& it : items())
+        if (const Setting* row = setting_of(it.id); row && it.id != OPT_DISPLAY)   // the window stays as it is
+            row->set(settings, row->get(d));                                     // (QUALITY follows the others)
     push(Action::SettingsChanged);
     dirty_ = true;
 }
@@ -677,15 +647,9 @@ std::vector<Frontend::Item> Frontend::items() const {
         return list;
     }
     case Screen::Options: {
-        std::vector<Item> all = option_items(settings);
         std::vector<Item> list = {{TABS, L"", L"", L"Left / Right here, Q / E or L1 / R1 change the tab"}};
-        for (const OptionTab& o : OPTION_TABS)   // the tab's options in their order, then any not listed
-            for (const Item& it : all)
-                if (it.id == o.id && o.tab == tab_) list.push_back(it);
-        for (const Item& it : all)
-            if (tab_ == GAME_TAB && std::none_of(std::begin(OPTION_TABS), std::end(OPTION_TABS),
-                                                 [&](const OptionTab& o) { return o.id == it.id; }))
-                list.push_back(it);
+        for (const Item& it : option_items(settings))   // the tab's options, in the table's order
+            if (setting_of(it.id)->tab == tab_) list.push_back(it);
         list.push_back(
             {BACK, L"BACK", L"", options_from_pause_ ? L"Return to the pause menu" : L"Return to the main menu"});
         return list;
@@ -758,14 +722,6 @@ void Frontend::activate(const Item& it, int dir) {
     case RESUME: push(Action::Resume); break;
     case SETTINGS: options_from_pause_ = true; tab_ = 0; open(Screen::Options); selected_ = 1; break;
     case OPT_DISPLAY: push(Action::ToggleFullscreen); break;
-    case OPT_VOLUME:
-        settings.volume = dir > 0 && settings.volume == 10 && wrap_ ? 0 : std::clamp(settings.volume + dir, 0, 10);
-        push(Action::SettingsChanged);
-        break;
-    case OPT_SPEAKERS: settings.speakers = (settings.speakers + dir + 3) % 3; push(Action::SettingsChanged); break;
-    case OPT_REAR: settings.rear_boost = (settings.rear_boost + 3 * dir + 15) % 15; push(Action::SettingsChanged); break;
-    case OPT_SAMPLES: settings.cubic_samples = !settings.cubic_samples; push(Action::SettingsChanged); break;
-    case OPT_AA: settings.aa = (settings.aa + dir + 3) % 3; push(Action::SettingsChanged); break;
     case OPT_QUALITY: {
         int q = settings.quality();
         settings.set_quality(q == FrontendSettings::CUSTOM ? (dir > 0 ? FrontendSettings::LOW : FrontendSettings::ULTRA)
@@ -773,54 +729,6 @@ void Frontend::activate(const Item& it, int dir) {
         push(Action::SettingsChanged);
         break;
     }
-    case OPT_SCALE: {
-        const int* scales = FrontendSettings::SCALES;
-        int i = 0;   // the next step from the nearest one at or below
-        while (i < 4 && scales[i + 1] <= settings.scale) i++;
-        settings.scale = scales[(i + dir + 5) % 5];
-        push(Action::SettingsChanged);
-        break;
-    }
-    case OPT_HALF_RATE: settings.half_rate = !settings.half_rate; push(Action::SettingsChanged); break;
-    case OPT_FRAME_CAP: {   // off, 30, 60, 120
-        const int* caps = FrontendSettings::FRAME_CAPS;
-        int i = int(std::find(caps, caps + 4, settings.frame_cap) - caps) % 4;
-        settings.frame_cap = caps[(i + dir + 4) % 4];
-        push(Action::SettingsChanged);
-        break;
-    }
-    case OPT_ASPECT: settings.aspect = (settings.aspect + dir + 3) % 3; push(Action::SettingsChanged); break;
-    case OPT_VSYNC: settings.vsync = !settings.vsync; push(Action::SettingsChanged); break;
-    case OPT_HAZE: settings.haze = !settings.haze; push(Action::SettingsChanged); break;
-    case OPT_BLOOM: settings.bloom = (settings.bloom + dir + 4) % 4; push(Action::SettingsChanged); break;
-    case OPT_AO: settings.ao = !settings.ao; push(Action::SettingsChanged); break;
-    case OPT_SKY: settings.sky = !settings.sky; push(Action::SettingsChanged); break;
-    case OPT_SUN: settings.sun = !settings.sun; push(Action::SettingsChanged); break;
-    case OPT_SHADOWS: settings.shadows = !settings.shadows; push(Action::SettingsChanged); break;
-    case OPT_RT: settings.ray_tracing = (settings.ray_tracing + dir + 3) % 3; push(Action::SettingsChanged); break;
-    case OPT_SHAFTS: settings.shafts = !settings.shafts; push(Action::SettingsChanged); break;
-    case OPT_SOFT: settings.soft = !settings.soft; push(Action::SettingsChanged); break;
-    case OPT_HDR: settings.hdr = !settings.hdr; push(Action::SettingsChanged); break;
-    case OPT_RIM: settings.rim = !settings.rim; push(Action::SettingsChanged); break;
-    case OPT_RELIEF: settings.relief = !settings.relief; push(Action::SettingsChanged); break;
-    case OPT_SHARPEN: settings.sharpen = !settings.sharpen; push(Action::SettingsChanged); break;
-    case OPT_TORCH: settings.torch = !settings.torch; push(Action::SettingsChanged); break;
-    case OPT_LIGHTNING: settings.lightning = !settings.lightning; push(Action::SettingsChanged); break;
-    case OPT_RAIN: settings.rain = (settings.rain + dir + 3) % 3; push(Action::SettingsChanged); break;
-    case OPT_TEXT: settings.hd_text = !settings.hd_text; push(Action::SettingsChanged); break;
-    case OPT_CROSS: settings.crosshair = !settings.crosshair; push(Action::SettingsChanged); break;
-    case OPT_MOTION: settings.smooth = !settings.smooth; push(Action::SettingsChanged); break;
-    case OPT_CROSS_HIDE: {   // never, 3, 5, 10 seconds
-        static const int STEPS[4] = {0, 3, 5, 10};
-        int i = int(std::find(std::begin(STEPS), std::end(STEPS), settings.crosshair_hide) - std::begin(STEPS)) % 4;
-        settings.crosshair_hide = STEPS[(i + dir + 4) % 4];
-        push(Action::SettingsChanged);
-        break;
-    }
-    case OPT_FREE_PLAY: settings.free_play = !settings.free_play; push(Action::SettingsChanged); break;
-    case OPT_TRIGGER_START: settings.trigger_start = !settings.trigger_start; push(Action::SettingsChanged); break;
-    case OPT_MUSIC: settings.menu_music = !settings.menu_music; push(Action::SettingsChanged); break;
-    case OPT_CROSS_STYLE: settings.crosshair_style = 1 - settings.crosshair_style; push(Action::SettingsChanged); break;
     case OPT_CROSS_P1:
     case OPT_CROSS_P2:   // the Windows file dialog; a picture picked is also shown from then on
         if (crosshair_pick(it.id == OPT_CROSS_P2 ? 1 : 0)) {
@@ -832,29 +740,12 @@ void Frontend::activate(const Item& it, int dir) {
             }
         }
         break;
-    case OPT_MICE: settings.second_mouse = !settings.second_mouse; push(Action::SettingsChanged); break;
     case OPT_GUN_TEST: open(Screen::GunTest); gun_step_ = 0; break;
-    case OPT_SUBS: settings.subtitles = (settings.subtitles + dir + 3) % 3; push(Action::SettingsChanged); break;
-    case OPT_PAD_SPEED:
-        settings.pad_speed = dir > 0 && settings.pad_speed == 10 && wrap_ ? 1 : std::clamp(settings.pad_speed + dir, 1, 10);
-        push(Action::SettingsChanged);
-        break;
-    case OPT_GYRO: settings.gyro = !settings.gyro; push(Action::SettingsChanged); break;
-    case OPT_GYRO_SPEED:
-        settings.gyro_speed = dir > 0 && settings.gyro_speed == 10 && wrap_ ? 1 : std::clamp(settings.gyro_speed + dir, 1, 10);
-        push(Action::SettingsChanged);
-        break;
-    case OPT_VIBRATION: settings.vibration = (settings.vibration + dir + 4) % 4; push(Action::SettingsChanged); break;
-    case OPT_ASSIST: settings.aim_assist = (settings.aim_assist + dir + 4) % 4; push(Action::SettingsChanged); break;
-    case OPT_SAT:   // 0..200 % in steps of 10; a click past the top starts again from the bottom
-        settings.saturation = dir > 0 && settings.saturation >= 200 && wrap_
-                                  ? 0 : std::clamp(settings.saturation + 10 * dir, 0, 200);
-        push(Action::SettingsChanged);
-        break;
-    case OPT_GAMMA:   // 0.50..1.50 in steps of 0.05
-        settings.gamma = dir > 0 && settings.gamma >= 150 && wrap_
-                             ? 50 : std::clamp(settings.gamma + 5 * dir, 50, 150);
-        push(Action::SettingsChanged);
+    default:   // the other options: as the table says
+        if (const Setting* d = setting_of(it.id)) {
+            d->change(settings, dir, wrap_);
+            push(Action::SettingsChanged);
+        }
         break;
     }
 }
@@ -1210,30 +1101,6 @@ void Frontend::draw_records(int x0, int x1, int y0, int row_h) {
 
 // ---- Drawing primitives (premultiplied BGRA canvas) ----
 
-// Integer "over" on premultiplied BGRA (it runs for every pixel of panels and text)
-static inline uint32_t over(uint32_t d, uint32_t rgb, int a) {   // a: 0..256
-    int k = 256 - a;
-    uint32_t rb = (((rgb & 0xFF00FFu) * a + (d & 0xFF00FFu) * k) >> 8) & 0xFF00FFu;
-    uint32_t g = (((rgb & 0x00FF00u) * a + (d & 0x00FF00u) * k) >> 8) & 0x00FF00u;
-    uint32_t da = ((255u * a + (d >> 24) * k) >> 8);
-    return rb | g | (da << 24);
-}
-
-void Frontend::blend(int x, int y, uint32_t rgb, float a) {
-    if (x < 0 || y < 0 || x >= w_ || y >= h_ || a <= 0) return;
-    uint32_t& d = px_[size_t(y) * w_ + x];
-    d = over(d, rgb, int(std::min(a, 1.0f) * 256.0f + 0.5f));
-}
-
-void Frontend::fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha) {
-    x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, w_), y1 = std::min(y1, h_);
-    int a = int(std::clamp(alpha, 0.0f, 1.0f) * 256.0f + 0.5f);
-    for (int y = y0; y < y1; y++) {
-        uint32_t* row = px_ + size_t(y) * w_;
-        for (int x = x0; x < x1; x++) row[x] = over(row[x], rgb, a);
-    }
-}
-
 // Horizontal band that fades out towards both ends
 void Frontend::band(int cx, int y0, int y1, int half_w, uint32_t rgb, float alpha) {
     for (int x = std::max(cx - half_w, 0); x < std::min(cx + half_w, w_); x++) {
@@ -1349,90 +1216,12 @@ void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
         }
 }
 
-HFONT Frontend::font(Family f, int px) {
-    auto key = std::make_pair(int(f), px);
-    auto it = fonts_.find(key);
-    if (it != fonts_.end()) return it->second;
-    HFONT h = CreateFontW(-px, 0, 0, 0, f == MONO || f == JURASSIC || f == BODY ? FW_NORMAL : FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                          OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, FACES[f]);
-    fonts_[key] = h;
-    return h;
-}
-
-const Frontend::Mask& Frontend::mask(Family f, int px, const std::wstring& s, int edge_px) {
-    std::wstring key = std::to_wstring(int(f)) + L"|" + std::to_wstring(px) + L"|" + std::to_wstring(edge_px) + L"|" + s;
-    auto it = masks_.find(key);
-    if (it != masks_.end()) return it->second;
-    if (masks_.size() > 400) masks_.clear();   // window resized many times
-    Mask& m = masks_[key];
-    SelectObject(dc_, font(f, px));
-    std::wstring t = s;   // the Jurassic font's space is very narrow: words ran together
-    if (f == JURASSIC) {
-        t.clear();
-        for (wchar_t c : s) t += c == L' ' ? std::wstring(L"   ") : std::wstring(1, c);
-    }
-    SIZE sz{};
-    GetTextExtentPoint32W(dc_, t.c_str(), int(t.size()), &sz);
-    TEXTMETRICW tm{};
-    GetTextMetricsW(dc_, &tm);
-    m.pad = edge_px + 2 + px / 6;   // room for the outline and overhanging letters
-    m.text_w = sz.cx;
-    m.text_h = sz.cy;
-    m.w = sz.cx + 2 * m.pad;
-    m.h = sz.cy + 2 * m.pad;
-    m.grad0 = m.pad + tm.tmInternalLeading + (tm.tmAscent - tm.tmInternalLeading) / 8;
-    m.grad1 = m.pad + tm.tmAscent;
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
-    bi.bmiHeader.biWidth = m.w;
-    bi.bmiHeader.biHeight = -m.h;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr;
-    HBITMAP bmp = CreateDIBSection(dc_, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!bmp) return m;
-    HGDIOBJ old = SelectObject(dc_, bmp);
-    memset(bits, 0, size_t(m.w) * m.h * 4);
-    SetBkMode(dc_, TRANSPARENT);
-    SetTextColor(dc_, RGB(255, 255, 255));
-    TextOutW(dc_, m.pad, m.pad, t.c_str(), int(t.size()));
-    GdiFlush();
-    m.a.resize(size_t(m.w) * m.h);
-    const uint8_t* p = static_cast<const uint8_t*>(bits);
-    for (size_t i = 0; i < m.a.size(); i++) m.a[i] = p[i * 4 + 1];
-    SelectObject(dc_, old);
-    DeleteObject(bmp);
-    if (edge_px > 0) {   // outline: the letters grown by a round brush
-        m.e.assign(m.a.size(), 0);
-        float r = float(edge_px);
-        for (int dy = -edge_px - 1; dy <= edge_px + 1; dy++)
-            for (int dx = -edge_px - 1; dx <= edge_px + 1; dx++) {
-                float wgt = std::clamp(r + 1 - std::sqrt(float(dx * dx + dy * dy)), 0.0f, 1.0f);
-                if (wgt <= 0) continue;
-                for (int y = std::max(0, -dy); y < std::min(m.h, m.h - dy); y++) {
-                    const uint8_t* src = &m.a[size_t(y + dy) * m.w];
-                    uint8_t* dst = &m.e[size_t(y) * m.w];
-                    for (int x = std::max(0, -dx); x < std::min(m.w, m.w - dx); x++) {
-                        uint8_t v = uint8_t(float(src[x + dx]) * wgt);
-                        if (v > dst[x]) dst[x] = v;
-                    }
-                }
-            }
-    }
-    return m;
-}
-
 int Frontend::measure(Family f, int px, const std::wstring& s) {
     if (f == JURASSIC) px = int(px * 1.34f + 0.5f);   // as text() draws it
     return mask(f, px, s, 0).text_w;
 }
 
-int Frontend::extent(Family f, int px, const std::wstring& s) {
-    SelectObject(dc_, font(f, px));
-    SIZE sz{};
-    GetTextExtentPoint32W(dc_, s.c_str(), int(s.size()), &sz);
-    return sz.cx;
-}
+int Frontend::extent(Family f, int px, const std::wstring& s) { return gdi_->extent(GdiText::Face(f), px, s); }
 
 // Lines of at most max_w pixels, broken between words
 std::vector<std::wstring> Frontend::wrap(Family f, int px, const std::wstring& s, int max_w) {
@@ -2090,9 +1879,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
         }
     if (option && cur->enabled && cur->id != OPT_DISPLAY && cur->kind != BUTTON) {   // its default and when it takes effect
         y += U(18);
-        std::wstring def;
-        for (const Item& d : option_items(FrontendSettings{}))
-            if (d.id == cur->id) def = d.value;
+        const std::wstring& def = default_value(cur->id);
         auto meta = [&](const wchar_t* label, const std::wstring& value) {
             text(ITEM, U(21), label, px0, y, 0, {FOOT, FOOT});
             text(ITEM, U(21), value, px0 + U(130), y, 0, {PALE_TOP, PALE_BOTTOM});

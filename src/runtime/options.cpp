@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "bosses.h"   // BOSS_COUNT
+#include "weather.h"
 
 namespace {
 
@@ -101,6 +102,8 @@ const std::vector<Entry>& table() {
         off("--no-lightning", &Options::lightning, "no lightning in the storm fog"),
         custom("--rain", "off|light|heavy", "rain where it rains in the game (heavy by default)", false,
                [](Options& o, const char* v) { o.rain = strcmp(v, "light") == 0 ? 1 : strcmp(v, "off") == 0 ? 0 : 2; }),
+        custom("--weather", "sunny|cloudy|fog|rain|storm", "this weather in every game (random in RANDOM SPAWNS and survival)",
+               false, [](Options& o, const char* v) { o.weather = weather_from_name(v); }),
         off("--no-hdr", &Options::hdr, "clipped lighting like the original"),
         off("--no-rim", &Options::rim, "no rim light on dinosaurs and characters"),
         off("--no-relief", &Options::relief, "flat textures, no relief"),

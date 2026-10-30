@@ -100,12 +100,79 @@ def main():
         print(f'sky y pixels per radian of pitch: median {ks[len(ks) // 2]:.1f} (10%: {ks[len(ks) // 10]:.1f}, 90%: {ks[9 * len(ks) // 10]:.1f})')
     rolls = [abs(math.degrees(d3[f][2])) for f in frames]
     print(f'roll: max {max(rolls):.2f} deg, frames over 1 deg: {sum(r > 1 for r in rolls)}')
+    smoothness(d2, d3, pres, row)
     # Translation without rotation: the sky should not move
     still = [s for s in steps if abs(s[3]) < 0.0005 and abs(s[4]) < 0.0005]
     moved = [s for s in still if s[1] or s[2]]
     print(f'frames with the camera not turning: {len(still)}, of which the sky moved: {len(moved)}')
     for s in moved[:20]:
         print(f'  {s[0]}: dx {s[1]:+d} dy {s[2]:+d} cam {s[6][5]}')
+
+
+def smoothness(d2, d3, pres, row):
+    """How the sky of screen row 40 (logged row 5) moves from present to present
+    against the world camera, from the sub-pixel position in the 'p' lines
+    (sky_motion.h) and, for comparison, as the whole-pixel scroll alone would
+    be drawn: the error against the camera (a running median removes the slow
+    drift of a sky that does not follow it exactly) and how often it changes
+    by more than half a pixel between presents, which is what shows as a tremor"""
+    K = 4096 / (2 * math.pi)
+    if not any(len(p) >= 12 for p in pres) or row != 5:
+        print('(no sub-pixel sky positions in the log, or not row 5: smoothness not measured)')
+        return
+    # camera yaw in sky pixels, unwrapped, single-frame blips smoothed
+    yaw = {}
+    acc = 0.0
+    prev = None
+    for n in sorted(d3):
+        acc = K * d3[n][0] if prev is None or n - prev > 3 else acc + K * math.remainder(d3[n][0] - d3[prev][0], 2 * math.pi)
+        yaw[n] = acc
+        prev = n
+    for n in sorted(yaw):
+        if n - 1 in yaw and n + 1 in yaw:
+            m = (yaw[n - 1] + yaw[n + 1]) / 2
+            if abs(yaw[n] - m) > 1.5 and abs(yaw[n + 1] - yaw[n - 1]) < 3:
+                yaw[n] = m
+    def positions(sub):
+        out = []
+        last = None
+        for p in pres:
+            n, bfrom, sfrom, sto, t, paired = int(p[0]), int(p[1]), int(p[2]), int(p[3]), float(p[4]), p[5] == '1'
+            if n not in d2 or d2[n][row][0] < 0 or n - 1 not in yaw or n not in yaw or bfrom != n - 1 or (sub and len(p) < 12):
+                last = None
+                continue
+            x = d2[n][row][1]
+            if sub:
+                pos = x + float(p[7]) + (float(p[8]) * t * (sto - sfrom) if paired else 0) if p[6] == '1' else x
+            else:
+                dx = wrap(x - d2[sfrom][row][1]) if paired and sfrom in d2 and d2[sfrom][row][0] == d2[n][row][0] else 0
+                pos = x + (dx * t if abs(dx) < 100 else 0)
+            tru = yaw[n - 1] + t * (yaw[n] - yaw[n - 1])
+            if last is not None and last[0] >= n - 1:
+                upos = last[2] + wrap(round((pos - last[1]) * 1000), 512000) / 1000
+            else:
+                upos = pos
+            out.append((n, upos - tru))
+            last = (n, pos, upos)
+        # the slow drift removed
+        res = []
+        W = 30
+        for i, (n, e) in enumerate(out):
+            win = sorted(e2 for n2, e2 in out[max(0, i - W):i + W + 1] if abs(n2 - n) <= W)
+            c = win[len(win) // 2]
+            if abs(e - c) < 6:
+                res.append((n, e - c))
+        return res
+    for name, sub in (('whole-pixel scroll, extrapolated by its last step', False), ('sub-pixel (as drawn)', True)):
+        res = positions(sub)
+        if len(res) < 2:
+            continue
+        ch = [res[i + 1][1] - res[i][1] for i in range(len(res) - 1) if res[i + 1][0] - res[i][0] <= 1]
+        big = sum(1 for c in ch if abs(c) > 0.5)
+        mean = sum(abs(e) for _, e in res) / len(res)
+        rms = math.sqrt(sum(c * c for c in ch) / max(1, len(ch)))
+        print(f'sky vs camera, {name}: mean error {mean:.3f} px, change between presents rms {rms:.3f} px, '
+              f'over 0.5 px in {big} of {len(ch)} ({100 * big / max(1, len(ch)):.1f}%)')
 
 
 main()

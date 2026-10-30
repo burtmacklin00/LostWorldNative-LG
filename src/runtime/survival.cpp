@@ -49,6 +49,7 @@
 #include "bosses.h"
 #include "inputs.h"
 #include "ppc_rt.h"
+#include "weather.h"
 
 namespace {
 
@@ -100,6 +101,12 @@ constexpr uint64_t FADE_FRAMES = 40;        // the fade to black at the end of a
 constexpr int32_t COUNTDOWN_FRAMES = int32_t(SURVIVAL_COUNTDOWN * 57.5);   // the countdown, as a -21 wait
 constexpr int WAVE_MIN = 8, WAVE_MAX = 30;  // dinosaurs in a wave: at least as many as the arena's first (the game's own)
 constexpr uint32_t FN_RAPTOR = 0x00053BB4;  // (slot 1..5, type, group of spawn positions)
+// The dead triceratops of the arcade's story (task 0x5B830, only in encounter 3,
+// the Jungle shack): survival's first wave runs that encounter, so it is left out
+constexpr uint32_t FN_DEAD_TRICERATOPS = 0x0005B758;
+// Its raptors (encounter 3, group 1) stand on it; without it they would stand
+// in the air, so they come from the next group of that stop, on the ground
+constexpr int TRICERATOPS_ENCOUNTER = 3, TRICERATOPS_GROUP = 1, GROUND_GROUP = 2;
 constexpr float NEAR_LOOK = 120;            // another stop's section joins a wave if it looks this near one of this stop's
 constexpr int AMBUSH_CHANCE = 35;           // % of the walks with an ambush on the way
 constexpr int BONUS_CHANCE = 50;            // % of the walks with a golden BONUS target
@@ -111,6 +118,22 @@ constexpr uint64_t DYING_FRAMES = 80;       // the killing attack and its flash 
 constexpr uint32_t COURSE_SELECT = 0x1C2AD8;   // 0 attract, 1-2 choosing a course, 0xC playing
 constexpr uint64_t LOADING_GIVE_UP = 40000;    // game frames (at full speed, ~50 s; the slowest arena takes ~9000)
 constexpr const char* RECORDS = "save/survival.ini";
+
+// Testing aids from the environment, read once
+struct TestEnv {
+    bool autostart = getenv("LW_SURV_AUTOSTART");   // no window to shoot at: start and play again by itself
+    bool bonus = getenv("LW_SURV_BONUS");           // a BONUS target every walk, shot by itself
+    bool ambush = getenv("LW_SURV_AMBUSH");         // an ambush every walk
+    bool no_cache = getenv("LW_SURV_NO_CACHE");     // never load a kept arena
+    const char* life = getenv("LW_SURV_LIFE");      // LIFE setting forced (with --trace-survival)
+    bool god = getenv("LW_SURV_GOD");
+    bool autoplay = getenv("LW_SURV_AUTOPLAY");
+    const char* ram = getenv("LW_SURV_RAM");
+};
+const TestEnv& test_env() {
+    static const TestEnv e;
+    return e;
+}
 
 bool g_trace = false;
 FILE* g_log = nullptr;
@@ -285,6 +308,16 @@ namespace {
 uint32_t script_addr(uint32_t pc) { return SCRIPT + 4 * pc; }
 uint32_t script_pc(uint32_t addr) { return (addr - SCRIPT) / 4; }
 
+// The call at word i of encounter `id`'s script (delay, function, nargs, args), as survival runs it
+std::vector<int32_t> script_call(uint32_t i, int id) {
+    std::vector<int32_t> item;
+    for (uint32_t k = 0; k < 3 + rd32(script_addr(i + 2)); k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+    if (id == TRICERATOPS_ENCOUNTER && uint32_t(item[1]) == FN_RAPTOR && item.size() >= 6 &&
+        item[5] == TRICERATOPS_GROUP)
+        item[5] = GROUND_GROUP;
+    return item;
+}
+
 // Calls of known enemies in encounter `id` (for the trace: which zones can be arenas)
 int encounter_enemies(int id) {
     uint32_t i = 0;
@@ -313,26 +346,42 @@ int encounter_enemies(int id) {
 struct Best {
     int wave = 0, score = 0, lap = 0;
 };
-struct Records {
-    std::map<std::pair<int, int>, Best> best;
-    void load() {
-        if (FILE* f = fopen(RECORDS, "r")) {
-            char line[128];
-            while (fgets(line, sizeof(line), f)) {
-                int s, z;
-                Best b;
-                if (sscanf(line, "%d:%d %d %d %d", &s, &z, &b.wave, &b.score, &b.lap) >= 4) best[{s, z}] = b;
-            }
-            fclose(f);
+// Read from the file once and kept in memory: the menu asks for every arena
+// each time it draws. The game thread writes a new record, the window reads
+std::mutex g_records_mutex;
+std::map<std::pair<int, int>, Best> g_records;
+bool g_records_read = false;
+
+void read_records() {   // (mutex held)
+    if (g_records_read) return;
+    g_records_read = true;
+    if (FILE* f = fopen(RECORDS, "r")) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            int s, z;
+            Best b;
+            if (sscanf(line, "%d:%d %d %d %d", &s, &z, &b.wave, &b.score, &b.lap) >= 4) g_records[{s, z}] = b;
         }
+        fclose(f);
     }
-    void save() const {
-        if (FILE* f = fopen(RECORDS, "w")) {
-            for (auto& [k, v] : best) fprintf(f, "%d:%d %d %d %d\n", k.first, k.second, v.wave, v.score, v.lap);
-            fclose(f);
-        }
+}
+
+Best record_of(int stage, int zone) {
+    std::lock_guard<std::mutex> lock(g_records_mutex);
+    read_records();
+    auto it = g_records.find({stage, zone});
+    return it == g_records.end() ? Best{} : it->second;
+}
+
+void keep_record(int stage, int zone, const Best& b) {
+    std::lock_guard<std::mutex> lock(g_records_mutex);
+    read_records();
+    g_records[{stage, zone}] = b;
+    if (FILE* f = fopen(RECORDS, "w")) {
+        for (auto& [k, v] : g_records) fprintf(f, "%d:%d %d %d %d\n", k.first, k.second, v.wave, v.score, v.lap);
+        fclose(f);
     }
-};
+}
 
 struct Survival {
     bool on = false;
@@ -390,7 +439,6 @@ struct Survival {
     uint64_t dying_until = 0;     // the last attack plays out until this frame, then the results
     bool confirm = false;         // set by the window: start, or play again
     uint32_t rng = 12345;
-    Records records;
     Best best_before;
     bool new_record = false;
     double wave_started = 0;
@@ -440,8 +488,12 @@ struct Survival {
                 i += 1 + n;
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+                std::vector<int32_t> item = script_call(i, encounter);
+                if (uint32_t(item[1]) == FN_DEAD_TRICERATOPS) {   // its delay is kept as a wait
+                    if (item[0] > 0) out.push_back(-21), out.push_back(item[0]);
+                    i += 3 + nargs;
+                    continue;
+                }
                 if (is_enemy_fn(uint32_t(item[1]))) {
                     if (!counted) {
                         out.push_back(-21), out.push_back(std::max(0, COUNTDOWN_FRAMES - waited));
@@ -492,8 +544,7 @@ struct Survival {
                 i += 1 + uint32_t(n);
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
+                std::vector<int32_t> item = script_call(i, id);
                 if (is_enemy_fn(uint32_t(item[1]))) e.push_back(item);
                 i += 3 + uint32_t(nargs);
             }
@@ -538,8 +589,7 @@ struct Survival {
                 i += 1 + uint32_t(n);
             } else {
                 int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item;
-                for (int k = 0; k < 3 + nargs; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
+                std::vector<int32_t> item = script_call(i, id);
                 if (is_enemy_fn(uint32_t(item[1]))) cur.calls.push_back(item);
                 i += 3 + uint32_t(nargs);
             }
@@ -697,8 +747,8 @@ struct Survival {
         pending = -1;
         stop_passed = false;
         uint64_t f = g_frame_no;
-        bool ambush = rand(100) < uint32_t(AMBUSH_CHANCE) || getenv("LW_SURV_AMBUSH");
-        bool bonus = rand(100) < uint32_t(BONUS_CHANCE) || getenv("LW_SURV_BONUS");
+        bool ambush = rand(100) < uint32_t(AMBUSH_CHANCE) || test_env().ambush;
+        bool bonus = rand(100) < uint32_t(BONUS_CHANCE) || test_env().bonus;
         walk_length = to_next_stop();
         ambush_planned = ambush && walk_length > 40;   // not on a short one
         bonus_at = bonus ? f + 20 + rand(80) : 0;
@@ -886,7 +936,7 @@ struct Survival {
                 hit = true;
             trigger_was[p] = down;
         }
-        if (getenv("LW_SURV_BONUS") && f >= bonus_until - BONUS_FRAMES + 60) hit = true;   // testing aid: shot by itself
+        if (test_env().bonus && f >= bonus_until - BONUS_FRAMES + 60) hit = true;   // testing aid: shot by itself
         if (hit) {
             bonus_on = false;
             give_reward();
@@ -972,13 +1022,10 @@ struct Survival {
 
     // The hunt is over: keep the record and show the results
     void finish() {
-        auto& best = records.best[{stage + 1, zone}];
+        Best best = record_of(stage + 1, zone);
         best_before = best;
         new_record = wave + 1 > best.wave || (wave + 1 == best.wave && score() > best.score);
-        if (new_record) {
-            best = {wave + 1, score(), lap};
-            records.save();
-        }
+        if (new_record) keep_record(stage + 1, zone, {wave + 1, score(), lap});
         printf("[survival] end: lap %d, wave %d, %d points%s\n", lap, wave + 1, score(),
                new_record ? " (record)" : "");
         mode = SurvivalMode::Results;
@@ -993,7 +1040,7 @@ struct Survival {
         lap = 0;
         saved_lives = start_lives;
         saved_score = 0;
-        best_before = records.best[{stage + 1, zone}];
+        best_before = record_of(stage + 1, zone);
         new_record = false;
         mode = SurvivalMode::Playing;
         if (game_state_load_mark()) set_phase(LAP_LOAD);
@@ -1139,8 +1186,7 @@ struct Survival {
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
         step = SurvivalStep::Preparing;
         new_record = false;
-        records.load();
-        best_before = records.best[{s, z}];
+        best_before = record_of(s, z);
         wave_started = 0;
     }
 
@@ -1225,12 +1271,10 @@ void survival_hooks() {
 }
 
 bool survival_record(int stage, int zone, int& wave, int& score, int* lap) {
-    Records r;
-    r.load();
-    auto it = r.best.find({stage, zone});
-    if (it == r.best.end() || it->second.wave <= 0) return false;
-    wave = it->second.wave, score = it->second.score;
-    if (lap) *lap = it->second.lap;
+    Best b = record_of(stage, zone);
+    if (b.wave <= 0) return false;
+    wave = b.wave, score = b.score;
+    if (lap) *lap = b.lap;
     return true;
 }
 
@@ -1238,6 +1282,7 @@ bool survival_record(int stage, int zone, int& wave, int& score, int* lap) {
 void survival_begin(int stage, int zone) {
     g_begin_stage = stage, g_begin_zone = zone;
     g_begin = true;
+    weather_roll();   // each run its own weather (weather.h)
     std::lock_guard<std::mutex> lock(g_surv.view_mutex);   // the loading screen right away
     g_surv.view = SurvivalView{};
     g_surv.view.mode = SurvivalMode::Loading;
@@ -1398,7 +1443,7 @@ bool survival_frame(Ctx&) {
             if (s.gate) break;
             // The arena kept from another time, once the game is in its main
             // loop (a state loads only from there: without a window, past the boot)
-            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !getenv("LW_SURV_NO_CACHE")) {
+            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !test_env().no_cache) {
                 s.cache_tried = true;
                 std::string path = s.cache_path();
                 s.keep_life = rd8(SETTING_LIFE), s.keep_diff = rd8(SETTING_DIFF);   // the settings as they are now
@@ -1442,7 +1487,7 @@ bool survival_frame(Ctx&) {
                           MoveFileExA((s.cache + ".tmp").c_str(), s.cache.c_str(), MOVEFILE_REPLACE_EXISTING);
                 printf("[survival] arena %s %s\n", ok ? "kept in" : "could not be kept in", s.cache.c_str());
             }
-            if (s.confirm || getenv("LW_SURV_AUTOSTART")) {   // testing aid: no window to shoot at
+            if (s.confirm || test_env().autostart) {   // testing aid: no window to shoot at
                 s.confirm = false;
                 s.mode = SurvivalMode::Playing;
                 s.wave_started = s.lap_started = now_seconds();
@@ -1469,7 +1514,7 @@ bool survival_frame(Ctx&) {
             hold = s.mode == SurvivalMode::Results;
             break;
         case SurvivalMode::Results:
-            if (s.confirm || getenv("LW_SURV_AUTOSTART")) {
+            if (s.confirm || test_env().autostart) {
                 s.confirm = false;
                 s.restart();
             } else {
@@ -1481,13 +1526,13 @@ bool survival_frame(Ctx&) {
         s.publish();
     }
     if (!g_trace) return hold;
-    if (const char* life = getenv("LW_SURV_LIFE"); life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
-    if (getenv("LW_SURV_GOD")) {   // testing aid: the player's life never drops
+    if (const char* life = test_env().life; life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
+    if (test_env().god) {   // testing aid: the player's life never drops
         if (s.on) s.lives = std::max(s.lives, 5);
         uint32_t life = rd32(PLAYER_LIFE);
         if (life > 0 && life < 5) wr32(PLAYER_LIFE, 5);
     }
-    if (getenv("LW_SURV_AUTOPLAY") && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
+    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
         uint64_t f = g_frame_no;
         g_inputs.p[0].trigger = f % 12 < 3;
         g_inputs.p[0].offscreen = f % 240 < 3;
@@ -1523,7 +1568,7 @@ bool survival_frame(Ctx&) {
     // RAM snapshots for offline searches: LW_SURV_RAM=FROM,TO,EVERY (frames)
     static unsigned long long ram_from = 0, ram_to = 0, ram_every = 0;
     static FILE* ram = nullptr;
-    if (const char* e = getenv("LW_SURV_RAM"); e && !ram_every) {
+    if (const char* e = test_env().ram; e && !ram_every) {
         if (sscanf(e, "%llu,%llu,%llu", &ram_from, &ram_to, &ram_every) != 3) ram_from = 0, ram_to = ~0ull, ram_every = 60;
         ram = fopen("out/survival_ram.bin", "wb");
     }

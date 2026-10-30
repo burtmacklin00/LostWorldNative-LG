@@ -228,10 +228,13 @@ saved games and are not versioned.
   crosshair, drawn at the last moment. In total the 3D image on screen is
   about 50-60 ms behind the game at 120 Hz.
   The 2D layers wait for the 3D of the same vblank, and the sky and backgrounds (the
-  2D layers behind the 3D) are also drawn between frames: each row goes on by
-  the scroll of its most visible layer since the previous frame, so the
+  2D layers behind the 3D) are also drawn between frames, so the
   background turns together with the scenery instead of jumping 57.5 times per
-  second. It goes on ahead rather than back because the 2D layers of a vblank
+  second. The game scrolls them in whole pixels (4 pixels of a 1440p screen),
+  so each row's scroll is first reconstructed at sub-pixel precision from the
+  last frames (src/video/sky_motion.h) and then goes on by the world camera's
+  turn in the frame, when that agrees with the scroll seen. It goes on ahead
+  rather than back because the 2D layers of a vblank
   are what the game wrote in the frame before (their sky scroll is that of the
   previous 3D frame's camera: drawn as they are, the sky trailed a frame behind
   the scenery while the camera turned). The distance
@@ -310,6 +313,17 @@ anything, so the camera walks the stage path as in the arcade. The
 opening of stage 2 and the bosses' own attacks stay as they are. The
 Carnotaurus and the T-Rex only get the life of their first phase changed.
 
+### Random weather
+
+RANDOM SPAWNS also rolls the weather at the start of every stage, and
+SURVIVAL at the start of every run: SUNNY, CLOUDY (soft light, grey sky, a
+light haze), FOG, RAIN or STORM (dark, heavy rain and lightning). It is laid
+over the game's own light, only outdoors in daylight (caves, corridors and
+the night keep theirs), and changes over a few seconds. The rain and the
+lightning follow the RAIN and LIGHTNING settings. RANDOM WEATHER in
+ATMOSPHERE turns it off; `--weather sunny|cloudy|fog|rain|storm` forces one
+in every game (tests, screenshots).
+
 ## Survival mode
 
 In the menu, PLAY > SURVIVAL shows the working arenas (stage 1: the
@@ -366,7 +380,7 @@ PNG to the textures/ folder with the same name and edit it: it can be any
 resolution (for example 4x upscaled with an AI) and have its own alpha channel. At
 startup, the game uses those in textures/ with trilinear and anisotropic filtering.
 `python tools/texture_sheet.py` makes a sheet with all the dumped ones, numbered.
-textures/ is not versioned.
+The repository ships with the replacements made so far (HD 2D, skies, text font).
 
 2D graphics (for example the route map) are replaced separately: F12 during
 play (or --shot N) saves the 2D layer to out/2d/capture_<frame>.png, and
@@ -488,7 +502,7 @@ normal behaviour when unset):
 | LW_INTERP=0.5 | Fixes the interpolation between the previous and the latest frame (0 to 1) |
 | LW_PACING=1 | Every 5 s, how steadily the interpolated motion advances (speed, spread, still or backward presents), with the current and the previous method |
 | LW_FRAMELOG=path | Writes a line per present (timings, frames shown) and per game frame, and when each image reached the screen (VK_KHR_present_wait); `python tools/frame_log.py path` reports missed refreshes, uneven motion and latency |
-| LW_SKYLOG=path | Writes the back layers' scroll of each 2D frame, the world camera of each 3D frame and the pairing of each present; `python tools/sky_log.py path` compares how the sky scrolls with how the camera turns (pixels per radian, how many frames apart) |
+| LW_SKYLOG=path | Writes the back layers' scroll of each 2D frame, the world camera of each 3D frame and, per present, the pairing and the sub-pixel position drawn; `python tools/sky_log.py path` compares how the sky scrolls with how the camera turns (pixels per radian, how many frames apart) and how smoothly the sky is drawn between frames |
 | LW_QUEUE=N | At most N images waiting for the screen (2 by default; 0 = the whole swapchain) |
 | LW_MENU_KEYS=40,13,27 | Presses those keys in the menu (one every 10 presents; `cX/Y` clicks pixel X,Y), saves out/menu.bmp and exits |
 | LW_MENU_SHOT=path.bmp | Saves the menu image each time it is redrawn |

@@ -10,11 +10,12 @@
 
 #include <cstdint>
 #include <deque>
-#include <map>
 #include <string>
 #include <vector>
 
-class AchievementToast {
+#include "ui_canvas.h"
+
+class AchievementToast : UiCanvas {
 public:
     bool init(const std::string& font_dir);
     void shutdown();
@@ -26,16 +27,10 @@ public:
     bool draw(int w, int h, double now, std::vector<uint32_t>& out);
 
 private:
-    struct Mask {
-        int w = 0, h = 0, pad = 0, text_w = 0, ascent = 0;
-        std::vector<uint8_t> a;
-    };
     enum Family { TITLE, TEXT };
-    HFONT font(Family f, int px);
-    const Mask& mask(Family f, int px, const std::wstring& s);
+    const GdiText::Mask& mask(Family f, int px, const std::wstring& s);
     int text(Family f, int px, const std::wstring& s, int x, int y, int align, uint32_t top, uint32_t bottom,
              float alpha);
-    void fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha);
     void shine(int x0, int y0, int x1, int y1, float pos);
     void chime();
 
@@ -51,12 +46,6 @@ private:
     float volume_ = 5;
     std::vector<uint8_t> wav_;   // the chime, played from memory
 
-    std::vector<HANDLE> font_handles_;
-    std::vector<std::vector<char>> font_data_;
-    std::map<std::pair<int, int>, HFONT> fonts_;
-    std::map<std::wstring, Mask> masks_;
-    HDC dc_ = nullptr;
+    GdiText* gdi_ = nullptr;
     bool jurassic_ = false;
-    int w_ = 0, h_ = 0;
-    uint32_t* px_ = nullptr;
 };

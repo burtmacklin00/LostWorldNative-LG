@@ -11,18 +11,18 @@
 #include <windows.h>
 
 #include <cstdint>
-#include <map>
 #include <string>
 #include <vector>
 
 #include "../runtime/survival.h"
+#include "ui_canvas.h"
 
 // Where the 4:3 game screen is in the window (ScreenLayout)
 struct SurvivalLayout {
     float scale = 1, ox = 0, oy = 0, game_x0 = 0;
 };
 
-class SurvivalUi {
+class SurvivalUi : UiCanvas {
 public:
     bool init(const std::string& font_dir);
     void shutdown();
@@ -35,18 +35,10 @@ public:
 
 private:
     enum Family { TITLE, TEXT, NUMBER };   // NUMBER: titles with digits (the Jurassic font has none)
-    struct Mask {
-        int w = 0, h = 0, pad = 0, text_w = 0, ascent = 0;
-        std::vector<uint8_t> a;
-    };
-    HFONT font(Family f, int px);
-    const Mask& mask(Family f, int px, const std::wstring& s);
     // Text with the top of its box at y; align 0 left, 1 centre, 2 right.
     // Gradient from top to bottom colour, with a dark drop shadow
     int text(Family f, int px, const std::wstring& s, int x, int y, int align, uint32_t top, uint32_t bottom,
              float alpha = 1);
-    void fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha);
-    void blend(int x, int y, uint32_t rgb, float a);
     void panel(int x0, int y0, int x1, int y1, float alpha);
     void bar(int x0, int y0, int x1, int y1, float fraction);
 
@@ -56,14 +48,8 @@ private:
     void ring(float x, float y, float r, float width, uint32_t rgb, float alpha);
     void draw_results(const SurvivalView& v, double now);
 
-    std::vector<HANDLE> font_handles_;
-    std::vector<std::vector<char>> font_data_;
-    std::map<std::pair<int, int>, HFONT> fonts_;
-    std::map<std::wstring, Mask> masks_;
-    HDC dc_ = nullptr;
+    GdiText* gdi_ = nullptr;
     bool jurassic_ = false;
-    int w_ = 0, h_ = 0;
     float u_ = 1;   // pixels per unit of a 1920x1080 layout
-    uint32_t* px_ = nullptr;
     std::wstring last_key_;   // what the last picture showed
 };
