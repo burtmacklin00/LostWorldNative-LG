@@ -3,14 +3,14 @@ rem Lost World Native LG: LOW graphics: the lightest settings there are, for lap
 rem built-in graphics. Every costly effect is off and the 3D is drawn at half
 rem resolution without edge smoothing; the HUD and the text stay sharp.
 rem Each step up (Low, Medium, High, Ultra) turns on more. VSYNC stays on and
-rem FRAME CAP 60 (never more than 60 pictures a second, on any monitor);
-rem HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
+rem FRAME CAP off (VSYNC already matches the monitor; the game's speed never
+rem changes); HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
 rem Takes effect the next time the game starts (edge smoothing too). Close the game first.
 setlocal
 set "SET_resolution_3d=50"
 set "SET_half_rate=1"
 set "SET_vsync=1"
-set "SET_frame_cap=60"
+set "SET_frame_cap=0"
 set "SET_motion=original"
 set "SET_aa=none"
 set "SET_ray_tracing=off"
