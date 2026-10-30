@@ -317,26 +317,42 @@ int encounter_enemies(int id) {
 struct Best {
     int wave = 0, score = 0, lap = 0;
 };
-struct Records {
-    std::map<std::pair<int, int>, Best> best;
-    void load() {
-        if (FILE* f = fopen(RECORDS, "r")) {
-            char line[128];
-            while (fgets(line, sizeof(line), f)) {
-                int s, z;
-                Best b;
-                if (sscanf(line, "%d:%d %d %d %d", &s, &z, &b.wave, &b.score, &b.lap) >= 4) best[{s, z}] = b;
-            }
-            fclose(f);
+// Read from the file once and kept in memory: the menu asks for every arena
+// each time it draws. The game thread writes a new record, the window reads
+std::mutex g_records_mutex;
+std::map<std::pair<int, int>, Best> g_records;
+bool g_records_read = false;
+
+void read_records() {   // (mutex held)
+    if (g_records_read) return;
+    g_records_read = true;
+    if (FILE* f = fopen(RECORDS, "r")) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            int s, z;
+            Best b;
+            if (sscanf(line, "%d:%d %d %d %d", &s, &z, &b.wave, &b.score, &b.lap) >= 4) g_records[{s, z}] = b;
         }
+        fclose(f);
     }
-    void save() const {
-        if (FILE* f = fopen(RECORDS, "w")) {
-            for (auto& [k, v] : best) fprintf(f, "%d:%d %d %d %d\n", k.first, k.second, v.wave, v.score, v.lap);
-            fclose(f);
-        }
+}
+
+Best record_of(int stage, int zone) {
+    std::lock_guard<std::mutex> lock(g_records_mutex);
+    read_records();
+    auto it = g_records.find({stage, zone});
+    return it == g_records.end() ? Best{} : it->second;
+}
+
+void keep_record(int stage, int zone, const Best& b) {
+    std::lock_guard<std::mutex> lock(g_records_mutex);
+    read_records();
+    g_records[{stage, zone}] = b;
+    if (FILE* f = fopen(RECORDS, "w")) {
+        for (auto& [k, v] : g_records) fprintf(f, "%d:%d %d %d %d\n", k.first, k.second, v.wave, v.score, v.lap);
+        fclose(f);
     }
-};
+}
 
 struct Survival {
     bool on = false;
@@ -394,7 +410,6 @@ struct Survival {
     uint64_t dying_until = 0;     // the last attack plays out until this frame, then the results
     bool confirm = false;         // set by the window: start, or play again
     uint32_t rng = 12345;
-    Records records;
     Best best_before;
     bool new_record = false;
     double wave_started = 0;
@@ -981,13 +996,10 @@ struct Survival {
 
     // The hunt is over: keep the record and show the results
     void finish() {
-        auto& best = records.best[{stage + 1, zone}];
+        Best best = record_of(stage + 1, zone);
         best_before = best;
         new_record = wave + 1 > best.wave || (wave + 1 == best.wave && score() > best.score);
-        if (new_record) {
-            best = {wave + 1, score(), lap};
-            records.save();
-        }
+        if (new_record) keep_record(stage + 1, zone, {wave + 1, score(), lap});
         printf("[survival] end: lap %d, wave %d, %d points%s\n", lap, wave + 1, score(),
                new_record ? " (record)" : "");
         mode = SurvivalMode::Results;
@@ -1002,7 +1014,7 @@ struct Survival {
         lap = 0;
         saved_lives = start_lives;
         saved_score = 0;
-        best_before = records.best[{stage + 1, zone}];
+        best_before = record_of(stage + 1, zone);
         new_record = false;
         mode = SurvivalMode::Playing;
         if (game_state_load_mark()) set_phase(LAP_LOAD);
@@ -1148,8 +1160,7 @@ struct Survival {
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
         step = SurvivalStep::Preparing;
         new_record = false;
-        records.load();
-        best_before = records.best[{s, z}];
+        best_before = record_of(s, z);
         wave_started = 0;
     }
 
@@ -1234,12 +1245,10 @@ void survival_hooks() {
 }
 
 bool survival_record(int stage, int zone, int& wave, int& score, int* lap) {
-    Records r;
-    r.load();
-    auto it = r.best.find({stage, zone});
-    if (it == r.best.end() || it->second.wave <= 0) return false;
-    wave = it->second.wave, score = it->second.score;
-    if (lap) *lap = it->second.lap;
+    Best b = record_of(stage, zone);
+    if (b.wave <= 0) return false;
+    wave = b.wave, score = b.score;
+    if (lap) *lap = b.lap;
     return true;
 }
 
