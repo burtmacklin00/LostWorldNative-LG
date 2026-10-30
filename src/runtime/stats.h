@@ -44,6 +44,7 @@ struct AchievementInfo {
     const wchar_t* name;
     const wchar_t* text;      // what it asks
     int64_t goal;             // progress needed (1 for yes / no ones)
+    int64_t (*progress)(const Stats&);   // what it counts
 };
 const std::vector<AchievementInfo>& achievement_table();
 int64_t achievement_progress(const Stats& s, int index);   // capped at the goal
