@@ -7,8 +7,9 @@
 // game frame, so the world is rebuilt from scratch every image (a few
 // thousand triangles: a fraction of a millisecond). Two bottom levels, two
 // instances: what stands near the ground (instance mask RT_LOW, the only
-// shadow casters, as with the shadow map) and what is higher up (RT_HIGH:
-// canopies and roofs, which the ambient occlusion also sees). Each has two
+// shadow casters, as with the shadow map, and what the ambient occlusion
+// sees) and what is higher up (RT_HIGH: canopies and roofs, built only on
+// request; nothing traces them now). Each has two
 // geometries: solid triangles, which stop a ray at once, and cut-out ones
 // (alpha-tested foliage, texture alpha), whose texture the shader reads to
 // decide whether a ray passes through.

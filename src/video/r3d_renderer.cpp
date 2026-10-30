@@ -396,7 +396,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     pli.pSetLayouts = &bloom_set_layout_;
     pli.pPushConstantRanges = &bpr;
     vkCreatePipelineLayout(dev_, &pli, nullptr, &bloom_layout_);
-    VkPushConstantRange apr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
+    VkPushConstantRange apr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 80};
     // Traced, the ambient occlusion also sees the 3D pass's set (the world's rays)
     VkDescriptorSetLayout ao_sets[2] = {ao_set_layout_, r3d_set_layout_};
     pli.setLayoutCount = rt_.ready() ? 2 : 1;
@@ -1546,7 +1546,9 @@ void R3DRenderer::record_uploads(const Frame& f) {
 // descriptors, which may have to point at a new cut-out buffer
 void R3DRenderer::record_ray_tracing(const Frame& f) {
     if (!rt_frame_ || !rt_world_) return;
-    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, 35.0f, rt_ao_);
+    // Nothing traces what is higher up any more: the ambient occlusion leaves
+    // the canopies out too (ao_common.glsl, AO_HIGH)
+    rt_.prepare(*scene_, *rt_world_, interp_, shadow_up_, shadow_height_, 35.0f, false);
     if (rt_.generation() != rt_generation_) {
         rt_generation_ = rt_.generation();
         VkDescriptorBufferInfo cut{rt_.cutouts(), 0, VK_WHOLE_SIZE};
@@ -1827,10 +1829,11 @@ void R3DRenderer::record_world_depth(const Frame& f, const R3DViewport& w, bool 
     weather_light(w, ao_sun, ao_ambient, ao_fog, ao_fog_color);
     bool full = w.x <= 0.5f && w.w >= SCREEN_W - 0.5f;
     float vx = full ? 0.0f : w.x + lay.game_x0, vw = full ? lay.view_w : w.w;
-    float ap[16] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
+    float ap[20] = {w.proj[0] / (full ? widen : 1.0f), w.proj[5], w.proj[8] / (full ? widen : 1.0f),
                     w.proj[9], vx * sx + jitter_x, w.y * sy + jitter_y, vw * sx, w.h * sy,
                     12.0f, std::min(ao_strength_, 1.0f) * 0.85f, ao_fog, w.fog_start,
-                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, getenv("LW_RTSPLIT") ? 1.0f : 0.0f};
+                    alpha_seed, 0.12f * float(out_h), rt_ao_ ? 6.0f : 0.0f, getenv("LW_RTSPLIT") ? 1.0f : 0.0f,
+                    shadow_up_[0], shadow_up_[1], shadow_up_[2], shadow_height_};
     auto fullscreen = [&](VkPipeline pipe, Image& target, VkImageView view, uint32_t tw, uint32_t th) {
         VkRenderingAttachmentInfo at{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
         at.imageView = view;
