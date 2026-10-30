@@ -164,6 +164,7 @@ private:
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_VSYNC,
         OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
+        NO_ROW,   // a setting only kept in the file
     };
     // How an option row shows its value: a switch, a choice with a dot per
     // value, a slider, or a button that opens something
@@ -195,9 +196,14 @@ private:
     Family display() const { return jurassic_ ? JURASSIC : TITLE; }
 
     std::vector<Item> items() const;
+    // Every setting: where save/settings.ini keeps it and its row in the
+    // options (frontend.cpp)
+    struct Setting;
+    friend struct FrontendSettings;
+    static const std::vector<Setting>& setting_table();
+    static const Setting* setting_of(Id id);
     std::vector<Item> option_items(const FrontendSettings& s) const;   // every option, as with these settings
     const std::wstring& default_value(int id);   // what option_items shows for it with the defaults
-    static void describe(Item& it, const FrontendSettings& s);         // its Kind and position
     void activate(const Item& it, int dir);
     void reset_tab();   // the open settings tab back to its defaults
     void back();
@@ -256,13 +262,10 @@ private:
     bool wrap_ = false;
     std::vector<Item> defaults_;   // option_items(FrontendSettings{}), made once (again if rt_available changes)
     bool defaults_rt_ = false;
-    // Settings tabs (tab_of in frontend.cpp says where each option goes)
+    // Settings tabs (setting_table says where each option goes)
     enum { DISPLAY_TAB, LIGHTING_TAB, ATMOSPHERE_TAB, AUDIO_TAB, CONTROLS_TAB, GAME_TAB };
     static constexpr int TAB_COUNT = 6;
     static const wchar_t* const TAB_NAMES[TAB_COUNT];
-    static int tab_of(Id id);
-    struct OptionTab { Id id; int tab; };
-    static const OptionTab OPTION_TABS[];   // frontend.cpp: where each option goes
     void set_tab(int t);
     int tab_ = 0;   // open tab of the settings, or of the records
     // The tab row of the screen on: settings tabs, or ACHIEVEMENTS / STATS

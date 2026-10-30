@@ -112,6 +112,92 @@ static const float MAX_ASPECT[3] = {4.0f / 3.0f, 16.0f / 9.0f, 2.4f};
 static int aspect_level(float max_aspect) { return max_aspect < 1.5f ? 0 : max_aspect < 2.0f ? 1 : 2; }
 static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu levels OFF, LOW, MEDIUM, HIGH
 
+// The menu's settings as the options the game runs with: from save/settings.ini
+// at the start (the command line then has the last word) and from the menu
+// while the game runs. The anti-aliasing is only read at the start
+static void options_from_settings(const FrontendSettings& s, Options& o) {
+    o.volume = float(s.volume);
+    o.speakers = s.speakers;
+    o.cubic_samples = s.cubic_samples;
+    o.rear_boost = s.rear_boost;
+    o.dlaa = s.aa == 1;
+    if (s.aa == 2) o.msaa = 1;
+    o.supersample = s.scale / 100.0f;
+    o.half_rate = s.half_rate;
+    o.vsync = s.vsync;
+    if (s.aspect != aspect_level(o.max_aspect)) o.max_aspect = MAX_ASPECT[s.aspect];   // --aspect 2.6 stays as 21:9
+    o.haze = s.haze ? 1.0f : 0.0f;
+    o.bloom = BLOOM_STRENGTH[s.bloom];
+    o.ao = s.ao ? 1.0f : 0.0f;
+    o.sky_procedural = s.sky;
+    o.sun = s.sun;
+    o.shadows = s.shadows;
+    o.ray_tracing = s.ray_tracing;
+    o.shafts = s.shafts;
+    o.soft = s.soft;
+    o.lightning = s.lightning;
+    o.rain = s.rain;
+    o.random_weather = s.random_weather;
+    o.hdr = s.hdr;
+    o.rim = s.rim;
+    o.relief = s.relief;
+    o.sharpen = s.sharpen;
+    o.modern_torch = s.torch;
+    o.classic_text = !s.hd_text;
+    o.subtitles = s.subtitles;
+    o.show_crosshair = s.crosshair;
+    o.custom_crosshair = s.crosshair_style == 1;
+    o.crosshair_hide = s.crosshair_hide;
+    o.free_play = s.free_play;
+    o.interp = s.smooth;
+    o.several_mice = s.second_mouse;
+    o.saturation = s.saturation / 100.0f;
+    o.gamma = s.gamma / 100.0f;
+}
+
+// And back: what the menu shows at the start, the file's settings with the
+// command line's options over them
+static void settings_from_options(const Options& o, FrontendSettings& s) {
+    s.volume = std::clamp(int(o.volume + 0.5f), 0, 10);
+    s.speakers = std::clamp(o.speakers, 0, 2);
+    s.cubic_samples = o.cubic_samples;
+    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, 0, 12);
+    s.aa = o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
+    s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
+    for (int sc : FrontendSettings::SCALES)
+        if (sc <= int(o.supersample * 100 + 0.5f)) s.scale = sc;
+    s.half_rate = o.half_rate;
+    s.vsync = o.vsync;
+    s.aspect = aspect_level(o.max_aspect);   // --aspect 2.6 shows as 21:9 and is kept until changed
+    s.haze = o.haze > 0;
+    s.bloom = o.bloom <= 0 ? 0 : o.bloom < 0.8f ? 1 : o.bloom < 1.3f ? 2 : 3;
+    s.ao = o.ao > 0;
+    s.sky = o.sky_procedural;
+    s.sun = o.sun;
+    s.shadows = o.shadows;
+    s.ray_tracing = o.ray_tracing;
+    s.shafts = o.shafts;
+    s.soft = o.soft;
+    s.lightning = o.lightning;
+    s.rain = o.rain;
+    s.random_weather = o.random_weather;
+    s.hdr = o.hdr;
+    s.rim = o.rim;
+    s.relief = o.relief;
+    s.sharpen = o.sharpen;
+    s.torch = o.modern_torch;
+    s.hd_text = !o.classic_text;
+    s.subtitles = o.subtitles;
+    s.crosshair = o.show_crosshair;
+    s.crosshair_style = o.custom_crosshair ? 1 : 0;
+    s.crosshair_hide = o.crosshair_hide;
+    s.free_play = o.free_play;
+    s.smooth = o.interp;
+    s.second_mouse = o.several_mice;
+    s.saturation = std::clamp(int(o.saturation * 100 + 0.5f), 0, 200);
+    s.gamma = std::clamp(int(o.gamma * 100 + 0.5f), 50, 150);
+}
+
 // Keyboard and mouse (only while the window is active):
 //   5 = coin, 1 = start, mouse = gun (left button fires, right reloads),
 //   6 / 2 = player 2's coin and start, F2 = test, F3 = service.
@@ -725,43 +811,7 @@ int main(int argc, char** argv) {
     bool first_start = g_opt.menu && !file_exists("save/settings.ini");
     if (g_opt.menu) {   // save/settings.ini, written by the options menu; command-line options win
         ini.load("save/settings.ini");
-        g_opt.volume = float(ini.volume);
-        g_opt.speakers = ini.speakers;
-        g_opt.cubic_samples = ini.cubic_samples;
-        g_opt.rear_boost = ini.rear_boost;
-        g_opt.dlaa = ini.aa == 1;
-        if (ini.aa == 2) g_opt.msaa = 1;
-        g_opt.supersample = ini.scale / 100.0f;
-        g_opt.half_rate = ini.half_rate;
-        g_opt.vsync = ini.vsync;
-        g_opt.max_aspect = MAX_ASPECT[ini.aspect];
-        g_opt.haze = ini.haze ? 1.0f : 0.0f;
-        g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
-        g_opt.ao = ini.ao ? 1.0f : 0.0f;
-        g_opt.sky_procedural = ini.sky;
-        g_opt.sun = ini.sun;
-        g_opt.shadows = ini.shadows;
-        g_opt.ray_tracing = ini.ray_tracing;
-        g_opt.shafts = ini.shafts;
-        g_opt.soft = ini.soft;
-        g_opt.lightning = ini.lightning;
-        g_opt.rain = ini.rain;
-        g_opt.random_weather = ini.random_weather;
-        g_opt.hdr = ini.hdr;
-        g_opt.rim = ini.rim;
-        g_opt.relief = ini.relief;
-        g_opt.sharpen = ini.sharpen;
-        g_opt.modern_torch = ini.torch;
-        g_opt.classic_text = !ini.hd_text;
-        g_opt.subtitles = ini.subtitles;
-        g_opt.show_crosshair = ini.crosshair;
-        g_opt.custom_crosshair = ini.crosshair_style == 1;
-        g_opt.crosshair_hide = ini.crosshair_hide;
-        g_opt.free_play = ini.free_play;
-        g_opt.interp = ini.smooth;
-        g_opt.several_mice = ini.second_mouse;
-        g_opt.saturation = ini.saturation / 100.0f;
-        g_opt.gamma = ini.gamma / 100.0f;
+        options_from_settings(ini, g_opt);
         g_pad_settings = {ini.pad_speed, ini.gyro, ini.gyro_speed, ini.vibration, ini.aim_assist};
     }
     // The survival mode's options live in survival.cpp: the table hands them over
@@ -1098,48 +1148,8 @@ int main(int argc, char** argv) {
     };
     if (g_opt.menu) {
         FrontendSettings& s = frontend.settings;
-        s.fullscreen = ini.fullscreen;
-        s.volume = std::clamp(int(g_opt.volume + 0.5f), 0, 10);
-        s.menu_music = ini.menu_music;
-        s.speakers = std::clamp(g_opt.speakers, 0, 2);
-        s.cubic_samples = g_opt.cubic_samples;
-        s.rear_boost = std::clamp(g_opt.rear_boost / 3 * 3, 0, 12);
-        s.aa = g_opt.dlaa ? 1 : g_opt.msaa <= 1 ? 2 : 0;
-        s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
-        for (int sc : FrontendSettings::SCALES)
-            if (sc <= int(g_opt.supersample * 100 + 0.5f)) s.scale = sc;
-        s.half_rate = g_opt.half_rate;
-        s.vsync = g_opt.vsync;
-        s.aspect = aspect_level(g_opt.max_aspect);   // --aspect 2.6 shows as 21:9 and is kept until changed
-        s.haze = g_opt.haze > 0;
-        s.bloom = g_opt.bloom <= 0 ? 0 : g_opt.bloom < 0.8f ? 1 : g_opt.bloom < 1.3f ? 2 : 3;
-        s.ao = g_opt.ao > 0;
-        s.sky = g_opt.sky_procedural;
-        s.sun = g_opt.sun;
-        s.shadows = g_opt.shadows;
-        s.ray_tracing = g_opt.ray_tracing;
-        s.shafts = g_opt.shafts;
-        s.soft = g_opt.soft;
-        s.lightning = g_opt.lightning;
-        s.rain = g_opt.rain;
-        s.random_weather = g_opt.random_weather;
-        s.hdr = g_opt.hdr;
-        s.rim = g_opt.rim;
-        s.relief = g_opt.relief;
-        s.sharpen = g_opt.sharpen;
-        s.torch = g_opt.modern_torch;
-        s.hd_text = !g_opt.classic_text;
-        s.subtitles = g_subtitles;
-        s.crosshair = g_opt.show_crosshair;
-        s.crosshair_style = g_opt.custom_crosshair ? 1 : 0;
-        s.crosshair_hide = g_opt.crosshair_hide;
-        s.free_play = g_opt.free_play;
-        s.smooth = g_opt.interp;
-        s.second_mouse = g_opt.several_mice;
-        s.gun_p1 = ini.gun_p1;
-        s.gun_p2 = ini.gun_p2;
-        s.saturation = std::clamp(int(g_opt.saturation * 100 + 0.5f), 0, 200);
-        s.gamma = std::clamp(int(g_opt.gamma * 100 + 0.5f), 50, 150);
+        s = ini;   // the window, the menu music, the gamepad and the guns picked: as the file has them
+        settings_from_options(g_opt, s);
         frontend.aa_at_launch = s.aa;
         frontend.rt_available = renderer.ray_tracing_available();
         if (s.fullscreen && !presenter.fullscreen()) presenter.toggle_fullscreen();
@@ -1680,66 +1690,55 @@ int main(int argc, char** argv) {
                 case Frontend::Action::Quit: presenter.close(); break;
                 case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
                 case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
-                case Frontend::Action::SettingsChanged:
-                    g_sound.set_volume(float(s.volume));
-                    toast.set_volume(float(s.volume));
-                    Scsp::set_cubic(g_opt.cubic_samples = s.cubic_samples);
-                    g_sound.set_rear_boost(g_opt.rear_boost = s.rear_boost);
-                    g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers = s.speakers));
-                    renderer.set_supersample(g_opt.supersample = s.scale / 100.0f);
-                    g_opt.half_rate = s.half_rate;
-                    presenter.set_vsync(g_opt.vsync = s.vsync);
-                    if (s.aspect != aspect_level(g_opt.max_aspect))
-                        renderer.set_max_aspect(g_opt.max_aspect = MAX_ASPECT[s.aspect]);
-                    renderer.set_distance_haze(s.haze ? haze_strength : 0);
-                    renderer.set_bloom(g_opt.bloom = BLOOM_STRENGTH[s.bloom]);
+                case Frontend::Action::SettingsChanged: {
+                    const Options was = g_opt;
+                    options_from_settings(s, g_opt);
+                    g_sound.set_volume(g_opt.volume);
+                    toast.set_volume(g_opt.volume);
+                    Scsp::set_cubic(g_opt.cubic_samples);
+                    g_sound.set_rear_boost(g_opt.rear_boost);
+                    g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers));
+                    renderer.set_supersample(g_opt.supersample);
+                    presenter.set_vsync(g_opt.vsync);
+                    if (g_opt.max_aspect != was.max_aspect) renderer.set_max_aspect(g_opt.max_aspect);
+                    renderer.set_distance_haze(s.haze ? haze_strength : 0);   // at the strength of the start (--haze)
+                    renderer.set_bloom(g_opt.bloom);
                     renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
-                    renderer.set_sun(g_opt.sun = s.sun);
-                    renderer.set_shadows((g_opt.shadows = s.shadows) ? 1.0f : 0.0f);
-                    renderer.set_ray_tracing(g_opt.ray_tracing = s.ray_tracing);
-                    renderer.set_light_shafts((g_opt.shafts = s.shafts) ? 1.0f : 0.0f);
-                    renderer.set_soft_particles(g_opt.soft = s.soft);
-                    renderer.set_lightning(g_opt.lightning = s.lightning);
-                    renderer.set_rain(g_opt.rain = s.rain);
-                    g_opt.random_weather = s.random_weather;
-                    renderer.set_hdr(g_opt.hdr = s.hdr);
-                    renderer.set_rim_light(g_opt.rim = s.rim);
-                    renderer.set_relief(g_opt.relief = s.relief);
-                    renderer.set_sharpen((g_opt.sharpen = s.sharpen) ? 0.5f : 0.0f);
-                    renderer.set_modern_torch(g_opt.modern_torch = s.torch);
-                    if (g_opt.sky_procedural != s.sky) {
-                        g_opt.sky_procedural = s.sky;
+                    renderer.set_sun(g_opt.sun);
+                    renderer.set_shadows(g_opt.shadows ? 1.0f : 0.0f);
+                    renderer.set_ray_tracing(g_opt.ray_tracing);
+                    renderer.set_light_shafts(g_opt.shafts ? 1.0f : 0.0f);
+                    renderer.set_soft_particles(g_opt.soft);
+                    renderer.set_lightning(g_opt.lightning);
+                    renderer.set_rain(g_opt.rain);
+                    renderer.set_hdr(g_opt.hdr);
+                    renderer.set_rim_light(g_opt.rim);
+                    renderer.set_relief(g_opt.relief);
+                    renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
+                    renderer.set_modern_torch(g_opt.modern_torch);
+                    if (g_opt.sky_procedural != was.sky_procedural) {
                         {
                             std::lock_guard<std::mutex> lock(prep_mutex);   // not while composing
-                            sky.set_procedural(s.sky);
+                            sky.set_procedural(g_opt.sky_procedural);
                         }
-                        renderer.set_night_sky(s.sky);
+                        renderer.set_night_sky(g_opt.sky_procedural);
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
                     }
-                    if (g_opt.classic_text != !s.hd_text) {
-                        g_opt.classic_text = !s.hd_text;
+                    if (g_opt.classic_text != was.classic_text)
                         shown = ~0ull;   // compose the 2D layer again even while the game stands still
-                    }
-                    g_opt.show_crosshair = s.crosshair;
-                    g_opt.crosshair_hide = s.crosshair_hide;
-                    if (g_opt.custom_crosshair != (s.crosshair_style == 1)) {
-                        g_opt.custom_crosshair = s.crosshair_style == 1;
-                        load_crosshairs(renderer);
-                    }
-                    g_opt.free_play = s.free_play;
-                    if (g_opt.interp != s.smooth) {
-                        g_opt.interp = s.smooth;
+                    if (g_opt.custom_crosshair != was.custom_crosshair) load_crosshairs(renderer);
+                    if (g_opt.interp != was.interp) {
                         renderer.set_interpolation(1.0f);   // the latest game frame as it is
                         renderer.set_back_shift(0.0f, false);
                     }
-                    g_opt.several_mice = s.second_mouse;
-                    if (!s.second_mouse) raw_mice::reset();
+                    if (!g_opt.several_mice) raw_mice::reset();
                     else raw_mice::set_saved(s.gun_p1, s.gun_p2);
-                    g_subtitles = s.subtitles;
-                    renderer.set_picture(s.saturation / 100.0f, s.gamma / 100.0f);
+                    g_subtitles = g_opt.subtitles;
+                    renderer.set_picture(g_opt.saturation, g_opt.gamma);
                     g_pad_settings = {s.pad_speed, s.gyro, s.gyro_speed, s.vibration, s.aim_assist};
                     s.save("save/settings.ini");
                     break;
+                }
                 default: break;
                 }
             }
