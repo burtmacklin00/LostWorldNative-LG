@@ -1215,6 +1215,10 @@ void rt_event(Ctx& c) {
                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
             if (g_boot_skip && boot_done) {
                 g_boot_skip = g_fast_idle = false;
+                // The arcade game at its SEGA logo: the home state, also when
+                // CLASSIC ARCADE was picked before the boot got here (it keeps
+                // it only once the boot is over)
+                if (!survival_enabled()) game_state_keep_home();
                 g_sound.set_dsp_enabled(true);
                 g_sound.set_muted(false);   // fades in from silence
                 printf("[boot] start screens skipped in %.1f s (frame %llu)\n",
