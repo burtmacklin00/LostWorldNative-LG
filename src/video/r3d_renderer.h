@@ -16,6 +16,7 @@
 #include "r3d_scene.h"
 #include "r3d_weather.h"
 #include "pack2d.h"
+#include "sky_motion.h"
 #include "sky_pack.h"
 #include "text_hd.h"
 #include "texture_pack.h"
@@ -75,6 +76,11 @@ public:
     // back layer pixel shows (TileGen::SKY_COORDS_W x SKY_COORDS_H BGRA texels)
     void add_sky_pictures(const std::vector<RgbaImage>& images);
     void set_sky_coords(const uint32_t* coords);
+    // With every set_layers: the vblank of the 2D frame and the layer and
+    // scroll of each back row (TileGen::Output::back_rows), for drawing the
+    // back layers between game frames (SkyMotion)
+    void set_sky_rows(uint64_t frame, const int32_t* rows);
+    const SkyMotion& sky_motion() const { return sky_motion_; }
     // Extra crosshair at the real gun position of a player (fraction of the game screen)
     void set_crosshair(int player, bool visible, float x, float y) {
         crosshair_visible_[player] = visible;
@@ -103,11 +109,13 @@ public:
     void set_hud_band(bool hud) { hud_band_ = hud; }
     // Position between the previous (0) and the current (1) game frame
     void set_interpolation(float t) { interp_ = t; }
-    // Fraction of their scroll since the previous game frame (the second extra
-    // row of the sky coordinates) by which the back layers are drawn back
-    // towards where they were; negative goes on ahead by that fraction of it
-    // (-interpolation: the 2D layers are a game frame behind the 3D); 0 = as composed
-    void set_back_shift(float f) { back_shift_ = f; }
+    // How far the 3D has gone from the previous game frame towards the one
+    // drawn, in vblanks (the interpolation times the frames between them):
+    // the back layers go on from their scroll by their velocity times this
+    // (SkyMotion). camera: the 3D frame drawn is that of the 2D layers'
+    // vblank, so the world camera's turn to it is the sky's motion in this
+    // frame. 0, false: as composed (no interpolation)
+    void set_back_shift(float vblanks, bool camera);
     // Distance haze (not in the original): the scenery takes the colour of the
     // horizon with distance and fades into the 2D backdrop before it stops
     // being drawn; 0 = off, 1 = default strength
@@ -373,15 +381,22 @@ private:
     WorldPose pose_now_, pose_prev_;
     uint64_t pose_serial_ = 0;
     bool pose_cut_ = false;   // the latest game frame cut to another shot
+    void refresh_pose(const R3DViewport* w);   // pose_now_, pose_prev_ and pose_cut_ for the latest scene
     WorldPose world_pose(const R3DViewport* w);
+    // The back layers between game frames: solved once per 2D frame when it
+    // is first drawn, with the camera's turn when the 3D frame drawn is its own
+    SkyMotion sky_motion_;
+    uint64_t sky_motion_serial_ = 0;
+    void solve_sky_motion();    // the frame fed last, if not solved yet
+    void update_sky_motion();   // solve_sky_motion and its texels to the staging buffer
     // The sun drawn in the sky, carried along with the sky picture's scroll
-    std::vector<uint32_t> sky_shift_;   // each row's scroll in the latest 2D frame (sky coordinates)
-    uint64_t sky_shift_serial_ = 0, sky_sun_serial_ = 0;
+    uint64_t sky_sun_serial_ = 0;
     bool sky_sun_carried_ = false;
     float sky_sun_uv_[2] = {};     // where it is in the 3D image in the latest 2D frame
-    float sky_sun_step_[2] = {};   // how far it moved there with the sky (for the interpolation)
+    float sky_sun_rate_[2] = {};   // how far it moves there with the sky per vblank (for the interpolation)
     void step_sky_sun(const WorldPose& pose, const float view[4], float view_w, float out[3]);
     float back_shift_ = 0.0f;
+    bool back_shift_camera_ = false;
     float crosshair_x_[2] = {}, crosshair_y_[2] = {};
     bool crosshair_picture_[2] = {};
 };

@@ -112,6 +112,7 @@ add_executable(LostWorld
     src/video/tilegen.cpp
     src/video/texture_pack.cpp
     src/video/pack2d.cpp
+    src/video/sky_motion.cpp
     src/video/sky_pack.cpp
     src/video/text_hd.cpp
     src/video/image_io.cpp
@@ -178,9 +179,10 @@ if(LW_TESTS)
     add_executable(tilegen_test tests/tilegen_test.cpp tests/stubs.cpp src/video/tilegen.cpp)
     add_executable(fnv_test tests/fnv_test.cpp)
     add_executable(options_test tests/options_test.cpp src/runtime/options.cpp src/runtime/weather.cpp)
+    add_executable(sky_motion_test tests/sky_motion_test.cpp src/video/sky_motion.cpp)
     add_executable(audio_stream_test tests/audio_stream_test.cpp src/audio/audio_stream.cpp)
     add_executable(rom_zip_test tests/rom_zip_test.cpp src/runtime/rom_zip.cpp ${MINIZ_DIR}/miniz.c)
-    foreach(t tilegen_test fnv_test options_test audio_stream_test rom_zip_test)
+    foreach(t tilegen_test fnv_test options_test sky_motion_test audio_stream_test rom_zip_test)
         target_include_directories(${t} PRIVATE src/video src/common src/runtime src/audio ${MINIZ_DIR})
         if(MSVC)
             target_compile_options(${t} PRIVATE /W4 /utf-8)
@@ -190,6 +192,7 @@ if(LW_TESTS)
     add_test(NAME tilegen COMMAND tilegen_test ${CMAKE_SOURCE_DIR}/tests/tilegen_expected.txt)
     add_test(NAME fnv_cpp COMMAND fnv_test ${CMAKE_SOURCE_DIR}/tests/fnv_expected.txt)
     add_test(NAME options COMMAND options_test)
+    add_test(NAME sky_motion COMMAND sky_motion_test)
     add_test(NAME audio_stream COMMAND audio_stream_test)
     add_test(NAME rom_zip COMMAND rom_zip_test)
     find_package(Python3 COMPONENTS Interpreter)

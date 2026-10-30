@@ -67,10 +67,9 @@ public:
     // shows; the first extra row starts with the fade offset of each layer pair
     // (R, G, B = offset / 2 + 128), and from texel 8 on holds the colours of
     // each procedural sky (SkyPack::Picture::bands, 64 texels per slot). The
-    // second one is not written here: the window thread puts there how far
-    // the back layers scrolled on each row since the previous game frame
-    // (texel y: R, G = x, y pixels + 128, B = 255 where known), for the interpolation
-    static constexpr int SKY_COORDS_W = BACK_W, SKY_COORDS_H = SCREEN_H + 2;
+    // last two are not written here: the renderer puts there how the back
+    // layers move on each row between game frames (x, then y; sky_motion.h)
+    static constexpr int SKY_COORDS_W = BACK_W, SKY_COORDS_H = SCREEN_H + 3;
     // The whole 512x512 picture of a layer, without scroll or fade offsets
     static void layer_plane(const uint8_t* vram, int layer, bool four_bpp, std::vector<uint32_t>& out);
     // Hash of the data a layer is drawn from (names, patterns, palettes)
