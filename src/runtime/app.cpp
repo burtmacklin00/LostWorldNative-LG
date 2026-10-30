@@ -986,7 +986,8 @@ int main(int argc, char** argv) {
     }
     R3DRenderer renderer;
     if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa)) {
-        fprintf(stderr, "Could not start the 3D renderer\n");
+        fprintf(stderr, "Could not start the 3D renderer on %s (see the [vulkan] line above)\n",
+                presenter.device_name().c_str());
         return 1;
     }
     renderer.set_max_aspect(g_opt.max_aspect);
