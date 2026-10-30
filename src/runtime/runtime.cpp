@@ -1011,9 +1011,14 @@ bool game_state_load_home() {
     }
     return st && start_load(std::move(st), false);
 }
-// The game as it is becomes the home state (survival mode starts from it)
+// The game as it is becomes the home state (survival mode starts from it).
+// Only the first time: with a home already kept it would only replace a load
+// still waiting (QUIT TO MAIN MENU puts the home back when the menu closes,
+// and CLASSIC ARCADE right after it used to cancel that load: the game went on
+// from where it was left, stuck when that was a survival arena)
 void game_state_keep_home() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
+    if (g_home || g_state_op == 2) return;
     g_state_result = 0;
     g_state_waits = 0;
     g_state_op = 3;
