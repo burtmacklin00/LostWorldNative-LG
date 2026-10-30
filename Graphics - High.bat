@@ -3,13 +3,14 @@ rem Lost World Native LG: HIGH graphics: mid-range cards (RTX 3060, RX 6600). Fu
 rem frame rate, ambient occlusion, sun shadows, light shafts and the procedural
 rem sky; no ray tracing.
 rem Each step up (Low, Medium, High, Ultra) turns on more. VSYNC stays on and
-rem FRAME CAP off; HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
+rem FRAME CAP 60 (never more than 60 pictures a second, on any monitor);
+rem HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
 rem Takes effect the next time the game starts (edge smoothing too). Close the game first.
 setlocal
 set "SET_resolution_3d=100"
 set "SET_half_rate=0"
 set "SET_vsync=1"
-set "SET_frame_cap=0"
+set "SET_frame_cap=60"
 set "SET_motion=smooth"
 set "SET_aa=msaa"
 set "SET_ray_tracing=off"
