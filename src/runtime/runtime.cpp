@@ -849,7 +849,7 @@ std::unique_ptr<GameState> g_home;   // the arcade game as it was before the fir
 std::unique_ptr<GameState> g_mark;   // survival: the arena's first stop, where each lap starts again
 bool g_state_keep_home = false;
 std::atomic<int> g_state_result{0};  // 1 done, -1 failed
-int g_state_waits = 0;
+uint64_t g_state_since = 0;   // the frame a load was asked at (it gives up 600 frames later)
 
 // Return addresses saved on the PowerPC stack, innermost first
 std::vector<uint32_t> call_chain(const uint8_t* ram, uint32_t sp) {
@@ -996,7 +996,7 @@ static bool start_load(std::unique_ptr<GameState> st, bool keep_home) {
     if (!st) return false;
     g_state = std::move(st);
     g_state_keep_home = keep_home;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 2;
     return true;
 }
@@ -1020,14 +1020,14 @@ void game_state_keep_home() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     if (g_home || g_state_op == 2) return;
     g_state_result = 0;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 3;
 }
 // The game as it is becomes the mark (replacing the last one); load_mark puts it back
 void game_state_mark() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     g_state_result = 0;
-    g_state_waits = 0;
+    g_state_since = g_frame;
     g_state_op = 4;
 }
 bool game_state_load_mark() {
@@ -1060,13 +1060,16 @@ void rt_state_point(Ctx& c) {
         g_state_op = 0;
     } else if (g_state_op == 2 && g_state) {
         // Only from the same chain of calls (the main loop); anywhere else
-        // (a loading screen waiting in a nested loop) it tries again later
+        // (a loading screen waiting in a nested loop) it tries again later.
+        // Counted in frames: a nested wait goes round its loop thousands of
+        // times a frame, and 600 of those made a load fail now and then (QUIT
+        // TO MAIN MENU leaving the game in the survival arena)
         if (call_chain(g_ram, c.r[1]) == g_state->chain) {
             if (g_state_keep_home && !g_home) g_home = capture_state(c);
             apply_state(c, *g_state);
             stats_state_loaded();
             g_state_result = 1;
-        } else if (g_boot_skip || ++g_state_waits < 600) {
+        } else if (g_boot_skip || g_frame - g_state_since < 600) {
             return;
         } else {
             g_state_result = -1;
