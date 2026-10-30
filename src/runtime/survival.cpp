@@ -45,6 +45,7 @@
 #include <set>
 #include <vector>
 
+#include "../common/random_seed.h"
 #include "bosses.h"
 #include "encounter_script.h"
 #include "inputs.h"
@@ -1310,7 +1311,7 @@ bool survival_frame(Ctx&) {
         if (s.on) s.restore();
         s.on = true;
         s.gate = true;
-        s.rng = script::seed();
+        s.rng = random_seed();
         s.reset(g_begin_stage, g_begin_zone);
         printf("[survival] stage %d, zone %d\n", s.stage + 1, s.zone);
     }

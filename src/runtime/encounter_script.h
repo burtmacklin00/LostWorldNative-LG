@@ -6,8 +6,6 @@
 // (delay in frames, function, nargs, args). tools/encounters.py lists them.
 #pragma once
 #include <cstdint>
-#include <cstdlib>
-#include <ctime>
 #include <vector>
 
 namespace script {
@@ -63,15 +61,11 @@ bool walk(Word word, uint32_t h, F&& f, int32_t* bad = nullptr) {
     return true;
 }
 
-// The random numbers of both modes: 0..n-1 (0 when n is 0)
+// The random numbers of both modes: 0..n-1 (0 when n is 0); the first state
+// is random_seed() (common/random_seed.h)
 inline uint32_t rand_below(uint32_t& state, uint32_t n) {
     state = state * 1103515245u + 12345u;
     return n ? (state >> 16) % n : 0;
-}
-// The first state: from the clock, or LW_SEED=N (tests: the same game again)
-inline uint32_t seed() {
-    if (const char* s = getenv("LW_SEED")) return uint32_t(strtoul(s, nullptr, 0));
-    return uint32_t(time(nullptr));
 }
 
 }  // namespace script

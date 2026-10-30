@@ -3,7 +3,8 @@
 #include <atomic>
 #include <cctype>
 #include <cstdio>
-#include <ctime>
+
+#include "../common/random_seed.h"
 
 namespace {
 
@@ -29,7 +30,7 @@ int weather_from_name(const char* s) {
 
 void weather_roll() {
     unsigned r = g_rng.load();
-    if (!r) r = unsigned(time(nullptr)) | 1;
+    if (!r) r = random_seed() | 1;
     int last = g_rolled.load(), w = last;
     while (w == last) {
         r = r * 1103515245u + 12345u;
