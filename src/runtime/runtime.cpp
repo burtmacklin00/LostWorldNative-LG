@@ -95,6 +95,7 @@ R3DTextureRam g_texture_ram;
 std::mutex g_video_mutex;
 std::vector<uint8_t> g_video_vram(TILEGEN_SIZE);
 uint64_t g_video_frame = 0;
+uint64_t g_video_page_serial[TILEGEN_PAGES] = {};
 bool g_realtime = false;
 LARGE_INTEGER g_qpf, g_start_time;
 // CPU time of the game thread per emulated frame, without the waits (frame
@@ -224,6 +225,13 @@ inline void mark_r3d_dirty(uint32_t page) {
     g_r3d_last_dirty = page;
 }
 
+// The tilegen pages written since the last video_snapshot, one bit each
+uint32_t g_tilegen_dirty = (1u << TILEGEN_PAGES) - 1;
+inline void mark_tilegen_dirty(uint32_t a) {
+    uint32_t page = (a - TILEGEN_BASE) >> 16;   // (huge below the tilegen)
+    if (page < TILEGEN_PAGES) g_tilegen_dirty |= 1u << page;
+}
+
 // Plain device memories, where nothing in dev_read8 / dev_write8 reacts to
 // an access besides the dirty pages and the FIFO stream: the Real3D culling
 // and polygon memories (0x8C, 0x8E, 0x98), the texture FIFO (0x94) and the
@@ -304,6 +312,7 @@ void dev_write8(uint32_t a, uint8_t v) {
     if (a == 0xF0040000) g_eeprom.write_pins(v);
     if (a == 0xF004003C) g_adc_channel = v & 7;
     *dev_ptr(a) = v;
+    mark_tilegen_dirty(a);
     if (a == 0xF0C00CFF)
         g_pci_cfg[le32_at(dev_ptr(0xF0800CF8)) & 0xFFFFFFFC] = le32_at(dev_ptr(0xF0C00CFC));
     if (a >= 0xC1000000 && a < 0xC1000100) g_scsi.wrote8(a & 0xFF, v, dev_ptr(0xC1000000));
@@ -619,6 +628,7 @@ void rt_wr8_slow(uint32_t a, uint8_t v) { check_wild_write(a, v); note(a, true, 
 static void plain_write(uint32_t a, const uint8_t* bytes, uint32_t n, Plain kind) {
     memcpy(dev_ptr(a), bytes, n);
     if (kind == Plain::R3D) mark_r3d_dirty(a >> 16);
+    else if (kind == Plain::Memory) mark_tilegen_dirty(a);
     else if (kind == Plain::Fifo) g_texture_fifo.insert(g_texture_fifo.end(), bytes, bytes + n);
 }
 
@@ -760,12 +770,16 @@ void rt_sc(Ctx& c, uint32_t addr) {
 // ---- Video: copy of the 2D layer on every vblank for the window thread ----
 namespace {
 
+// (only the pages written since the last one)
 void video_snapshot() {
     std::lock_guard<std::mutex> lock(g_video_mutex);
-    for (uint32_t off = 0; off < TILEGEN_SIZE; off += 0x10000) {
-        auto it = g_dev.find((TILEGEN_BASE + off) >> 16);
-        if (it != g_dev.end()) memcpy(&g_video_vram[off], it->second.data(), std::min<uint32_t>(0x10000, TILEGEN_SIZE - off));
+    for (uint32_t p = 0; p < TILEGEN_PAGES; p++) {
+        if (!(g_tilegen_dirty >> p & 1)) continue;
+        auto it = g_dev.find((TILEGEN_BASE >> 16) + p);
+        if (it != g_dev.end()) memcpy(&g_video_vram[p << 16], it->second.data(), 0x10000);
+        g_video_page_serial[p]++;
     }
+    g_tilegen_dirty = 0;
     g_video_frame = g_frame;
 }
 
@@ -974,6 +988,7 @@ void apply_state(Ctx& c, const GameState& st) {
     for (auto& [key, page] : st.pages) memcpy(dev_ptr(key << 16), page.data(), 0x10000);
     for (auto& [key, page] : g_dev)
         if ((key >> 8) == 0x8C || (key >> 8) == 0x8E || (key >> 8) == 0x98) g_r3d_dirty.insert(key);
+    g_tilegen_dirty = (1u << TILEGEN_PAGES) - 1;
     g_texture_fifo.clear();
     g_fifo_consumed = 0;
     g_texture_ram.load_all(st.texture);
