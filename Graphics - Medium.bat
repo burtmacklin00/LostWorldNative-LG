@@ -3,7 +3,7 @@ rem Lost World Native LG: MEDIUM graphics (mid-range cards such as RTX 3060 / RX
 rem Takes effect the next time the game starts. Close the game first.
 setlocal
 set "SET_resolution_3d=100"
-set "SET_half_rate=0"
+set "SET_half_rate=1"
 set "SET_vsync=1"
 set "SET_frame_cap=0"
 set "SET_ray_tracing=off"

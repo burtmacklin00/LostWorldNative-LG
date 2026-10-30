@@ -1,20 +1,34 @@
 @echo off
-rem Lost World Native LG: LOW graphics (laptops and older graphics cards).
+rem Lost World Native LG: LOW graphics, the lightest settings there are, so the
+rem game runs on as many PCs as possible (laptops, older or built-in graphics).
+rem Every costly effect is off, the 3D is drawn at half resolution without edge
+rem smoothing, and only at the game's own rate. The HUD and the text stay sharp.
 rem Takes effect the next time the game starts. Close the game first.
 setlocal
-set "SET_resolution_3d=75"
+set "SET_resolution_3d=50"
 set "SET_half_rate=1"
 set "SET_vsync=1"
 set "SET_frame_cap=0"
+set "SET_motion=original"
+set "SET_aa=none"
 set "SET_ray_tracing=off"
 set "SET_ao=0"
 set "SET_shadows=0"
+set "SET_sun=0"
 set "SET_light_shafts=0"
-set "SET_soft_particles=1"
+set "SET_soft_particles=0"
 set "SET_sky=original"
-set "SET_surface_detail=1"
-set "SET_bloom=low"
-set "KEYS=resolution_3d half_rate vsync frame_cap ray_tracing ao shadows light_shafts soft_particles sky surface_detail bloom"
+set "SET_surface_detail=0"
+set "SET_bloom=off"
+set "SET_hdr=0"
+set "SET_rim_light=0"
+set "SET_sharpen=0"
+set "SET_haze=0"
+set "SET_lightning=0"
+set "SET_rain=off"
+set "SET_flashlight=original"
+set "SET_random_weather=0"
+set "KEYS=resolution_3d half_rate vsync frame_cap motion aa ray_tracing ao shadows sun light_shafts soft_particles sky surface_detail bloom hdr rim_light sharpen haze lightning rain flashlight random_weather"
 call :apply
 exit /b
 rem ---------------------------------------------------------------------------
