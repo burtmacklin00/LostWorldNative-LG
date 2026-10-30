@@ -4,6 +4,8 @@ rem Takes effect the next time the game starts. Close the game first.
 setlocal
 set "SET_resolution_3d=75"
 set "SET_half_rate=1"
+set "SET_vsync=1"
+set "SET_frame_cap=0"
 set "SET_ray_tracing=off"
 set "SET_ao=0"
 set "SET_shadows=0"
@@ -12,7 +14,7 @@ set "SET_soft_particles=1"
 set "SET_sky=original"
 set "SET_surface_detail=1"
 set "SET_bloom=low"
-set "KEYS=resolution_3d half_rate ray_tracing ao shadows light_shafts soft_particles sky surface_detail bloom"
+set "KEYS=resolution_3d half_rate vsync frame_cap ray_tracing ao shadows light_shafts soft_particles sky surface_detail bloom"
 call :apply
 exit /b
 rem ---------------------------------------------------------------------------
