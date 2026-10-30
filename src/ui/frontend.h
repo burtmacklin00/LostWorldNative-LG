@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "../runtime/stats.h"
+#include "ui_canvas.h"
 
 struct FrontendSettings {
     bool fullscreen = false;
@@ -79,7 +80,7 @@ struct FrontendSettings {
     int quality() const;
 };
 
-class Frontend {
+class Frontend : UiCanvas {
 public:
     enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
@@ -179,11 +180,7 @@ private:
         bool levels = false;      // CHOICE: low to high (the dots up to it lit)
         float frac = 0;           // SLIDER: 0..1
     };
-    struct Mask {   // text coverage (0..255) with `pad` pixels around the text box
-        int w = 0, h = 0, pad = 0, text_w = 0, text_h = 0;
-        int grad0 = 0, grad1 = 0;   // rows of the colour gradient (top of the capitals to the baseline)
-        std::vector<uint8_t> a, e;  // letters, letters grown by the outline width
-    };
+    using Mask = GdiText::Mask;
     struct Style {
         uint32_t top, bottom;   // gradient (0xRRGGBB)
         uint32_t edge = 0;      // outline colour
@@ -191,7 +188,7 @@ private:
         float alpha = 1;
         int shadow = 0;         // drop shadow offset (pixels), black
     };
-    enum Family { TITLE, ITEM, MONO, JURASSIC, BODY };
+    enum Family { TITLE, ITEM, MONO, JURASSIC, BODY };   // in the order of GdiText::Face
     // Titles and menu entries: the Jurassic Park font when it is installed
     Family display() const { return jurassic_ ? JURASSIC : TITLE; }
 
@@ -210,16 +207,15 @@ private:
     void push(Action a) { actions_.push_back(a); }
     void select(int index);
 
-    HFONT font(Family f, int px);
-    const Mask& mask(Family f, int px, const std::wstring& text, int edge_px);
+    const Mask& mask(Family f, int px, const std::wstring& text, int edge_px) {
+        return gdi_->mask(GdiText::Face(f), px, text, edge_px);
+    }
     int text(Family f, int px, const std::wstring& s, int x, int y, int align, const Style& st);
     int measure(Family f, int px, const std::wstring& s);
     int extent(Family f, int px, const std::wstring& s);   // width without making a mask (body text)
     std::vector<std::wstring> wrap(Family f, int px, const std::wstring& s, int max_w);
-    void fill(int x0, int y0, int x1, int y1, uint32_t rgb, float alpha);
     void band(int cx, int y0, int y1, int half_w, uint32_t rgb, float alpha);
     void triangle(int x, int y, int size, int dir, uint32_t rgb, float alpha);
-    void blend(int x, int y, uint32_t rgb, float a);
     void hgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1);   // alpha a0 at the left to a1
     void vgrad(int x0, int y0, int x1, int y1, uint32_t rgb, float a0, float a1);   // alpha a0 at the top to a1
     void frame(int x0, int y0, int x1, int y1, int t, uint32_t rgb, float alpha);   // outline, t pixels
@@ -290,16 +286,10 @@ private:
     std::vector<RECT> tab_rects_;   // a step past the end starts again (clicks on the label)
     int mouse_x_ = -1, mouse_y_ = -1;
 
-    std::vector<HANDLE> font_handles_;
-    std::vector<std::vector<char>> font_data_;
-    std::map<std::pair<int, int>, HFONT> fonts_;
-    std::map<std::wstring, Mask> masks_;
-    HDC dc_ = nullptr;
+    GdiText* gdi_ = nullptr;
     bool jurassic_ = false;   // third_party/fonts/Jurassic_Park.ttf loaded
 
-    int w_ = 0, h_ = 0;
     float u_ = 1;   // pixels per unit of a 1920x1080 layout
-    uint32_t* px_ = nullptr;
     std::vector<uint32_t> bg_;   // main menu backdrop for the current size
     std::vector<uint32_t> bg_stone_;   // with a poster: its stone only, without the logo (options)
     // Optional poster (third_party/menu/cover.png, not in the repository):
