@@ -196,6 +196,7 @@ private:
 
     std::vector<Item> items() const;
     std::vector<Item> option_items(const FrontendSettings& s) const;   // every option, as with these settings
+    const std::wstring& default_value(int id);   // what option_items shows for it with the defaults
     static void describe(Item& it, const FrontendSettings& s);         // its Kind and position
     void activate(const Item& it, int dir);
     void reset_tab();   // the open settings tab back to its defaults
@@ -253,6 +254,8 @@ private:
     struct ValueArea { int left, middle; };   // option rows: value column (left < 0: none)
     std::vector<ValueArea> values_;
     bool wrap_ = false;
+    std::vector<Item> defaults_;   // option_items(FrontendSettings{}), made once (again if rt_available changes)
+    bool defaults_rt_ = false;
     // Settings tabs (tab_of in frontend.cpp says where each option goes)
     enum { DISPLAY_TAB, LIGHTING_TAB, ATMOSPHERE_TAB, AUDIO_TAB, CONTROLS_TAB, GAME_TAB };
     static constexpr int TAB_COUNT = 6;

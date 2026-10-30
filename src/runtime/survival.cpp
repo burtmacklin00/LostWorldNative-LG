@@ -116,6 +116,22 @@ constexpr uint32_t COURSE_SELECT = 0x1C2AD8;   // 0 attract, 1-2 choosing a cour
 constexpr uint64_t LOADING_GIVE_UP = 40000;    // game frames (at full speed, ~50 s; the slowest arena takes ~9000)
 constexpr const char* RECORDS = "save/survival.ini";
 
+// Testing aids from the environment, read once
+struct TestEnv {
+    bool autostart = getenv("LW_SURV_AUTOSTART");   // no window to shoot at: start and play again by itself
+    bool bonus = getenv("LW_SURV_BONUS");           // a BONUS target every walk, shot by itself
+    bool ambush = getenv("LW_SURV_AMBUSH");         // an ambush every walk
+    bool no_cache = getenv("LW_SURV_NO_CACHE");     // never load a kept arena
+    const char* life = getenv("LW_SURV_LIFE");      // LIFE setting forced (with --trace-survival)
+    bool god = getenv("LW_SURV_GOD");
+    bool autoplay = getenv("LW_SURV_AUTOPLAY");
+    const char* ram = getenv("LW_SURV_RAM");
+};
+const TestEnv& test_env() {
+    static const TestEnv e;
+    return e;
+}
+
 bool g_trace = false;
 FILE* g_log = nullptr;
 std::set<uint32_t> g_hooks;
@@ -721,8 +737,8 @@ struct Survival {
         pending = -1;
         stop_passed = false;
         uint64_t f = g_frame_no;
-        bool ambush = rand(100) < uint32_t(AMBUSH_CHANCE) || getenv("LW_SURV_AMBUSH");
-        bool bonus = rand(100) < uint32_t(BONUS_CHANCE) || getenv("LW_SURV_BONUS");
+        bool ambush = rand(100) < uint32_t(AMBUSH_CHANCE) || test_env().ambush;
+        bool bonus = rand(100) < uint32_t(BONUS_CHANCE) || test_env().bonus;
         walk_length = to_next_stop();
         ambush_planned = ambush && walk_length > 40;   // not on a short one
         bonus_at = bonus ? f + 20 + rand(80) : 0;
@@ -910,7 +926,7 @@ struct Survival {
                 hit = true;
             trigger_was[p] = down;
         }
-        if (getenv("LW_SURV_BONUS") && f >= bonus_until - BONUS_FRAMES + 60) hit = true;   // testing aid: shot by itself
+        if (test_env().bonus && f >= bonus_until - BONUS_FRAMES + 60) hit = true;   // testing aid: shot by itself
         if (hit) {
             bonus_on = false;
             give_reward();
@@ -1417,7 +1433,7 @@ bool survival_frame(Ctx&) {
             if (s.gate) break;
             // The arena kept from another time, once the game is in its main
             // loop (a state loads only from there: without a window, past the boot)
-            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !getenv("LW_SURV_NO_CACHE")) {
+            if (!s.cache_tried && (game_state_has_home() || g_frame_no >= 900) && !test_env().no_cache) {
                 s.cache_tried = true;
                 std::string path = s.cache_path();
                 s.keep_life = rd8(SETTING_LIFE), s.keep_diff = rd8(SETTING_DIFF);   // the settings as they are now
@@ -1461,7 +1477,7 @@ bool survival_frame(Ctx&) {
                           MoveFileExA((s.cache + ".tmp").c_str(), s.cache.c_str(), MOVEFILE_REPLACE_EXISTING);
                 printf("[survival] arena %s %s\n", ok ? "kept in" : "could not be kept in", s.cache.c_str());
             }
-            if (s.confirm || getenv("LW_SURV_AUTOSTART")) {   // testing aid: no window to shoot at
+            if (s.confirm || test_env().autostart) {   // testing aid: no window to shoot at
                 s.confirm = false;
                 s.mode = SurvivalMode::Playing;
                 s.wave_started = s.lap_started = now_seconds();
@@ -1488,7 +1504,7 @@ bool survival_frame(Ctx&) {
             hold = s.mode == SurvivalMode::Results;
             break;
         case SurvivalMode::Results:
-            if (s.confirm || getenv("LW_SURV_AUTOSTART")) {
+            if (s.confirm || test_env().autostart) {
                 s.confirm = false;
                 s.restart();
             } else {
@@ -1500,13 +1516,13 @@ bool survival_frame(Ctx&) {
         s.publish();
     }
     if (!g_trace) return hold;
-    if (const char* life = getenv("LW_SURV_LIFE"); life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
-    if (getenv("LW_SURV_GOD")) {   // testing aid: the player's life never drops
+    if (const char* life = test_env().life; life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
+    if (test_env().god) {   // testing aid: the player's life never drops
         if (s.on) s.lives = std::max(s.lives, 5);
         uint32_t life = rd32(PLAYER_LIFE);
         if (life > 0 && life < 5) wr32(PLAYER_LIFE, 5);
     }
-    if (getenv("LW_SURV_AUTOPLAY") && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
+    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
         uint64_t f = g_frame_no;
         g_inputs.p[0].trigger = f % 12 < 3;
         g_inputs.p[0].offscreen = f % 240 < 3;
@@ -1542,7 +1558,7 @@ bool survival_frame(Ctx&) {
     // RAM snapshots for offline searches: LW_SURV_RAM=FROM,TO,EVERY (frames)
     static unsigned long long ram_from = 0, ram_to = 0, ram_every = 0;
     static FILE* ram = nullptr;
-    if (const char* e = getenv("LW_SURV_RAM"); e && !ram_every) {
+    if (const char* e = test_env().ram; e && !ram_every) {
         if (sscanf(e, "%llu,%llu,%llu", &ram_from, &ram_to, &ram_every) != 3) ram_from = 0, ram_to = ~0ull, ram_every = 60;
         ram = fopen("out/survival_ram.bin", "wb");
     }
