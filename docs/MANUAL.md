@@ -92,8 +92,9 @@ without extracting it), `--data FOLDER`, `data\` in the current folder or next t
 folder. If none is found, a message says where it looked and how to give it the path.
 
 Finally it runs the tests in `tests/` (ctest): 2D composition against reference
-hashes, the C++ and Python FNV-1a hash against the same vectors, and the
-audio queue (click-free resampling with mismatched clocks).
+hashes, the C++ and Python FNV-1a hash against the same vectors, the
+audio queue (click-free resampling with mismatched clocks) and the encounter
+script reader shared by survival and random spawns.
 `-DLW_TESTS=OFF` in CMake disables them; `tilegen_test tests\tilegen_expected.txt
 --write` regenerates the reference after an intentional change to the composition.
 
@@ -494,6 +495,7 @@ normal behaviour when unset):
 | LW_RAINDBG | Prints per frame the game's rain streaks, their direction and the camera |
 | LW_BOSS=N | Starts the boss mode fight with boss N (1-4) directly |
 | LW_BOSS_LIFE=PCT | Random spawns: every boss gets PCT % of its life instead of a random share |
+| LW_SEED=N | Survival and random spawns: the same random numbers every run (N instead of the clock) |
 | LW_HIT_PROBE=file | Writes RAM 0x100000-0x200000 to the file after every scoring hit and every 120 frames (to find what hits change) |
 | LW_SNDDBG | Sound board trace (68000 and SCSP) |
 | LW_SNDLOG | Each SCSP note to out/voices.csv (registers, duration, direct and effects peaks) and the per-second level of the direct mix and effects return to out/mix.csv |
