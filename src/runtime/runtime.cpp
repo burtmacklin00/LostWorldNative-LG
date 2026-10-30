@@ -850,6 +850,7 @@ std::unique_ptr<GameState> g_mark;   // survival: the arena's first stop, where 
 bool g_state_keep_home = false;
 std::atomic<int> g_state_result{0};  // 1 done, -1 failed
 uint64_t g_state_since = 0;   // the frame a load was asked at (it gives up 600 frames later)
+bool g_logo_up = false;       // the boot has reached the SEGA logo (the game's main loop) once
 
 // Return addresses saved on the PowerPC stack, innermost first
 std::vector<uint32_t> call_chain(const uint8_t* ram, uint32_t sp) {
@@ -1077,6 +1078,10 @@ void rt_state_point(Ctx& c) {
         g_state.reset();
         g_state_op = 0;
     } else if (g_state_op == 3) {
+        // Not before the SEGA logo: the boot screens wait in nested loops, and
+        // a home kept in one of them could never be loaded again (the game
+        // does not come back to that chain of calls)
+        if (!g_logo_up) return;
         if (!g_home) g_home = capture_state(c);
         g_state_result = 1;
         g_state_op = 0;
@@ -1213,6 +1218,7 @@ void rt_event(Ctx& c) {
             random_spawns_frame();
             if (g_boss_maker >= 0) boss_maker_frame();
             video_snapshot();
+            if (!g_logo_up && ((g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000)) g_logo_up = true;
             // Survival mode: on to the chosen stage at full speed, behind its loading screen
             bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 200000   // (survival gives up first)
                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
