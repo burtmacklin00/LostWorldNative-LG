@@ -1,20 +1,35 @@
 @echo off
-rem Lost World Native LG: ULTRA graphics (everything on, ray-traced shadows and ambient occlusion).
-rem Takes effect the next time the game starts. Close the game first.
+rem Lost World Native LG: ULTRA graphics: everything on, for fast cards with ray tracing (RTX 3070
+rem or RX 6800 and up): ray-traced sun shadows and ambient occlusion, high
+rem bloom, full resolution and frame rate.
+rem Each step up (Low, Medium, High, Ultra) turns on more. VSYNC stays on and
+rem FRAME CAP off; HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
+rem Takes effect the next time the game starts (edge smoothing too). Close the game first.
 setlocal
 set "SET_resolution_3d=100"
 set "SET_half_rate=0"
 set "SET_vsync=1"
 set "SET_frame_cap=0"
+set "SET_motion=smooth"
+set "SET_aa=msaa"
 set "SET_ray_tracing=ao"
 set "SET_ao=1"
 set "SET_shadows=1"
+set "SET_sun=1"
 set "SET_light_shafts=1"
 set "SET_soft_particles=1"
 set "SET_sky=procedural"
 set "SET_surface_detail=1"
-set "SET_bloom=medium"
-set "KEYS=resolution_3d half_rate vsync frame_cap ray_tracing ao shadows light_shafts soft_particles sky surface_detail bloom"
+set "SET_bloom=high"
+set "SET_hdr=1"
+set "SET_rim_light=1"
+set "SET_sharpen=1"
+set "SET_haze=1"
+set "SET_lightning=1"
+set "SET_rain=heavy"
+set "SET_flashlight=modern"
+set "SET_random_weather=1"
+set "KEYS=resolution_3d half_rate vsync frame_cap motion aa ray_tracing ao shadows sun light_shafts soft_particles sky surface_detail bloom hdr rim_light sharpen haze lightning rain flashlight random_weather"
 call :apply
 exit /b
 rem ---------------------------------------------------------------------------

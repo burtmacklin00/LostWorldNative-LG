@@ -1,9 +1,10 @@
 @echo off
-rem Lost World Native LG: LOW graphics, the lightest settings there are, so the
-rem game runs on as many PCs as possible (laptops, older or built-in graphics).
-rem Every costly effect is off, the 3D is drawn at half resolution without edge
-rem smoothing, and only at the game's own rate. The HUD and the text stay sharp.
-rem Takes effect the next time the game starts. Close the game first.
+rem Lost World Native LG: LOW graphics: the lightest settings there are, for laptops and older or
+rem built-in graphics. Every costly effect is off and the 3D is drawn at half
+rem resolution without edge smoothing; the HUD and the text stay sharp.
+rem Each step up (Low, Medium, High, Ultra) turns on more. VSYNC stays on and
+rem FRAME CAP off; HALF FRAME RATE (Low, Medium) only acts above 100 Hz.
+rem Takes effect the next time the game starts (edge smoothing too). Close the game first.
 setlocal
 set "SET_resolution_3d=50"
 set "SET_half_rate=1"

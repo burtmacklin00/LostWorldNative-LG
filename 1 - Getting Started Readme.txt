@@ -106,10 +106,11 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
  5. QUICK SETTINGS (close the game first)
 ---------------------------------------------------------------------
 
-   Graphics - Low.bat ...... Older or laptop graphics cards
-   Graphics - Medium.bat ... Mid-range cards
-   Graphics - High.bat ..... Ray-traced shadows
-   Graphics - Ultra.bat .... Everything on (the game's default)
+   Graphics - Low.bat ...... Lightest: laptops, older or built-in graphics
+   Graphics - Medium.bat ... Entry-level cards (GTX 1060, RX 580)
+   Graphics - High.bat ..... Mid-range cards (RTX 3060, RX 6600)
+   Graphics - Ultra.bat .... Everything on, with ray tracing (the default)
+   Each step up turns on more; slow on a PC? Go one step down.
    Crosshairs - On.bat / Crosshairs - Off.bat
 
  With FREE PLAY on, the game runs in the arcade's own FREE PLAY mode:
