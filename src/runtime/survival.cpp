@@ -344,9 +344,9 @@ void keep_record(int stage, int zone, const Best& b) {
     }
 }
 
-struct Survival {
-    bool on = false;
-    bool gate = false;            // the window is still putting the game back at the attract
+// One run of the mode, from the menu's choice to its results: reset() starts
+// each one from these values
+struct Run {
     uint64_t loading_frames = 0;
     SurvivalStep step = SurvivalStep::Preparing;
     int stage = 0, zone = 0;      // 0-based stage byte, zone nibble
@@ -361,7 +361,6 @@ struct Survival {
     std::vector<uint32_t> enemy_pcs;   // where the script being run calls an enemy
     int wave = 0;                 // 0: the encounter itself
     bool armed = false;           // a new course: its first stage becomes the chosen one
-    int base_diff = 7;
     int lives = 0, start_lives = 0;
     // The lap: fight at a stop, a pause once it is cleared, the walk on to the
     // next one (maybe an ambush on the way), and after the last stop the fade
@@ -395,17 +394,33 @@ struct Survival {
     int reward = 0;
     double reward_at = 0;
 
-    int alive() const { return std::max(int(rd32(VM_ALIVE)), int(rd32(VM_ALIVE2))); }
     bool last_hit = false;        // a hit function ran with one life left
     uint64_t dying_until = 0;     // the last attack plays out until this frame, then the results
-    bool confirm = false;         // set by the window: start, or play again
-    uint32_t rng = 12345;
     Best best_before;
     bool new_record = false;
     double wave_started = 0;
     double results_at = 0;
+    uint64_t travel_frames = 0;   // on the way to the arena (the loading bar creeps on)
+    uint32_t loading_lives = 0;   // the player's lives as the stage began (kept on the way in)
+    bool shoot_in = false;        // SurvivalZone::shoot_in of this arena
+    // The arena kept the first time it was reached (save/survival/), made
+    // with this LIFE and difficulty setting: the way there only once
+    std::string cache;            // its file: being loaded or saved this run
+    bool cache_loading = false, cache_saving = false, cache_tried = false;
+    uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
+};
+
+struct Survival : Run {
+    // Kept from run to run
+    bool on = false;
+    bool gate = false;            // the window is still putting the game back at the attract
+    int base_diff = 7;            // the settings' difficulty, put back when a run ends
+    bool confirm = false;         // set by the window: start, or play again
+    uint32_t rng = 12345;
     std::mutex view_mutex;        // the window reads mode, wave, score...
     SurvivalView view;
+
+    int alive() const { return std::max(int(rd32(VM_ALIVE)), int(rd32(VM_ALIVE2))); }
 
     uint32_t rand(uint32_t n) { return script::rand_below(rng, n); }
 
@@ -1014,9 +1029,6 @@ struct Survival {
         default: return 1;
         }
     }
-    uint64_t travel_frames = 0;
-    uint32_t loading_lives = 0;   // the player's lives as the stage began (kept on the way in)
-    bool shoot_in = false;        // SurvivalZone::shoot_in of this arena
 
     // The arena's first encounter is ours (take_over): the start screen
     void at_arena() {
@@ -1033,11 +1045,7 @@ struct Survival {
         unlock(stage + 1, zone, start_lives, false);
     }
 
-    // The arena kept the first time it was reached (save/survival/), made
-    // with this LIFE and difficulty setting: the way there only once
-    std::string cache;            // its file: being loaded or saved this run
-    bool cache_loading = false, cache_saving = false, cache_tried = false;
-    uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
+    // The arena kept the first time it was reached (Run::cache)
     std::string cache_path() const { return arena_state_path(stage + 1, zone); }
     // Loaded: the arena's first encounter (where survival or the arcade game
     // kept the state) is taken over from its start, with the lives of a new game
@@ -1059,46 +1067,14 @@ struct Survival {
 
     // A new run: everything as at the start
     void reset(int s, int z) {
+        static_cast<Run&>(*this) = Run{};
         stage = s - 1;
         zone = z;
-        state = WAITING;
-        zone_empty = false;
         mode = SurvivalMode::Loading;
-        encounter = -1;
-        enemies.clear(), looks.clear(), setup.clear();
-        wave = 0;
-        armed = false;
-        lives = start_lives = 0;
-        last_hit = false;
-        dying_until = 0;
         confirm = false;
-        enemy_pcs.clear();
-        phase = FIGHT;
-        lap = 1;
-        stop = 0;
-        last_stop = false;
-        pending = -1;
-        ambush_planned = false;
-        bonus_at = fade_in_at = 0;
-        first_encounter = -1;
-        first_enemies.clear(), first_looks.clear(), first_setup.clear();
-        first_count = 0;
-        zone_encounters.clear(), raptor_types.clear();
-        last_sig = 0;
-        bonus_on = false;
-        reward = 0;
-        lap_started = ambush_started = 0;
-        loading_frames = travel_frames = 0;
-        loading_lives = 0;
-        cache.clear();
-        cache_loading = cache_saving = cache_tried = false;
-        shoot_in = false;
         for (const SurvivalZone& sz : SURVIVAL_ZONES)
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
-        step = SurvivalStep::Preparing;
-        new_record = false;
         best_before = record_of(s, z);
-        wave_started = 0;
     }
 
     void publish() {
