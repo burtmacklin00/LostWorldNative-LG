@@ -183,7 +183,7 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hint = L"Sharp fonts for menus, captions and score instead of the original pixels"},
         {.id = OPT_MENU_FX, .tab = DISPLAY_TAB, .label = L"MENU EFFECTS", .key = "menu_effects", .flag = &FS::menu_effects,
          .kind = TOGGLE,
-         .hint = L"Mist, light rays, storm flashes and a slow drift on the menu backdrop.  Only in the menus, never in game"},
+         .hint = L"Leaves swaying, mist, light rays and a slow drift on the menu backdrop.  Only in the menus, never in game"},
         {.id = OPT_SAT, .tab = DISPLAY_TAB, .label = L"COLOR SATURATION", .key = "saturation", .number = &FS::saturation,
          .lo = 0, .hi = 200, .kind = SLIDER, .step = 10, .text = percent,
          .hint = L"How vivid the colours are (100% = original, 80% by default)"},

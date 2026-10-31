@@ -5,9 +5,9 @@
 // Settings > MENU EFFECTS: the menu backdrop comes alive. The picture marks
 // its own pixels in alpha (ui/frontend.cpp): 254 the jungle backdrop, 253 the
 // logo, 255 everything drawn over them (text, panels, buttons), which is left
-// alone. On the backdrop: a slow camera drift, drifting mist, light rays
-// through the trees and the odd storm flash; on the logo, a glint now and
-// then. A handful of operations per pixel, only while a menu with the
+// alone. On the backdrop: leaves stirring in the wind, a slow camera drift,
+// drifting mist and light rays through the trees; on the logo, a glint now
+// and then. A handful of operations per pixel, only while a menu with the
 // backdrop is open.
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 color;
@@ -42,17 +42,6 @@ float fbm(vec2 p) {   // three octaves: soft, cheap
     return 0.55 * noise(p) + 0.3 * noise(p * 2.03 + 1.7) + 0.15 * noise(p * 4.1 + 3.1);
 }
 
-// Storm flashes: every 9 to 16 seconds a double flicker of about half a second
-float lightning(float t) {
-    float period = 12.5;
-    float k = floor(t / period);
-    float start = k * period + 2.0 + hash(vec2(k, 7.0)) * 6.0;
-    float s = t - start;
-    if (s < 0.0 || s > 0.7) return 0.0;
-    float f = exp(-s * 9.0) + 0.7 * exp(-max(s - 0.22, 0.0) * 12.0) * step(0.22, s);
-    return f * (0.6 + 0.4 * hash(vec2(k, 3.0)));
-}
-
 vec3 backdrop_fx(vec3 c, vec2 p, float aspect, float t, bool logo) {
     // Light rays: soft warm bands slanting down from the top left, slowly swaying
     vec2 q = vec2(p.x * aspect, p.y);
@@ -65,12 +54,10 @@ vec3 backdrop_fx(vec3 c, vec2 p, float aspect, float t, bool logo) {
     // Mist: low, drifting slowly sideways
     float mist = fbm(vec2(q.x * 2.2 + t * 0.03, q.y * 3.0 - t * 0.01));
     mist = smoothstep(0.35, 0.85, mist) * smoothstep(0.35, 1.0, p.y);
-    float flash = lightning(t);
     if (!logo) {
-        c += vec3(1.0, 0.85, 0.55) * rays * 0.10;
-        c = mix(c, vec3(0.55, 0.62, 0.55), mist * 0.16);
+        c += vec3(1.0, 0.85, 0.55) * rays * 0.14;
+        c = mix(c, vec3(0.55, 0.62, 0.55), mist * 0.18);
     }
-    c += vec3(0.75, 0.8, 1.0) * flash * (logo ? 0.25 : 0.35) * (0.6 + 0.4 * (1.0 - p.y));
     return c;
 }
 
@@ -85,10 +72,18 @@ void main() {
             vec2 size = vec2(textureSize(ui, 0));
             float aspect = size.x / size.y;
             vec3 c = color.rgb;
-            if (back) {   // the camera drift: a slow zoom and pan of the jungle
-                float z = 1.0 - 0.012 * (0.5 + 0.5 * sin(t * 0.045));
-                vec2 pan = vec2(sin(t * 0.031), cos(t * 0.023)) * 0.004;
-                vec4 d = texture(ui, (uv - 0.5) * z + 0.5 + pan);
+            if (back) {
+                // The leaves stir in the wind: the jungle warped by slow
+                // noise, in gusts, more at the edges than in the middle;
+                // and the camera drifts: a slow zoom and pan
+                float gust = 0.55 + 0.45 * sin(t * 0.37) * sin(t * 0.11 + 1.0);
+                vec2 w = vec2(noise(uv * vec2(7.0, 5.0) + vec2(t * 0.45, t * 0.2)),
+                              noise(uv * vec2(6.0, 7.0) + vec2(4.1 - t * 0.3, 1.3 + t * 0.35))) - 0.5;
+                float edge = 0.45 + 0.55 * clamp(abs(uv.x - 0.45) * 2.4 + max(uv.y - 0.55, 0.0) * 1.6, 0.0, 1.0);
+                vec2 sway = w * vec2(0.010, 0.007) * gust * edge;
+                float z = 1.0 - 0.03 * (0.5 + 0.5 * sin(t * 0.06));
+                vec2 pan = vec2(sin(t * 0.041), cos(t * 0.029)) * 0.008;
+                vec4 d = texture(ui, (uv - 0.5) * z + 0.5 + pan + sway);
                 if (abs(d.a * 255.0 - 254.0) < 0.5) c = d.rgb;   // (never pulls in text or the logo)
             } else {      // the logo: a glint sweeping across it every 7 seconds
                 float s = fract(t / 7.0) * 3.0 - 1.0;   // -1..2: off, across, off
