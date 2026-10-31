@@ -21,7 +21,8 @@ echo   %CD%
 echo.
 echo Removed: .git, .github, build, docs, src, tests, tools, the build
 echo libraries in third_party, build.bat, setup-and-build, update.bat,
-echo Make Update Pack.bat, Update Packs, the Debug bats,
+echo Make Update Pack.bat, Update Packs, the Debug bats, out (debug
+echo snapshots), an update's _UPDATE - READ ME.txt,
 echo CMakeLists.txt and README.md.
 echo Kept: LostWorld.exe, data, save, your settings, guns, bezels, menu art,
 echo fonts, Hook of the Reaper, the launcher and the setting .bat files.
@@ -35,14 +36,14 @@ if /i not "%ANSWER%"=="YES" (
     goto :end
 )
 
-for %%d in (".git" ".github" "build" "docs" "src" "tests" "tools" "third_party\glslang" "third_party\musashi" "third_party\ngx" "third_party\volk" "third_party\vulkan-headers" "Update Packs") do (
+for %%d in (".git" ".github" "build" "docs" "src" "tests" "tools" "third_party\glslang" "third_party\musashi" "third_party\ngx" "third_party\volk" "third_party\vulkan-headers" "Update Packs" "out") do (
     if exist "%%~d\" (
         echo Deleting %%~d
         attrib -r -h -s "%%~d\*" /s /d >nul 2>&1
         rd /s /q "%%~d"
     )
 )
-for %%f in (".gitattributes" ".gitignore" "build.bat" "CMakeLists.txt" "README.md" "setup-and-build.bat" "setup-and-build.ps1" "update.bat" "update.bat.new" "Make Update Pack.bat" "Debug - Auto Snapshots.bat" "Debug - Capture Popups.bat" "Debug - Dump Textures.bat" "res\lostworld.rc" "res\lostworld.ico" "res\logo.png") do (
+for %%f in (".gitattributes" ".gitignore" "build.bat" "CMakeLists.txt" "README.md" "setup-and-build.bat" "setup-and-build.ps1" "update.bat" "update.bat.new" "Make Update Pack.bat" "Debug - Auto Snapshots.bat" "Debug - Capture Popups.bat" "Debug - Dump Textures.bat" "_UPDATE - READ ME.txt" "res\lostworld.rc" "res\lostworld.ico" "res\logo.png") do (
     if exist "%%~f" (
         echo Deleting %%~f
         del /f /q "%%~f"
