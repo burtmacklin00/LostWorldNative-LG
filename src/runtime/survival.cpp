@@ -79,6 +79,7 @@ constexpr uint32_t P2_SCORE = 0x1A85FC, P2_STAGE_SCORE = 0x1A860C, P2_SHOWN = 0x
 constexpr int TWO_PLAYER_RECORDS = 100;     // a two-player record is kept as zone + 100 in save/survival.ini
 constexpr uint64_t NOBODY_FRAMES = 60;      // no one playing for this long (both out at once): the hunt is over
 constexpr uint32_t FN_PLAYER_HIT[2] = {0x000463D4, 0x00071460};   // hurt the player: lives - 1
+constexpr uint32_t FN_ADD_SCORE = 0x0003DC60;  // (type, player from 1, points): every scoring hit (logged: types 7 and 8)
 // Player 1's score, the score its counter shows (fn_0003E800 draws the digits
 // again when the two differ; the game writes -1 there to force it), then the score of each
 constexpr uint32_t SCORE[7] = {0x1A857C, 0x1C1D54,
@@ -889,6 +890,8 @@ struct Survival : Run {
     }
 
     void give_reward(int p) {   // to the player who shot it
+        printf("[survival] BONUS shot by player %d (playing: %d %d, lives %d %d)\n", p + 1, playing(0), playing(1),
+               lives_of(0), lives_of(1));
         if (!playing(p)) p = playing(0) ? 0 : 1;
         int lives_now = lives_of(p);
         if (lives_now < MAX_LIVES) {
@@ -1056,6 +1059,12 @@ struct Survival : Run {
     void watch_lives() {
         lives = lives_of(0);
         for (int p = 0; p < 2; p++) {
+            static bool was[2] = {};
+            if (playing(p) != was[p]) {
+                was[p] = playing(p);
+                printf("[survival] player %d %s (slot %d, lives %d)\n", p + 1, was[p] ? "in" : "out",
+                       rd8(SLOT_STATE + 0x10 * uint32_t(p)), lives_of(p));
+            }
             if (playing(p)) joined[p] = true;
             if (!last_hit[p]) continue;
             last_hit[p] = false;
@@ -1243,6 +1252,7 @@ void survival_hooks() {
     hook(FN_PLAYLIST_INIT);
     hook(FN_PLAYER_HIT[0]);
     hook(FN_PLAYER_HIT[1]);
+    hook(FN_ADD_SCORE);
 }
 
 bool survival_record(int stage, int zone, int& wave, int& score, int* lap) {
@@ -1312,6 +1322,8 @@ void survival_enter(Ctx& c, uint32_t fn) {
                 g_surv.last_hit[p] = true;
             }
     }
+    if (fn == FN_ADD_SCORE && g_surv.on && g_surv.mode == SurvivalMode::Playing && int32_t(c.r[3]) >= 7)
+        printf("[survival] hit type %d by player %d, %d points\n", int32_t(c.r[3]), int32_t(c.r[4]), int32_t(c.r[5]));
     if (fn == FN_ENCOUNTER && g_surv.on) {
         Survival& s = g_surv;
         uint32_t pc = rd32(VM_PC);
