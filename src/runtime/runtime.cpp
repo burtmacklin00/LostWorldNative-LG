@@ -1074,7 +1074,7 @@ void rt_state_point(Ctx& c) {
             if (g_state_keep_home && !g_home) g_home = capture_state(c);
             apply_state(c, *g_state);
             stats_state_loaded();
-            outputs::quiet(120);   // ~2 s: the loaded game settles before any feedback
+            outputs::quiet(3);   // then until the loaded game holds still (outputs.h)
             g_state_result = 1;
         } else if (g_boot_skip || g_frame - g_state_since < 600) {
             return;

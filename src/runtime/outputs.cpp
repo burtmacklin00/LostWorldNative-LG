@@ -129,6 +129,12 @@ struct Player {
 };
 Player g_player[2];
 std::atomic<int> g_quiet{0};   // frames left without feedback (quiet())
+// After them, still quiet until the players hold still (STEADY_FRAMES in a
+// row with the same slot states and lives), at most SETTLE_MAX frames
+constexpr int STEADY_FRAMES = 12, SETTLE_MAX = 180;
+bool g_settling = false;
+int g_steady = 0, g_settle_frames = 0;
+uint32_t g_seen = 0;   // slot states and lives, packed
 
 }  // namespace
 
@@ -183,8 +189,21 @@ void quiet(int frames) {
 
 void frame(unsigned long long game_frame) {
     if (!g_running) return;
-    if (g_quiet > 0) {   // nothing sent; the players are read again afterwards
+    uint32_t seen = 0;
+    for (int p = 0; p < 2; p++)
+        seen |= uint32_t(rd8(SLOT_STATE + 0x10 * p)) << (16 * p) | (rd32(LIVES[p]) & 0xFF) << (16 * p + 8);
+    bool quiet_now = false;
+    if (g_quiet > 0) {
         g_quiet--;
+        g_settling = true, g_steady = 0, g_settle_frames = 0;
+        quiet_now = true;
+    } else if (g_settling) {
+        g_steady = seen == g_seen ? g_steady + 1 : 0;
+        if (g_steady >= STEADY_FRAMES || ++g_settle_frames > SETTLE_MAX) g_settling = false;
+        else quiet_now = true;
+    }
+    g_seen = seen;
+    if (quiet_now) {   // nothing sent; the players are read again afterwards
         for (int p = 0; p < 2; p++) {
             Player& pl = g_player[p];
             std::string P = "P" + std::to_string(p + 1);
