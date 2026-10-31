@@ -222,6 +222,21 @@ private:
     void upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler sampler, uint32_t slot, int w, int h,
                      const std::vector<uint8_t>& rgba,
                      std::unordered_map<uint32_t, Image>* replace = nullptr);   // the slot's previous picture there is freed
+    // The pictures upload_slot has waiting: their copies go at the start of
+    // the next frame's commands, and their slots are filled then
+    struct Upload {
+        Image img;
+        Buffer staging;
+        uint32_t mips;
+        VkDescriptorSet set;
+        uint32_t binding, slot;
+        VkSampler sampler;
+        std::unordered_map<uint32_t, Image>* replace;
+    };
+    void record_pending_uploads(VkCommandBuffer cmd);
+    void bind_pending_uploads(bool idle);   // idle: the GPU has nothing in flight
+    void flush_uploads(VkCommandBuffer cmd);
+    void free_spent();
 
     // record(), pass by pass. Frame: what they all need
     struct Frame {
@@ -347,6 +362,10 @@ private:
     std::vector<Image> replacements_;
     std::unordered_map<uint32_t, Image> overlay_images_;   // 2D replacement and backdrop pictures by slot
     std::unordered_map<uint32_t, Image> crosshair_images_;   // the players' own crosshair pictures
+    std::vector<Upload> uploads_;
+    size_t upload_bytes_ = 0;             // staging bytes in uploads_
+    std::vector<Image> spent_images_;     // replaced pictures the frame in flight may still read
+    std::vector<Buffer> spent_staging_;   // staging of the uploads in the frame in flight
     VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, replace_sampler_ = VK_NULL_HANDLE,
               overlay_sampler_ = VK_NULL_HANDLE;
     float overlay_brightness_ = 0;
