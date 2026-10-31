@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "../common/paths.h"
 #include "nvsdk_ngx_helpers_vk.h"
 #include "nvsdk_ngx_vk.h"
 
@@ -12,16 +13,8 @@ namespace {
 const char* kProjectId = "5e1c7a3e-3b8f-4d2a-9f6e-1d4c2b7a9e10";
 const char* kEngineVersion = "1.0";
 
-std::wstring exe_dir() {
-    wchar_t path[MAX_PATH];
-    DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
-    std::wstring dir(path, n);
-    size_t sep = dir.find_last_of(L"\\/");
-    return sep == std::wstring::npos ? L"." : dir.substr(0, sep);
-}
-
 struct Discovery {
-    std::wstring dir = exe_dir();
+    std::wstring dir = exe_folder_w();
     const wchar_t* paths[1];
     NVSDK_NGX_FeatureCommonInfo common{};
     NVSDK_NGX_FeatureDiscoveryInfo info{};

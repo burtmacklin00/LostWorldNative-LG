@@ -15,17 +15,9 @@ namespace {
 
 void save_plane(const std::string& dir, uint64_t hash, const std::vector<uint32_t>& plane) {
     CreateDirectoryA(dir.c_str(), nullptr);
-    std::vector<uint8_t> rgba(plane.size() * 4);
-    for (size_t i = 0; i < plane.size(); i++) {
-        uint32_t c = plane[i];
-        rgba[i * 4 + 0] = uint8_t(c >> 16);
-        rgba[i * 4 + 1] = uint8_t(c >> 8);
-        rgba[i * 4 + 2] = uint8_t(c);
-        rgba[i * 4 + 3] = uint8_t(c >> 24);
-    }
     char name[32];
     snprintf(name, sizeof(name), "/%016llx.png", (unsigned long long)hash);
-    png_save(dir + name, SkyPack::SIZE, SkyPack::SIZE, rgba.data());
+    png_save_bgra(dir + name, SkyPack::SIZE, SkyPack::SIZE, plane.data());
     printf("[sky] backdrop saved to %s%s\n", dir.c_str(), name);
 }
 }  // namespace
