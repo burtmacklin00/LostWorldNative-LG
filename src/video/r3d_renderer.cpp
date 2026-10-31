@@ -775,7 +775,8 @@ void R3DRenderer::bind_scene_image(VkImageView view, VkImageView alpha) {
         w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         w[i].pImageInfo = &info[i];
     }
-    if (composed_view_) vkDeviceWaitIdle(dev_);   // the previous frame may still be reading it
+    // (only while recording a frame: the one before is over, and this one has
+    // not bound the composition's set yet)
     vkUpdateDescriptorSets(dev_, 2, w, 0, nullptr);
     composed_view_ = view;
 }
@@ -886,101 +887,143 @@ void R3DRenderer::upload_texture_rows(const std::vector<uint16_t>& rows, int y0,
     }
 }
 
+// A picture for a descriptor slot. It is not copied to the GPU here: frames
+// in flight may still read the slot's previous picture, so its copy, its mip
+// chain and the slot itself wait for the start of the next frame's commands
+// (flush_uploads), when the frame before is over. A batch that grows past
+// UPLOAD_BATCH (a whole texture pack at once) goes out right away in one submit
+// instead, rather than holding that much staging memory.
+constexpr size_t UPLOAD_BATCH = 64 << 20;
+
 void R3DRenderer::upload_slot(VkDescriptorSet set, uint32_t binding, VkSampler sampler, uint32_t slot, int w, int h,
                               const std::vector<uint8_t>& rgba, std::unordered_map<uint32_t, Image>* replace) {
-    {
-        uint32_t mips = 1;
-        while ((std::max(w, h) >> mips) > 0) mips++;
-        Image img;
-        VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ii.imageType = VK_IMAGE_TYPE_2D;
-        ii.format = VK_FORMAT_R8G8B8A8_UNORM;
-        ii.extent = {uint32_t(w), uint32_t(h), 1};
-        ii.mipLevels = mips;
-        ii.arrayLayers = 1;
-        ii.samples = VK_SAMPLE_COUNT_1_BIT;
-        ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        if (vkCreateImage(dev_, &ii, nullptr, &img.image) != VK_SUCCESS) return;
-        VkMemoryRequirements req;
-        vkGetImageMemoryRequirements(dev_, img.image, &req);
-        VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        ai.allocationSize = req.size;
-        ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (vkAllocateMemory(dev_, &ai, nullptr, &img.memory) != VK_SUCCESS) {
-            vkDestroyImage(dev_, img.image, nullptr);
-            return;
+    uint32_t mips = 1;
+    while ((std::max(w, h) >> mips) > 0) mips++;
+    Image img;
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ii.extent = {uint32_t(w), uint32_t(h), 1};
+    ii.mipLevels = mips;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (vkCreateImage(dev_, &ii, nullptr, &img.image) != VK_SUCCESS) return;
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(dev_, img.image, &req);
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(dev_, &ai, nullptr, &img.memory) != VK_SUCCESS) {
+        vkDestroyImage(dev_, img.image, nullptr);
+        return;
+    }
+    vkBindImageMemory(dev_, img.image, img.memory, 0);
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = img.image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = ii.format;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mips, 0, 1};
+    vkCreateImageView(dev_, &vi, nullptr, &img.view);
+    img.w = uint32_t(w);
+    img.h = uint32_t(h);
+
+    Upload u{.img = img, .mips = mips, .set = set, .binding = binding, .slot = slot, .sampler = sampler, .replace = replace};
+    if (!create_buffer(u.staging, rgba.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) {
+        destroy_image(u.img);
+        return;
+    }
+    memcpy(u.staging.mapped, rgba.data(), rgba.size());
+    uploads_.push_back(u);
+    upload_bytes_ += rgba.size();
+    if (upload_bytes_ >= UPLOAD_BATCH) {
+        vk_->run_once([&](VkCommandBuffer cmd) { record_pending_uploads(cmd); });   // (it waits for the queue)
+        bind_pending_uploads(true);
+    }
+}
+
+// The copies of the waiting pictures and their mip chains (each level a
+// filtered blit of the previous one), ready to be sampled
+void R3DRenderer::record_pending_uploads(VkCommandBuffer cmd) {
+    for (Upload& u : uploads_) {
+        Image& img = u.img;
+        auto barrier = [&](uint32_t level, VkImageLayout from, VkImageLayout to) {
+            VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+            b.oldLayout = from;
+            b.newLayout = to;
+            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            b.image = img.image;
+            b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                                 nullptr, 0, nullptr, 1, &b);
+        };
+        barrier(0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy c{};
+        c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        c.imageExtent = {img.w, img.h, 1};
+        vkCmdCopyBufferToImage(cmd, u.staging.buffer, img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        for (uint32_t l = 1; l < u.mips; l++) {
+            barrier(l - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            barrier(l, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l - 1, 0, 1};
+            blit.srcOffsets[1] = {int32_t(std::max(1u, img.w >> (l - 1))), int32_t(std::max(1u, img.h >> (l - 1))), 1};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1};
+            blit.dstOffsets[1] = {int32_t(std::max(1u, img.w >> l)), int32_t(std::max(1u, img.h >> l)), 1};
+            vkCmdBlitImage(cmd, img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, img.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+            barrier(l - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
-        vkBindImageMemory(dev_, img.image, img.memory, 0);
-        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        vi.image = img.image;
-        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = ii.format;
-        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mips, 0, 1};
-        vkCreateImageView(dev_, &vi, nullptr, &img.view);
-        img.w = uint32_t(w);
-        img.h = uint32_t(h);
-
-        Buffer staging;
-        if (!create_buffer(staging, rgba.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) return;
-        memcpy(staging.mapped, rgba.data(), rgba.size());
-        vk_->run_once([&](VkCommandBuffer cmd) {
-            auto barrier = [&](uint32_t level, VkImageLayout from, VkImageLayout to) {
-                VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-                b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-                b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-                b.oldLayout = from;
-                b.newLayout = to;
-                b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                b.image = img.image;
-                b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1};
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                                     nullptr, 0, nullptr, 1, &b);
-            };
-            barrier(0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            VkBufferImageCopy c{};
-            c.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            c.imageExtent = {img.w, img.h, 1};
-            vkCmdCopyBufferToImage(cmd, staging.buffer, img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-            // Mip chain: each level is a filtered blit of the previous one
-            for (uint32_t l = 1; l < mips; l++) {
-                barrier(l - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-                barrier(l, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                VkImageBlit blit{};
-                blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l - 1, 0, 1};
-                blit.srcOffsets[1] = {int32_t(std::max(1u, img.w >> (l - 1))), int32_t(std::max(1u, img.h >> (l - 1))), 1};
-                blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1};
-                blit.dstOffsets[1] = {int32_t(std::max(1u, img.w >> l)), int32_t(std::max(1u, img.h >> l)), 1};
-                vkCmdBlitImage(cmd, img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, img.image,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-                barrier(l - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            }
-            barrier(mips - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        });
-        destroy_buffer(staging);
+        barrier(u.mips - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         img.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+}
 
-        VkDescriptorImageInfo info{sampler, img.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+// Their slots, once the commands that copy them are recorded or done. What
+// they replace (and their staging) may still be in use by the commands in
+// flight unless the GPU is idle: freed at the next frame
+void R3DRenderer::bind_pending_uploads(bool idle) {
+    for (Upload& u : uploads_) {
+        VkDescriptorImageInfo info{u.sampler, u.img.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        wr.dstSet = set;
-        wr.dstBinding = binding;
-        wr.dstArrayElement = slot;
+        wr.dstSet = u.set;
+        wr.dstBinding = u.binding;
+        wr.dstArrayElement = u.slot;
         wr.descriptorCount = 1;
         wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         wr.pImageInfo = &info;
-        if (replace) {   // the slot's previous picture is no longer needed
-            auto old = replace->find(slot);
-            if (old != replace->end()) {
-                vkDeviceWaitIdle(dev_);   // frames in flight may still read it
-                destroy_image(old->second);
-            }
-            vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
-            (*replace)[slot] = img;
-            return;
-        }
         vkUpdateDescriptorSets(dev_, 1, &wr, 0, nullptr);
-        replacements_.push_back(img);
+        if (u.replace) {
+            auto old = u.replace->find(u.slot);
+            if (old != u.replace->end()) spent_images_.push_back(old->second);
+            (*u.replace)[u.slot] = u.img;
+        } else {
+            replacements_.push_back(u.img);
+        }
+        spent_staging_.push_back(u.staging);
     }
+    uploads_.clear();
+    upload_bytes_ = 0;
+    if (idle) free_spent();
+}
+
+void R3DRenderer::free_spent() {
+    for (Image& img : spent_images_) destroy_image(img);
+    for (Buffer& b : spent_staging_) destroy_buffer(b);
+    spent_images_.clear();
+    spent_staging_.clear();
+}
+
+// At the start of a frame's commands, the frame before is over (one frame in
+// flight): what it left spent is freed, and the waiting pictures go out
+void R3DRenderer::flush_uploads(VkCommandBuffer cmd) {
+    free_spent();
+    if (uploads_.empty()) return;
+    record_pending_uploads(cmd);
+    bind_pending_uploads(false);
 }
 
 void R3DRenderer::add_replacements(const std::vector<RgbaImage>& images) {
@@ -2186,6 +2229,7 @@ void R3DRenderer::record_compose(const Frame& f, const ComposePush& pc, VkImageV
 
 // A frame, pass by pass (each one in its own function above)
 void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent) {
+    flush_uploads(cmd);
     // Placement in the window (widescreen or 4:3) and internal 3D resolution
     Frame f{};
     f.cmd = cmd;
@@ -2313,7 +2357,9 @@ void R3DRenderer::record_repeat(VkCommandBuffer cmd, VkImageView target, VkExten
         record(cmd, target, extent);
         return;
     }
-    // Everything the composition reads is as the last record() left it
+    // Everything the composition reads is as the last record() left it,
+    // with the pictures uploaded since
+    flush_uploads(cmd);
     Frame f = repeat_frame_;
     f.cmd = cmd;
     ComposePush pc = repeat_push_;
@@ -2339,5 +2385,15 @@ void R3DRenderer::shutdown() {
     for (Image& img : replacements_) destroy_image(img);
     for (auto& [slot, img] : overlay_images_) destroy_image(img);
     for (auto& [slot, img] : crosshair_images_) destroy_image(img);
+    for (Upload& u : uploads_) destroy_image(u.img), destroy_buffer(u.staging);
+    uploads_.clear();
+    free_spent();
     for (Buffer* b : {&texture_staging_, &layer_staging_, &vertices_, &atmosphere_uniform_}) destroy_buffer(*b);
+    for (VkSampler sm : {nearest_, linear_, replace_sampler_, overlay_sampler_})
+        if (sm) vkDestroySampler(dev_, sm, nullptr);
+    for (VkPipelineLayout l : {r3d_layout_, compose_layout_, bloom_layout_, ao_layout_})
+        if (l) vkDestroyPipelineLayout(dev_, l, nullptr);
+    if (pool_) vkDestroyDescriptorPool(dev_, pool_, nullptr);   // (and the sets from it)
+    for (VkDescriptorSetLayout l : {r3d_set_layout_, compose_set_layout_, bloom_set_layout_, ao_set_layout_})
+        if (l) vkDestroyDescriptorSetLayout(dev_, l, nullptr);
 }

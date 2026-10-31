@@ -572,6 +572,13 @@ void VkPresenter::shutdown() {
     if (device_) {
         vkDeviceWaitIdle(device_);
         destroy_swapchain();
+        for (VkSemaphore sem : rendered_)
+            if (sem) vkDestroySemaphore(device_, sem, nullptr);
+        if (acquired_) vkDestroySemaphore(device_, acquired_, nullptr);
+        if (fence_) vkDestroyFence(device_, fence_, nullptr);
+        if (pool_) vkDestroyCommandPool(device_, pool_, nullptr);   // (and cmd_)
+        if (capture_buffer_) vkDestroyBuffer(device_, capture_buffer_, nullptr);
+        if (capture_memory_) vkFreeMemory(device_, capture_memory_, nullptr);
         vkDestroyDevice(device_, nullptr);
     }
     if (surface_) vkDestroySurfaceKHR(instance_, surface_, nullptr);
