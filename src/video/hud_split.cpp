@@ -38,13 +38,33 @@ std::vector<int> classify(const std::vector<Box>& boxes) {
         g.x0 = std::min(g.x0, b.x0), g.y0 = std::min(g.y0, b.y0);
         g.x1 = std::max(g.x1, b.x1), g.y1 = std::max(g.y1, b.y1);
     }
-    std::vector<int> side(n, 0);
-    for (int i = 0; i < n; i++) {
-        const Box& g = group[find(parent, i)];
+    // Each group's side: wide enough, below the popups, on one side of the middle
+    std::vector<int> group_side(n, 0);
+    for (int r = 0; r < n; r++) {
+        if (find(parent, r) != r) continue;
+        const Box& g = group[r];
         if (g.x1 - g.x0 + 1 < (g.y0 >= LIVES_ROW ? MIN_WIDTH_LIVES : MIN_WIDTH)) continue;
         if (g.y1 < POPUP_ROWS) continue;   // a shot's popup under the scores: where the game puts it
-        side[i] = g.x1 < MIDDLE_X0 ? -1 : g.x0 >= MIDDLE_X1 ? 1 : 0;
+        group_side[r] = g.x1 < MIDDLE_X0 ? -1 : g.x0 >= MIDDLE_X1 ? 1 : 0;
     }
+    // A narrow group just under a moving one and centred within it (the
+    // countdown under CONTINUE!, 2 players) goes with it, staying centred
+    for (int r = 0; r < n; r++) {
+        if (find(parent, r) != r || group_side[r] != 0) continue;
+        const Box& g = group[r];
+        if (g.y0 < POPUP_ROWS || g.y0 >= LIVES_ROW) continue;
+        int cx = (g.x0 + g.x1) / 2;
+        for (int a = 0; a < n; a++) {
+            if (a == r || find(parent, a) != a || group_side[a] == 0) continue;
+            const Box& o = group[a];
+            if (o.y1 < g.y0 && g.y0 - o.y1 <= FOLLOW_GAP && cx >= o.x0 && cx <= o.x1 && g.x1 - g.x0 < o.x1 - o.x0) {
+                group_side[r] = group_side[a];
+                break;
+            }
+        }
+    }
+    std::vector<int> side(n, 0);
+    for (int i = 0; i < n; i++) side[i] = group_side[find(parent, i)];
     return side;
 }
 

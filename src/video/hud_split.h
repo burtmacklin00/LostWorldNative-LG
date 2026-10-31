@@ -28,6 +28,7 @@ constexpr int POPUP_ROWS = 120;
 constexpr int LIVES_ROW = 320;          // the lives row at the bottom: a single heart (32 px) still moves
 constexpr int MIN_WIDTH_LIVES = 16;
 constexpr int JOIN_X = 16, JOIN_Y = 8;  // gaps that still make one group (letters, lines of one prompt)
+constexpr int FOLLOW_GAP = 20;          // a narrow group this close under a moving one goes with it (CONTINUE! countdown)
 
 struct Box { int x0, y0, x1, y1; };     // inclusive, 2D pixels of the 4:3 screen
 

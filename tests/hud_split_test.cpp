@@ -75,6 +75,16 @@ int main() {
         std::vector<uint32_t> r = s.rows();
         check(r[75] == 0, "a shot's popup stays where the game puts it");
     }
+    {   // 2 players: CONTINUE! on player 2's side and its countdown 13 rows under it move together
+        Screen s;
+        s.text(336, 227, 112, 19);   // CONTINUE!
+        s.fill(389, 259, 410, 284);  // 9
+        auto r = s.rows();
+        check(moves_right(r[236], 340) && moves_right(r[270], 400), "countdown follows CONTINUE!");
+        Screen p;   // a narrow number alone stays (a hit's points)
+        p.fill(389, 259, 410, 284);
+        check(!moves_right(p.rows()[270], 400), "a lone number stays");
+    }
     {   // A message across the middle (STAGE CLEAR) stays whole
         Screen s;
         s.text(150, 180, 200, 20);
