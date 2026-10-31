@@ -144,6 +144,7 @@ const std::vector<Entry>& table() {
         off("--no-free-play", &Options::free_play, "coins needed to start and continue (5 / 6)"),
         off("--no-outputs", &Options::outputs, "no Hook of the Reaper outputs (TCP port 8000)"),
         flag("--gamepads", &Options::gamepads, "controllers play too (off by default: light guns, or the mouse)"),
+        off("--no-menu-effects", &Options::menu_effects, "a still menu backdrop: no mist, light rays, storm flashes or drift"),
         off("--no-all-arenas", &Options::all_arenas, "SURVIVAL's arenas open only once reached in the arcade game"),
         off("--no-trigger-start", &Options::trigger_start, "the gun's trigger does not start or continue a game"),
         num("--crosshair-hide", &Options::crosshair_hide, "hide a crosshair after N seconds unused (0 = never)"),

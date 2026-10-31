@@ -22,6 +22,8 @@ public:
         cursor_x_ = x, cursor_y_ = y;
     }
     bool visible() const { return visible_; }
+    // Settings > MENU EFFECTS: the backdrop's mist, light rays, flashes and drift (ui.frag)
+    void set_effects(bool on) { effects_ = on; }
 
     // After the main renderer: blends the picture over the swapchain image
     void record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent);
@@ -43,6 +45,7 @@ private:
     uint32_t pending_w_ = 0, pending_h_ = 0;
     bool dirty_ = false, visible_ = false;
     bool cursor_visible_ = false;
+    bool effects_ = false;
     float cursor_x_ = 0, cursor_y_ = 0;
     uint32_t dirty_y0_ = 0, dirty_y1_ = 0;   // rows to upload
     bool filled_ = false;   // the image holds a picture (a partial upload keeps the rest)

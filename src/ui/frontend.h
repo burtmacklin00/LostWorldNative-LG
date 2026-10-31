@@ -53,6 +53,7 @@ struct FrontendSettings {
     int rain = 2;          // rain where the game has its own: 0 off, 1 light, 2 heavy
     bool random_weather = true;   // random weather in RANDOM SPAWNS and survival (runtime/weather.h)
     bool hd_text = true;
+    bool menu_effects = true;   // the menu backdrop animated (ui.frag)
     bool crosshair = true;
     int crosshair_style = 1; // 0 the drawn rings, 1 the crosshair.png pictures when there are any (ui/crosshair_file.h)
     int crosshair_hide = 0; // seconds without use before a crosshair hides: 0 never, 3, 5 or 10
@@ -170,7 +171,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_MENU_FX, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
         NO_ROW,   // a setting only kept in the file
     };
     // How an option row shows its value: a switch, a choice with a dot per

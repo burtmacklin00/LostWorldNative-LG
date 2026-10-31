@@ -11,6 +11,7 @@ set "SET_resolution_3d=100"
 set "SET_half_rate=0"
 set "SET_vsync=1"
 set "SET_frame_cap=0"
+set "SET_menu_effects=1"
 set "SET_motion=smooth"
 set "SET_aa=msaa"
 set "SET_ray_tracing=ao"
@@ -30,7 +31,7 @@ set "SET_lightning=1"
 set "SET_rain=heavy"
 set "SET_flashlight=modern"
 set "SET_random_weather=1"
-set "KEYS=resolution_3d half_rate vsync frame_cap motion aa ray_tracing ao shadows sun light_shafts soft_particles sky surface_detail bloom hdr rim_light sharpen haze lightning rain flashlight random_weather"
+set "KEYS=resolution_3d half_rate vsync frame_cap menu_effects motion aa ray_tracing ao shadows sun light_shafts soft_particles sky surface_detail bloom hdr rim_light sharpen haze lightning rain flashlight random_weather"
 call :apply
 exit /b
 rem ---------------------------------------------------------------------------

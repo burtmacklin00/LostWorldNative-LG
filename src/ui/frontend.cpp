@@ -181,6 +181,9 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hint = L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start"},
         {.id = OPT_TEXT, .tab = DISPLAY_TAB, .label = L"HD TEXT", .key = "hd_text", .flag = &FS::hd_text, .kind = TOGGLE,
          .hint = L"Sharp fonts for menus, captions and score instead of the original pixels"},
+        {.id = OPT_MENU_FX, .tab = DISPLAY_TAB, .label = L"MENU EFFECTS", .key = "menu_effects", .flag = &FS::menu_effects,
+         .kind = TOGGLE,
+         .hint = L"Mist, light rays, storm flashes and a slow drift on the menu backdrop.  Only in the menus, never in game"},
         {.id = OPT_SAT, .tab = DISPLAY_TAB, .label = L"COLOR SATURATION", .key = "saturation", .number = &FS::saturation,
          .lo = 0, .hi = 200, .kind = SLIDER, .step = 10, .text = percent,
          .hint = L"How vivid the colours are (100% = original, 80% by default)"},
@@ -1460,9 +1463,18 @@ void Frontend::backdrop_background() {
     fill(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.6f);
     hgrad(int(w_ * 0.64f), 0, w_, h_, 0x040508, 0.0f, 0.6f);
     vgrad(0, int(h_ * 0.72f), w_, h_, 0x000000, 0.0f, 0.6f);
+    // Marked for ui.frag's MENU EFFECTS: 254 the jungle, 253 the logo
+    for (uint32_t& p : bg_) p = (p & 0xFFFFFFu) | 0xFE000000u;
     if (has_logo()) {   // the logo picture, area-averaged down to LOGO_SCREEN_H of the window
         int lh = int(LOGO_SCREEN_H * h_), lw = lh * logo_.w / logo_.h;
-        sprite(logo_, int(w_ - LOGO_PICTURE_X * u_) - lw / 2, int(LOGO_SCREEN_TOP * h_), lw, lh);
+        int lx = int(w_ - LOGO_PICTURE_X * u_) - lw / 2, ly = int(LOGO_SCREEN_TOP * h_);
+        std::vector<uint32_t> under(bg_);
+        sprite(logo_, lx, ly, lw, lh);
+        for (int y = std::max(ly, 0); y < std::min(ly + lh, h_); y++)
+            for (int x = std::max(lx, 0); x < std::min(lx + lw, w_); x++) {
+                uint32_t& p = bg_[size_t(y) * w_ + x];
+                if (p != under[size_t(y) * w_ + x]) p = (p & 0xFFFFFFu) | 0xFD000000u;
+            }
     } else if (has_poster()) {   // the logo cut out of the poster: its disc and its banner (cover.png's shapes)
         float s, x0, y0;
         poster_layout(s, x0, y0);

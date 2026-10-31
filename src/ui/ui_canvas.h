@@ -27,7 +27,10 @@ inline uint32_t over(uint32_t d, uint32_t rgb, int a) {
     int k = 256 - a;
     uint32_t rb = (((rgb & 0xFF00FFu) * a + (d & 0xFF00FFu) * k) >> 8) & 0xFF00FFu;
     uint32_t g = (((rgb & 0x00FF00u) * a + (d & 0x00FF00u) * k) >> 8) & 0x00FF00u;
-    uint32_t da = ((255u * a + (d >> 24) * k) >> 8);
+    uint32_t dst_a = d >> 24;
+    // 253 / 254: the backdrop's logo / jungle (ui.frag animates those);
+    // anything drawn over them is the menu's own, left still (255)
+    uint32_t da = dst_a == 253 || dst_a == 254 ? 255u : ((255u * a + dst_a * k) >> 8);
     return rb | g | (da << 24);
 }
 
