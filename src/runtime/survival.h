@@ -40,7 +40,8 @@ struct SurvivalView {
     SurvivalMode mode = SurvivalMode::Off;
     int stage = 0, zone = 0;   // as the player counts them (stage from 1)
     int wave = 0;              // from 1
-    int score = 0, lives = 0;
+    int score = 0, lives = 0;  // the score is the team's (both players)
+    int players = 1;           // 2: player 2 has played in this run (two-player records)
     int lap = 1;               // laps of the zone, from 1
     int best_wave = 0, best_score = 0, best_lap = 0;   // record before this game
     bool new_record = false;
@@ -75,6 +76,7 @@ void survival_begin(int stage, int zone);
 void survival_ungate();
 void survival_end();
 bool survival_enabled();
+bool survival_blocks_p2();     // player 2's controls kept out: the way in, start and results screens
 SurvivalView survival_view();
 bool survival_owns_inputs();   // the mode drives the controls (getting into the stage)
 void survival_confirm();       // shot or Enter on the start / results screen

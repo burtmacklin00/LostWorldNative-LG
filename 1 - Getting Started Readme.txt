@@ -24,7 +24,9 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
 
  Every SURVIVAL arena is open from the start (Options > GAME > ALL
  ARENAS OPEN; with it off, each arena opens once you reach it in
- CLASSIC ARCADE).
+ CLASSIC ARCADE). Survival is for one or two players: player 2 joins
+ with their start button at the first stop of any lap, and a player who
+ is out comes back with the next lap. Two players have their own records.
 
 
 ---------------------------------------------------------------------

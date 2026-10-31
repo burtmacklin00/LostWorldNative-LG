@@ -23,6 +23,16 @@
 // get one more first), so the game never reaches its CONTINUE screen: that hit
 // ends the hunt with the results screen; playing again starts over there.
 //
+// Two players: player 2 (or a player who is out) can join at the first stop
+// of every lap, while the arena is held there; the state kept for the next
+// lap is taken again (once the stop is cleared) with whoever plays then. A
+// player who is out at a lap's end comes back with the next lap. Only the hit
+// that would take the last life of the last player still in is held back (as
+// above); while the other still plays, a player loses the last life as in the
+// arcade (its CONTINUE countdown, with no joining again until the first stop).
+// The hunt ends when no one is left; the score is the team's, and two-player
+// runs keep their own records.
+//
 // --trace-survival writes out/survival_trace.txt: per frame the stage, zone,
 // camera, tasks and the encounter machine, plus every task the game creates and
 // every call of the zone trigger task. The addresses are in docs/game_ram.md.
@@ -61,6 +71,12 @@ constexpr uint32_t CAMERA_POS = 0x1A6F28;   // floats x, y, z: camera position
 constexpr uint32_t TASK_HEAD = 0x1C10B0;    // first task; node +8 next, +0xC function
 constexpr uint32_t FN_TASK_NEW = 0x00116A48;   // (size, fn) -> task
 constexpr uint32_t PLAYER_LIFE = 0x1A3720;  // player 1 object (0x1A36C8) + 0x58: lives left
+constexpr uint32_t LIFE[2] = {0x1A3720, 0x1A377C};   // each player's lives (player 2: object 2 + 0x58)
+constexpr uint32_t SLOT_STATE = 0x1A3791;   // +0x10 for player 2: 1 / 2 playing, 0 CONTINUE, 3 out
+// Player 2's score block follows player 1's (0x80 bytes on), its counter +4
+constexpr uint32_t P2_SCORE = 0x1A85FC, P2_STAGE_SCORE = 0x1A860C, P2_SHOWN = 0x1C1D58;
+constexpr int TWO_PLAYER_RECORDS = 100;     // a two-player record is kept as zone + 100 in save/survival.ini
+constexpr uint64_t NOBODY_FRAMES = 30;      // no one playing for this long (both out at once): the hunt is over
 constexpr uint32_t FN_PLAYER_HIT[2] = {0x000463D4, 0x00071460};   // hurt the player: lives - 1
 // Player 1's score, the score its counter shows (fn_0003E800 draws the digits
 // again when the two differ; the game writes -1 there to force it), then the score of each
@@ -383,7 +399,12 @@ struct Run {
     uint32_t last_sig = 0;        // the wave before (the same one never comes twice in a row)
     std::vector<std::vector<int32_t>> first_enemies, first_looks;
     std::vector<int32_t> first_setup;
-    int saved_lives = 0, saved_score = 0;   // kept over the state put back at a new lap
+    int saved_lives[2] = {}, saved_score[2] = {};   // kept over the state put back at a new lap
+    bool was_playing[2] = {};     // at the lap's end
+    bool joined[2] = {true, false};   // played in this run (player 2: a two-player run)
+    unsigned marked = 1;          // who was playing when the lap's state was kept (bit per player)
+    bool remarking = false;       // that state being taken again, with the players now
+    uint64_t nobody_since = 0;    // frame no one was playing any more (0: someone is)
     uint64_t fade_in_at = 0;      // the picture comes back from black (after a new lap)
     double lap_started = 0;       // banner
     double ambush_started = 0;
@@ -395,7 +416,7 @@ struct Run {
     int reward = 0;
     double reward_at = 0;
 
-    bool last_hit = false;        // a hit function ran with one life left
+    bool last_hit[2] = {};        // a hit function ran with that player's last life held back
     uint64_t dying_until = 0;     // the last attack plays out until this frame, then the results
     Best best_before;
     bool new_record = false;
@@ -422,6 +443,18 @@ struct Survival : Run {
     SurvivalView view;
 
     int alive() const { return std::max(int(rd32(VM_ALIVE)), int(rd32(VM_ALIVE2))); }
+    static bool playing(int p) {
+        uint8_t st = rd8(SLOT_STATE + 0x10 * uint32_t(p));
+        return st == 1 || st == 2;
+    }
+    static int lives_of(int p) { return int(rd32(LIFE[p])); }
+    static unsigned roster() { return (playing(0) ? 1u : 0u) | (playing(1) ? 2u : 0u); }
+    // A player who is not playing may join (start) now: at the first stop of a
+    // lap, until the state for the next lap is taken again
+    bool can_join() const {
+        return mode == SurvivalMode::Playing && !dying_until && stop == 0 && !remarking &&
+               (phase == FIGHT || phase == CLEARED);
+    }
 
     uint32_t rand(uint32_t n) { return script::rand_below(rng, n); }
 
@@ -769,6 +802,21 @@ struct Survival : Run {
             break;
         case CLEARED:
             if (f < phase_at + clear_frames()) break;
+            // The first stop with other players than when the lap's state was
+            // kept: kept again now (cleared, before the walk), so the next lap
+            // comes back with them
+            if (stop == 0 && roster() != marked && roster() != 0) {
+                if (!remarking) {
+                    game_state_mark();
+                    remarking = true;
+                    break;
+                }
+                if (game_state_result() == 0) break;
+                remarking = false;
+                marked = roster();
+                printf("[survival] the lap's start kept again: player%s %s\n", marked == 3 ? "s" : "",
+                       marked == 3 ? "1 and 2" : marked == 2 ? "2" : "1");
+            }
             if (last_stop) start_lap_out();
             else start_walk();
             break;
@@ -797,8 +845,11 @@ struct Survival : Run {
 
     // The end of the zone: fade out, then the state kept at the first stop
     void start_lap_out() {
-        saved_lives = int(rd32(PLAYER_LIFE));
-        saved_score = score();
+        for (int p = 0; p < 2; p++) {
+            saved_lives[p] = lives_of(p);
+            was_playing[p] = playing(p);
+        }
+        saved_score[0] = int(rd32(SCORE[0])), saved_score[1] = int(rd32(P2_SCORE));
         bonus_on = false;
         bonus_at = 0;
         ambush_planned = false;
@@ -809,15 +860,21 @@ struct Survival : Run {
     // The game is back at the first stop (or, if that failed, still at the last)
     void new_lap(bool back) {
         if (back) {
-            wr32(PLAYER_LIFE, uint32_t(saved_lives));
-            for (uint32_t a : {SCORE[0], SCORE[2 + size_t(stage)]}) wr32(a, uint32_t(saved_score));
-            wr32(SCORE[1], ~0u);   // the counter shows it
+            // Who was in at the lap's end keeps their lives; a player who was
+            // out comes back with the lives they had when the state was kept
+            for (int p = 0; p < 2; p++)
+                if (was_playing[p] && playing(p)) wr32(LIFE[p], uint32_t(saved_lives[p]));
+            for (uint32_t a : {SCORE[0], SCORE[2 + size_t(stage)]}) wr32(a, uint32_t(saved_score[0]));
+            for (uint32_t a : {P2_SCORE, P2_STAGE_SCORE + 4 * uint32_t(stage)}) wr32(a, uint32_t(saved_score[1]));
+            wr32(SCORE[1], ~0u);   // the counters show them
+            wr32(P2_SHOWN, ~0u);
             enemies = first_enemies, looks = first_looks, setup = first_setup;
             encounter = first_encounter;
         } else {
             printf("[survival] could not go back to the first stop: the lap goes on here\n");
         }
-        lives = saved_lives;
+        lives = lives_of(0);
+        nobody_since = 0;
         lap++;
         stop = 0;
         last_stop = false;
@@ -828,14 +885,19 @@ struct Survival : Run {
         printf("[survival] lap %d\n", lap);
     }
 
-    void give_reward() {
-        int lives_now = int(rd32(PLAYER_LIFE));
+    void give_reward(int p) {   // to the player who shot it
+        if (!playing(p)) p = playing(0) ? 0 : 1;
+        int lives_now = lives_of(p);
         if (lives_now < MAX_LIVES) {
-            wr32(PLAYER_LIFE, uint32_t(lives_now + 1));
+            wr32(LIFE[p], uint32_t(lives_now + 1));
             reward = 1;
-        } else {
+        } else if (p == 0) {
             for (uint32_t a : {SCORE[0], SCORE[2 + size_t(stage)]}) wr32(a, rd32(a) + GOLD_POINTS);
             wr32(SCORE[1], ~0u);
+            reward = 2;
+        } else {
+            for (uint32_t a : {P2_SCORE, P2_STAGE_SCORE + 4 * uint32_t(stage)}) wr32(a, rd32(a) + GOLD_POINTS);
+            wr32(P2_SHOWN, ~0u);
             reward = 2;
         }
         reward_at = now_seconds();
@@ -861,19 +923,19 @@ struct Survival : Run {
         float t = float(f - (bonus_until - BONUS_FRAMES)) / 57.5f;
         bonus_x = bonus_bx + 0.06f * std::sin(t * 1.7f);
         bonus_y = bonus_by + 0.04f * std::sin(t * 2.3f);
-        bool hit = false;
+        int hit_by = -1;
         for (int p = 0; p < 2; p++) {
             bool down = g_inputs.p[p].trigger;
             PlayerAim a = player_aim(p);
             if (down && !trigger_was[p] && a.inside &&
                 std::hypot((a.x - bonus_x) * 496.0f, (a.y - bonus_y) * 384.0f) < BONUS_HIT)
-                hit = true;
+                hit_by = p;
             trigger_was[p] = down;
         }
-        if (test_env().bonus && f >= bonus_until - BONUS_FRAMES + 60) hit = true;   // testing aid: shot by itself
-        if (hit) {
+        if (test_env().bonus && f >= bonus_until - BONUS_FRAMES + 60) hit_by = 0;   // testing aid: shot by itself
+        if (hit_by >= 0) {
             bonus_on = false;
-            give_reward();
+            give_reward(hit_by);
         } else if (f >= bonus_until || phase == LAP_OUT) {
             bonus_on = false;
         }
@@ -949,19 +1011,20 @@ struct Survival : Run {
             diff);
     }
 
-    int score() const { return int(rd32(SCORE[0])); }
+    int score() const { return int(rd32(SCORE[0])) + (joined[1] ? int(rd32(P2_SCORE)) : 0); }   // the team's
 
     void set_diff(int d) { wr8(SETTING_DIFF, uint8_t((rd8(SETTING_DIFF) & 0x0F) | (d << 4))); }
     void restore() { set_diff(base_diff); }   // the difficulty as the settings have it
 
     // The hunt is over: keep the record and show the results
     void finish() {
-        Best best = record_of(stage + 1, zone);
+        int key = zone + (joined[1] ? TWO_PLAYER_RECORDS : 0);   // two players: their own records
+        Best best = record_of(stage + 1, key);
         best_before = best;
         new_record = wave + 1 > best.wave || (wave + 1 == best.wave && score() > best.score);
-        if (new_record) keep_record(stage + 1, zone, {wave + 1, score(), lap});
-        printf("[survival] end: lap %d, wave %d, %d points%s\n", lap, wave + 1, score(),
-               new_record ? " (record)" : "");
+        if (new_record) keep_record(stage + 1, key, {wave + 1, score(), lap});
+        printf("[survival] end: lap %d, wave %d, %d points%s%s\n", lap, wave + 1, score(),
+               joined[1] ? " (two players)" : "", new_record ? " (record)" : "");
         mode = SurvivalMode::Results;
         results_at = now_seconds();
     }
@@ -972,9 +1035,13 @@ struct Survival : Run {
         set_diff(base_diff);
         wave = -1;
         lap = 0;
-        saved_lives = start_lives;
-        saved_score = 0;
-        best_before = record_of(stage + 1, zone);
+        saved_lives[0] = start_lives;
+        saved_score[0] = saved_score[1] = 0;
+        was_playing[0] = true, was_playing[1] = false;   // player 2 (if in the kept state) as they were then
+        joined[0] = true, joined[1] = (marked & 2) != 0;
+        nobody_since = 0;
+        dying_until = 0;
+        best_before = record_of(stage + 1, zone + (joined[1] ? TWO_PLAYER_RECORDS : 0));
         new_record = false;
         mode = SurvivalMode::Playing;
         if (game_state_load_mark()) set_phase(LAP_LOAD);
@@ -983,14 +1050,32 @@ struct Survival : Run {
 
     // After a hit with one life left (survival_enter gave one more): did it take it?
     void watch_lives() {
-        lives = int(rd32(PLAYER_LIFE));
-        if (!last_hit) return;
-        last_hit = false;
-        if (lives <= 1) {   // it did: the hunt is over, once the attack has been seen
+        lives = lives_of(0);
+        for (int p = 0; p < 2; p++) {
+            if (playing(p)) joined[p] = true;
+            if (!last_hit[p]) continue;
+            last_hit[p] = false;
+            int l = lives_of(p);
+            if (l <= 1) {   // it did: the hunt is over, once the attack has been seen
+                if (p == 0) lives = 0;
+                if (!dying_until) dying_until = g_frame_no + DYING_FRAMES, log("  last hit (player %d)\n", p + 1);
+            } else {        // that call did not hurt this player
+                wr32(LIFE[p], uint32_t(l - 1));
+                if (p == 0) lives = l - 1;
+            }
+        }
+        // No one left (both lost their last life to the same attack, or the
+        // other one's CONTINUE ran out): over too
+        bool anyone = playing(0) || playing(1);
+        if (anyone || dying_until || phase == LAP_OUT || phase == LAP_LOAD) {
+            nobody_since = 0;
+        } else if (!nobody_since) {
+            nobody_since = g_frame_no;
+        } else if (g_frame_no - nobody_since > NOBODY_FRAMES) {
+            nobody_since = 0;
             lives = 0;
-            if (!dying_until) dying_until = g_frame_no + DYING_FRAMES, log("  last hit\n");
-        } else {            // that call did not hurt
-            wr32(PLAYER_LIFE, uint32_t(--lives));
+            dying_until = g_frame_no + 1;
+            log("  no one left\n");
         }
     }
 
@@ -1081,6 +1166,7 @@ struct Survival : Run {
         view.zone = zone;
         view.wave = wave + 1;
         view.score = mode == SurvivalMode::Loading ? 0 : score();
+        view.players = joined[1] ? 2 : 1;
         view.lives = lives;
         view.best_wave = best_before.wave;
         view.best_score = best_before.score;
@@ -1186,6 +1272,8 @@ void survival_end() {
 
 bool survival_enabled() { return g_surv.on || g_begin; }
 
+bool survival_blocks_p2() { return survival_enabled() && !(g_surv.on && !g_begin && g_surv.mode == SurvivalMode::Playing); }
+
 SurvivalView survival_view() {
     std::lock_guard<std::mutex> lock(g_surv.view_mutex);
     return g_surv.view;
@@ -1209,10 +1297,15 @@ void survival_enter(Ctx& c, uint32_t fn) {
         for (int32_t i = std::max(0, int32_t(rd32(PLAYLIST_INDEX)) + 1); i < 5; i++)
             wr32(PLAYLIST + 4 * uint32_t(i), uint32_t(g_surv.stage));
     }
-    if ((fn == FN_PLAYER_HIT[0] || fn == FN_PLAYER_HIT[1]) && g_surv.on && g_surv.mode == SurvivalMode::Playing &&
-        int(rd32(PLAYER_LIFE)) <= 1) {   // this hit would end the game: it takes the extra life instead
-        wr32(PLAYER_LIFE, rd32(PLAYER_LIFE) + 1);
-        g_surv.last_hit = true;
+    if ((fn == FN_PLAYER_HIT[0] || fn == FN_PLAYER_HIT[1]) && g_surv.on && g_surv.mode == SurvivalMode::Playing) {
+        // A hit that would take the last life of the last player still in
+        // would end the game: it takes an extra life instead (watch_lives)
+        int in = int(Survival::playing(0)) + int(Survival::playing(1));
+        for (int p = 0; p < 2; p++)
+            if (in == 1 && Survival::playing(p) && Survival::lives_of(p) <= 1) {
+                wr32(LIFE[p], rd32(LIFE[p]) + 1);
+                g_surv.last_hit[p] = true;
+            }
     }
     if (fn == FN_ENCOUNTER && g_surv.on) {
         Survival& s = g_surv;
@@ -1375,7 +1468,11 @@ bool survival_frame(Ctx&) {
                 s.mode = SurvivalMode::Playing;
                 s.wave_started = s.lap_started = now_seconds();
                 for (uint32_t a : SCORE) wr32(a, 0);
+                wr32(P2_SCORE, 0);
+                for (uint32_t k = 0; k < 5; k++) wr32(P2_STAGE_SCORE + 4 * k, 0);
                 wr32(SCORE[1], ~0u);   // the counter shows the 0 (it still showed the score of the way in)
+                s.joined[0] = true, s.joined[1] = false;
+                s.marked = 1;
                 game_state_mark();   // the first stop: every lap starts again from here
                 log("  survival wave 1 count %zu (the encounter itself)\n", s.enemies.size());
                 s.set_phase(Survival::FIGHT);
@@ -1388,7 +1485,7 @@ bool survival_frame(Ctx&) {
             s.tick();
             s.watch_lives();
             if (s.dying_until) {   // the player's controls do nothing meanwhile (survival_owns_inputs)
-                g_inputs.p[0].trigger = g_inputs.p[0].offscreen = false;
+                for (PlayerInputs& pl : g_inputs.p) pl.trigger = pl.offscreen = false;
                 if (g_frame_no >= s.dying_until) {
                     s.dying_until = 0;
                     s.finish();
@@ -1408,6 +1505,9 @@ bool survival_frame(Ctx&) {
         }
         s.publish();
     }
+    // Joining: in a run only at the first stop of a lap (Survival::can_join)
+    bool join_ok = !s.on || s.mode != SurvivalMode::Playing || s.can_join();
+    for (int p = 0; p < 2; p++) g_inputs.p[p].no_join = !join_ok && !(s.on && Survival::playing(p));
     if (!g_trace) return hold;
     if (const char* life = test_env().life; life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
     if (test_env().god) {   // testing aid: the player's life never drops
