@@ -268,8 +268,8 @@ saved games and are not versioned.
   speakers (4.0, 5.1 or 7.1; with 5.1 to the sides if there are no rears); on
   headphones they are mixed with crossfeed and the rears sound duller and
   wider, as if from behind.
-- --rear-boost N (AUDIO tab, REAR BOOST; default OFF): extra dB (3 to
-  12) on the rear speakers (slave SCSP). In the arcade they are in the
+- --rear-boost N (AUDIO tab, REAR LEVEL; default 0 DB): dB on the rear
+  speakers (slave SCSP), from -6 (quieter) to +12 in steps of 3. In the arcade they are in the
   seat, next to the head, and they carry the T-Rex roars and many effects.
   The T-Rex roars and the rest of the mix play at their original level.
 - --linear-samples (AUDIO tab, SAMPLE QUALITY = ORIGINAL): linear

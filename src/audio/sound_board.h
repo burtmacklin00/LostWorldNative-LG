@@ -22,7 +22,7 @@ public:
     void dump_wav(const char* path);
     void close_wav();
     void set_volume(float gain) { gain_ = gain; }
-    // Extra level of the rear pair (slave SCSP), in dB: on the cabinet those
+    // Level of the rear pair (slave SCSP), in dB, quieter or louder: on the cabinet those
     // speakers sit in the seat by the player's head, and the T-Rex roars and
     // many effects play there
     void set_rear_boost(int db) { rear_gain_ = std::pow(10.0f, float(db) / 20.0f); }
