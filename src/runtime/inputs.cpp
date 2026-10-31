@@ -1,7 +1,8 @@
 #include "inputs.h"
 
+#include "../common/clock.h"
+
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
@@ -73,11 +74,6 @@ int pad_player(int pad, uint32_t connected) {
 // player_join: coin held for 100 ms, then start for 100 ms after a pause, so
 // the game sees each press on its own (it reads the buttons at 57.5 Hz)
 static double g_join_at[2] = {-1, -1};
-
-static double now_seconds() {
-    using namespace std::chrono;
-    return duration<double>(steady_clock::now().time_since_epoch()).count();
-}
 
 void player_join(int player) {
     if (g_join_at[player] < 0) g_join_at[player] = now_seconds();

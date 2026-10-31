@@ -49,6 +49,11 @@ Entry custom(const char* name, const char* value_name, const char* help, bool te
              std::function<void(Options&, const char*)> set) {
     return {name, value_name, help, false, test, std::move(set)};
 }
+// Parsed by the ExtraOption handler (the modes' own options): listed here for
+// the help and the test runs only
+Entry elsewhere(const char* name, const char* value_name, const char* help, bool test = false) {
+    return {name, value_name, help, false, test, {}};
+}
 
 // The order is the order of the help
 const std::vector<Entry>& table() {
@@ -153,6 +158,11 @@ const std::vector<Entry>& table() {
              "save the state before and after FN on that frame (tools/diff_unicorn.py)"),
         custom("--trace", "A,B,...", "count the calls to those functions (hex addresses)", false,
                [](Options& o, const char* v) { o.traces.push_back(v); }),
+        section("Survival mode"),
+        elsewhere("--survival", "STAGE:ZONE", "wave arena in that stage and zone (see README)"),
+        elsewhere("--trace-survival", nullptr, "trace of the mode in out/survival_trace.txt", true),
+        section("Random spawns"),
+        elsewhere("--random-spawns", nullptr, "the arcade game with its encounters shuffled (CLASSIC > RANDOM SPAWNS)"),
     };
     return t;
 }
@@ -180,14 +190,6 @@ void print_usage(FILE* out) {
         if (e.value_name) left += std::string(" ") + e.value_name;
         fprintf(out, "  %-28s %s\n", left.c_str(), e.help);
     }
-    fprintf(out,
-            "Survival mode:\n"
-            "  %-28s %s\n  %-28s %s\n"
-            "Random spawns:\n"
-            "  %-28s %s\n",
-            "--survival STAGE:ZONE", "wave arena in that stage and zone (see README)",
-            "--trace-survival", "trace of the mode in out/survival_trace.txt",
-            "--random-spawns", "the arcade game with its encounters shuffled (CLASSIC > RANDOM SPAWNS)");
 }
 
 bool options_disable_menu(int argc, char** argv, std::initializer_list<const char*> more) {
@@ -212,7 +214,7 @@ bool parse_options(Options& o, int argc, char** argv, const ExtraOption& extra, 
             return false;
         }
         const char* next = i + 1 < argc ? argv[i + 1] : nullptr;
-        if (const Entry* e = find(a)) {
+        if (const Entry* e = find(a); e && e->set) {
             if (!e->value_name) {
                 e->set(o, nullptr);
             } else if (e->optional) {

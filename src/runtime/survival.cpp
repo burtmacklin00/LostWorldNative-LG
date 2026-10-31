@@ -33,7 +33,6 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -45,6 +44,7 @@
 #include <set>
 #include <vector>
 
+#include "../common/clock.h"
 #include "../common/random_seed.h"
 #include "bosses.h"
 #include "encounter_script.h"
@@ -141,14 +141,10 @@ uint64_t g_frame_no = 0;
 
 float rdf(uint32_t a) { return float(f2d(rd32(a))); }
 
-double now_seconds() {
-    using namespace std::chrono;
-    return duration<double>(steady_clock::now().time_since_epoch()).count();
-}
 
 void hook(uint32_t fn) {
     g_hooks.insert(fn);
-    g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7));
+    rt_hook_function(fn);
 }
 
 void log(const char* fmt, ...) {
@@ -1001,16 +997,12 @@ struct Survival : Run {
         uint64_t f = loading_frames;
         uint32_t select = rd32(COURSE_SELECT);
         bool boot = g_frame_no < 900;   // a button held during the boot changes what it does
-        g_inputs.p[0].coin = !boot && select == 0 && f % 240 < 6;
-        g_inputs.p[0].start = !boot && select == 0 && f % 240 >= 60 && f % 240 < 66;
+        auto_coin_start(g_inputs.p[0], f, !boot && select == 0);
         g_inputs.p[0].trigger = !boot && (select == 1 || select == 2) && f % 90 < 6;
         g_inputs.p[0].offscreen = false;
         g_inputs.p[0].gun_x = 128, g_inputs.p[0].gun_y = 128;
         if (select == 0xC && shoot_in) {   // in the stage: shoots its way to the arena, lives kept
-            g_inputs.p[0].trigger = f % 12 < 3;
-            g_inputs.p[0].offscreen = f % 240 < 3;
-            g_inputs.p[0].gun_x = int(40 + (f * 7) % 180);
-            g_inputs.p[0].gun_y = int(40 + (f * 3) % 170);
+            auto_sweep_fire(g_inputs.p[0], f);
             if (!loading_lives) loading_lives = rd32(PLAYER_LIFE);
             if (loading_lives) wr32(PLAYER_LIFE, loading_lives);
         }
@@ -1201,7 +1193,6 @@ bool survival_owns_inputs() {
 
 void survival_confirm() { g_surv.confirm = true; }
 
-double survival_now() { return now_seconds(); }
 
 void survival_enter(Ctx& c, uint32_t fn) {
     if (!g_hooks.count(fn)) return;
@@ -1420,13 +1411,8 @@ bool survival_frame(Ctx&) {
         uint32_t life = rd32(PLAYER_LIFE);
         if (life > 0 && life < 5) wr32(PLAYER_LIFE, 5);
     }
-    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
-        uint64_t f = g_frame_no;
-        g_inputs.p[0].trigger = f % 12 < 3;
-        g_inputs.p[0].offscreen = f % 240 < 3;
-        g_inputs.p[0].gun_x = int(40 + (f * 7) % 180);
-        g_inputs.p[0].gun_y = int(40 + (f * 3) % 170);
-    }
+    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC)   // testing aid: shoots all over the screen
+        auto_sweep_fire(g_inputs.p[0], g_frame_no);
     static std::map<uint32_t, uint32_t> last;
     auto now = tasks();
     for (auto& [t, fn] : last)

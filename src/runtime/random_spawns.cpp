@@ -244,7 +244,7 @@ bool random_spawns_option(const std::string& name) {
 }
 
 void random_spawns_hooks() {
-    for (uint32_t fn : {FN_ENCOUNTER_START, FN_ADD_SCORE}) g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7));
+    for (uint32_t fn : {FN_ENCOUNTER_START, FN_ADD_SCORE}) rt_hook_function(fn);
     if (const char* p = getenv("LW_HIT_PROBE")) g_probe = fopen(p, "wb");
 }
 

@@ -49,6 +49,20 @@ struct Inputs {
 
 extern Inputs g_inputs;
 
+// Testing aids (the boss states, survival's way in, LW_SURV_AUTOPLAY): a
+// credit and start every 240 frames while `on`, and shots swept over the
+// screen with a reload now and then
+inline void auto_coin_start(PlayerInputs& p, uint64_t f, bool on = true) {
+    p.coin = on && f % 240 < 6;
+    p.start = on && f % 240 >= 60 && f % 240 < 66;
+}
+inline void auto_sweep_fire(PlayerInputs& p, uint64_t f) {
+    p.trigger = f % 12 < 3;
+    p.offscreen = f % 240 < 3;
+    p.gun_x = int(40 + (f * 7) % 180);
+    p.gun_y = int(40 + (f * 3) % 170);
+}
+
 // Aim of a player as a fraction of the 4:3 game screen (outside 0..1 = off
 // it, or in the side bands of a wide 3D view): sets that gun's ADC values and
 // keeps it for the crosshair. The mouse, the second mouse and the pads all
