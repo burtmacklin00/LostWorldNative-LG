@@ -18,6 +18,8 @@
 #include "../audio/audio_out.h"
 #include "../audio/sound_board.h"
 #include "../video/r3d_state.h"
+#include "../video/tilegen.h"
+#include "../common/clock.h"
 
 // ROMs, loaded by main() from g_data_dir
 extern std::vector<uint8_t> g_crom, g_banked, g_vrom;
@@ -41,7 +43,6 @@ extern AutoInput g_auto;
 
 // The game thread: runs the recompiled program on a 512 MB native stack
 DWORD WINAPI game_thread(LPVOID);
-double qpc_seconds();              // seconds from a fixed origin (QueryPerformanceCounter)
 void frame_log(const char* fmt, ...);   // LW_FRAMELOG (app.cpp); does nothing without it
 extern LARGE_INTEGER g_qpf, g_start_time;
 extern bool g_realtime;            // pace the game to real time (off with LW_FAST)
@@ -68,3 +69,6 @@ extern R3DTextureRam g_texture_ram;
 extern std::mutex g_video_mutex;
 extern std::vector<uint8_t> g_video_vram;
 extern uint64_t g_video_frame;
+// Bumped each time a page of g_video_vram is copied again (g_video_mutex):
+// a copy of it only needs the pages whose number has changed since
+extern uint64_t g_video_page_serial[TILEGEN_PAGES];

@@ -15,7 +15,8 @@ from analyze import Memory  # noqa: E402
 
 SCRIPT = 0x1268B8
 WORDS = 0x13DF
-# Negative opcodes and how many words follow them
+# Negative opcodes and how many words follow them (the same as op_args in
+# src/runtime/encounter_script.cpp: the encounter_script test checks it)
 OPS = {-1: 0, -8: 1, -9: 3, -10: 1, -11: 4, -12: 0, -13: 0, -14: 0, -15: 0, -17: 2, -19: 1, -20: 1,
        -5: 1, -21: 1, -22: 0, -23: 1, -24: 2, -25: 3, -26: 2, -27: 1, -28: 1, -29: 0, -30: 0, -31: 0, -32: 0,
        -33: 0, -998: 0, -999: 0}

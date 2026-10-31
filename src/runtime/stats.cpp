@@ -357,7 +357,7 @@ void stats_init() {
     g.load();
     g.on = true;
     g.rebase = true;
-    g_trace_bits[(FN_ADD_SCORE >> 5) & 511] |= uint8_t(1 << ((FN_ADD_SCORE >> 2) & 7));
+    rt_hook_function(FN_ADD_SCORE);
 }
 
 void stats_boss_begin(int boss) {

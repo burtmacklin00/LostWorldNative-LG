@@ -43,7 +43,7 @@ struct SurvivalView {
     int lap = 1;               // laps of the zone, from 1
     int best_wave = 0, best_score = 0, best_lap = 0;   // record before this game
     bool new_record = false;
-    double wave_started = 0;   // qpc seconds when the wave on screen began (banner)
+    double wave_started = 0;   // now_seconds() (common/clock.h) when the wave on screen began (banner)
     SurvivalStep step = SurvivalStep::Preparing;
     float progress = 0;        // 0..1 of the way in
     int left = 0, total = 0;   // dinosaurs of the wave still to beat (alive or to come), of how many
@@ -77,4 +77,3 @@ bool survival_enabled();
 SurvivalView survival_view();
 bool survival_owns_inputs();   // the mode drives the controls (getting into the stage)
 void survival_confirm();       // shot or Enter on the start / results screen
-double survival_now();         // the clock of SurvivalView::wave_started (seconds)

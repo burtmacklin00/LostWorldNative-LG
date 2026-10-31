@@ -14,10 +14,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <ctime>
 #include <set>
 #include <vector>
 
+#include "../common/random_seed.h"
+#include "encounter_script.h"
 #include "ppc_rt.h"
 #include "weather.h"
 
@@ -26,14 +27,8 @@ bool survival_enabled();
 
 namespace {
 
-constexpr uint32_t SCRIPT = 0x1268B8;       // the encounter scripts (RAM, copied there at boot)
-constexpr uint32_t SCRIPT_ROM = 0xFFF468BC; // where the boot code copies them from
-constexpr uint32_t SCRIPT_WORDS = 0x13DF;
-constexpr uint32_t FN_ENCOUNTER_START = 0x00039428;   // (record) with record+0x14 = encounter
+using script::FN_ENCOUNTER_START, script::FN_RAPTOR, script::FN_PLACED, script::FN_PLACED_XZ;
 constexpr uint32_t FN_ADD_SCORE = 0x0003DC60;   // (type, player from 1, points): every scoring hit
-constexpr uint32_t FN_RAPTOR = 0x00053BB4;   // (slot 1..5, type, group of spawn positions)
-constexpr uint32_t FN_PLACED = 0x00063ADC;   // (kind, x, z, heading): the stage 2 river
-constexpr uint32_t FN_PLACED_XZ = 0x0007409C;   // (x, z): the same stretch
 constexpr uint32_t COURSE_SELECT = 0x1C2AD8; // 0xC while a game is played
 constexpr uint32_t STAGE = 0x1A623C;         // byte: current stage (0 = stage 1)
 constexpr uint32_t ZONE = 0x1A3984;          // low nibble: current zone
@@ -73,67 +68,20 @@ std::atomic<bool> g_playing{false};   // a shuffled arcade game is being played
 uint32_t g_rng = 1;
 bool g_patched = true;    // the script in RAM may not be the ROM's (a game state loaded)
 
-uint32_t rnd(uint32_t n) {
-    g_rng = g_rng * 1103515245u + 12345u;
-    return n ? (g_rng >> 16) % n : 0;
-}
+uint32_t rnd(uint32_t n) { return script::rand_below(g_rng, n); }
 int32_t rnd_between(int32_t lo, int32_t hi) { return lo + int32_t(rnd(uint32_t(hi - lo + 1))); }
 
-int32_t rom_word(uint32_t pc) { return int32_t(rd32(SCRIPT_ROM + 4 * pc)); }
-
-// Words that follow each negative opcode (as in survival.cpp, tools/encounters.py)
-int op_args(int32_t op) {
-    switch (op) {
-    case -1: case -12: case -13: case -14: case -15: case -22: case -29: case -30: case -31: case -32: case -33:
-    case -998: case -999: return 0;
-    case -5: case -8: case -10: case -19: case -20: case -21: case -23: case -27: case -28: return 1;
-    case -17: case -24: case -26: return 2;
-    case -9: case -25: return 3;
-    case -11: return 4;
-    default: return -1;
-    }
-}
-
-bool is_enemy_fn(uint32_t fn) {
-    switch (fn) {
-    case 0x53BB4: case 0x61AF8: case 0x627E8: case 0x46B50: case 0x536CC: case 0x63ADC: case 0x7409C:
-    case 0x71914: return true;
-    default: return false;
-    }
-}
+int32_t rom_word(uint32_t pc) { return int32_t(rd32(script::ROM + 4 * pc)); }
 
 // One operation or call of an encounter, with its words
-struct Tok {
-    uint32_t pc;
-    std::vector<int32_t> w;
-    bool call() const { return w[0] >= 0; }
-    int32_t op() const { return w[0]; }
-    uint32_t fn() const { return call() ? uint32_t(w[1]) : 0; }
-    bool raptor() const { return fn() == FN_RAPTOR && w.size() >= 6 && w[3] >= 1 && w[3] <= 5; }
-};
+using Tok = script::Item;
+bool is_raptor(const Tok& t) { return t.fn() == FN_RAPTOR && t.w.size() >= 6 && t.w[3] >= 1 && t.w[3] <= 5; }
 
 // Encounter `id` as the ROM has it, from its header to its end (included); empty if not found
 std::vector<Tok> parse(int id) {
-    uint32_t i = 0;
-    while (i < SCRIPT_WORDS) {
-        int32_t op = rom_word(i);
-        if (op == -10 && rom_word(i + 1) == id) break;
-        int n = op < 0 ? op_args(op) : -2;
-        if (op < 0 && n < 0) return {};
-        i += op < 0 ? 1 + uint32_t(n) : 3 + uint32_t(rom_word(i + 2));
-    }
     std::vector<Tok> out;
-    for (uint32_t h = i; i < SCRIPT_WORDS;) {
-        int32_t op = rom_word(i);
-        if (op == -10 && i != h) break;
-        uint32_t len = op < 0 ? 1 + uint32_t(std::max(0, op_args(op))) : 3 + uint32_t(rom_word(i + 2));
-        if ((op < 0 && op_args(op) < 0) || len > 64) return {};
-        Tok t{i, {}};
-        for (uint32_t k = 0; k < len; k++) t.w.push_back(rom_word(i + k));
-        out.push_back(t);
-        i += len;
-        if (op == -999 || op == -998) break;
-    }
+    uint32_t h = script::find(rom_word, id);
+    if (h == script::NOT_FOUND || !script::walk(rom_word, h, [&](const Tok& t) { out.push_back(t); })) return {};
     return out;
 }
 
@@ -161,7 +109,7 @@ void gather(const std::vector<Tok>& toks, std::vector<Spawn>& out) {
     float x = 0, z = 0;
     for (const Tok& t : toks) {
         if (t.op() == -9) look = true, x = float(t.w[1]), z = float(t.w[3]);
-        if (look && t.raptor()) out.push_back({x, z, t.w[4], t.w[5]});
+        if (look && is_raptor(t)) out.push_back({x, z, t.w[4], t.w[5]});
     }
 }
 
@@ -175,7 +123,7 @@ bool plain_section(const std::vector<Tok>& toks, size_t a, size_t& end) {
             end = i + 1;
             return enemies > 0;
         }
-        if (t.call() && is_enemy_fn(t.fn())) enemies++;
+        if (t.enemy()) enemies++;
         else if (!(t.op() == -25 || t.op() == -26 || t.op() == -21)) return false;
     }
     return false;
@@ -228,8 +176,8 @@ void shuffle(int id) {
     float x = 0, z = 0;
     for (Tok& t : toks) {
         if (t.op() == -9) look = true, x = float(t.w[1]), z = float(t.w[3]);
-        if (!t.call() || !is_enemy_fn(t.fn())) continue;
-        if (t.raptor() && look) {
+        if (!t.enemy()) continue;
+        if (is_raptor(t) && look) {
             std::vector<int32_t> groups;
             for (const Spawn& s : spawns)
                 if (std::hypot(s.x - x, s.z - z) < NEAR_LOOK) groups.push_back(s.group);
@@ -259,14 +207,14 @@ void shuffle(int id) {
     }
     reorder(toks, ch);
     for (const Tok& t : toks)
-        for (size_t k = 0; k < t.w.size(); k++) wr32(SCRIPT + 4 * (t.pc + uint32_t(k)), uint32_t(t.w[k]));
+        for (size_t k = 0; k < t.w.size(); k++) wr32(script::BASE + 4 * (t.pc + uint32_t(k)), uint32_t(t.w[k]));
     g_patched = true;
     printf("[random] encounter %d: %d raptors moved, %d other types, %d placed, %d retimed, %d sections reordered\n",
            id, ch.moved, ch.types, ch.placed, ch.timed, ch.reordered);
 }
 
 void restore() {
-    for (uint32_t i = 0; i < SCRIPT_WORDS; i++) wr32(SCRIPT + 4 * i, rd32(SCRIPT_ROM + 4 * i));
+    for (uint32_t i = 0; i < script::WORDS; i++) wr32(script::BASE + 4 * i, rd32(script::ROM + 4 * i));
     g_patched = false;
 }
 
@@ -296,7 +244,7 @@ bool random_spawns_option(const std::string& name) {
 }
 
 void random_spawns_hooks() {
-    for (uint32_t fn : {FN_ENCOUNTER_START, FN_ADD_SCORE}) g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7));
+    for (uint32_t fn : {FN_ENCOUNTER_START, FN_ADD_SCORE}) rt_hook_function(fn);
     if (const char* p = getenv("LW_HIT_PROBE")) g_probe = fopen(p, "wb");
 }
 
@@ -320,7 +268,7 @@ void random_spawns_frame() {
 }
 
 void random_spawns_set(bool on) {
-    if (on && !g_on) g_rng = uint32_t(time(nullptr)) | 1;
+    if (on && !g_on) g_rng = random_seed() | 1;
     g_boss = {};
     g_on = on;
 }

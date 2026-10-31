@@ -42,6 +42,7 @@
 #include "free_play.h"
 #include "weather.h"
 #include "../audio/sound_board.h"
+#include "../common/paths.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
@@ -167,7 +168,7 @@ static void settings_from_options(const Options& o, FrontendSettings& s) {
     s.volume = std::clamp(int(o.volume + 0.5f), 0, 10);
     s.speakers = std::clamp(o.speakers, 0, 2);
     s.cubic_samples = o.cubic_samples;
-    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, 0, 12);
+    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, -6, 12);
     s.aa = o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
     s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
     for (int sc : FrontendSettings::SCALES)
@@ -538,29 +539,11 @@ static bool load_snapshot(const char* path) {
         std::lock_guard<std::mutex> lock(g_video_mutex);
         g_video_vram = vram;
         g_video_frame = state->frame;
+        for (uint64_t& serial : g_video_page_serial) serial++;
     }
     std::lock_guard<std::mutex> lock(g_r3d_mutex);
     g_r3d_latest = std::move(state);
     return true;
-}
-
-static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return;
-    BITMAPFILEHEADER fh{};
-    BITMAPINFOHEADER ih{};
-    fh.bfType = 0x4D42;
-    fh.bfOffBits = sizeof(fh) + sizeof(ih);
-    fh.bfSize = fh.bfOffBits + DWORD(w) * h * 4;
-    ih.biSize = sizeof(ih);
-    ih.biWidth = w;
-    ih.biHeight = -h;   // top-down
-    ih.biPlanes = 1;
-    ih.biBitCount = 32;
-    fwrite(&fh, sizeof(fh), 1, f);
-    fwrite(&ih, sizeof(ih), 1, f);
-    fwrite(px, 4, size_t(w) * h, f);
-    fclose(f);
 }
 
 // When the image being recorded will be on screen: with vsync the images go
@@ -587,7 +570,7 @@ struct DisplayClock {
     Mode mode = Vblanks;
     bool told = false;        // the mode was printed
     double tick(HWND hwnd) {
-        double now = qpc_seconds();
+        double now = now_seconds();
         if (last > 0 && now - last < 0.1) {
             double dt = std::clamp(now - last, 1.0 / 1000, 0.05);
             interval = interval > 0 ? interval + 0.01 * (dt - interval) : dt;
@@ -744,12 +727,6 @@ static void pacing_sample(double now, double display, double shown, const R3DFra
 }
 
 // The folder of LostWorld.exe, with its trailing backslash
-static std::string exe_folder() {
-    char path[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string s(path, n);
-    return s.substr(0, s.find_last_of("\\/") + 1);
-}
 static bool file_exists(const std::string& path) { return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
 static std::string full_path(const std::string& path) {
     char full[MAX_PATH];
@@ -925,7 +902,7 @@ int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);   // keep logs even if the process dies
     // The menus (and the settings they save) are left out of test runs, so
     // those always start from the same defaults
-    g_opt.menu = !options_disable_menu(argc, argv, {"--trace-survival"});
+    g_opt.menu = !options_disable_menu(argc, argv);
     FrontendSettings ini;
     // The first start (no settings saved yet) picks the QUALITY for the graphics card
     bool first_start = g_opt.menu && !file_exists("save/settings.ini");
@@ -964,14 +941,14 @@ int main(int argc, char** argv) {
         size_t at = d.find('@');
         if (at != std::string::npos) g_diff_frame = strtoull(d.c_str() + at + 1, nullptr, 10);
         g_trace_hits[g_diff_fn] = 0;
-        g_trace_bits[(g_diff_fn >> 5) & 511] |= uint8_t(1 << ((g_diff_fn >> 2) & 7));
+        rt_hook_function(g_diff_fn);
     }
     for (const std::string& list : g_opt.traces) {   // comma-separated: --trace 10F650,10D564
         size_t p = 0;
         while (p < list.size()) {
             uint32_t fn = strtoul(list.c_str() + p, nullptr, 16);
             g_trace_hits[fn] = 0;
-            g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7));
+            rt_hook_function(fn);
             p = list.find(',', p);
             if (p == std::string::npos) break;
             p++;
@@ -1109,7 +1086,8 @@ int main(int argc, char** argv) {
     }
     R3DRenderer renderer;
     if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa)) {
-        fprintf(stderr, "Could not start the 3D renderer\n");
+        fprintf(stderr, "Could not start the 3D renderer on %s (see the [vulkan] line above)\n",
+                presenter.device_name().c_str());
         return 1;
     }
     renderer.set_max_aspect(g_opt.max_aspect);
@@ -1215,6 +1193,8 @@ int main(int argc, char** argv) {
     struct Snapshot2D {
         uint64_t frame = ~0ull;
         std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);
+        std::array<uint64_t, TILEGEN_PAGES> serial;   // g_video_page_serial of each page copied
+        Snapshot2D() { serial.fill(~0ull); }
     };
     std::array<Snapshot2D, 4> snaps;   // the 2D layers of the last vblanks (snaps_mutex)
     size_t newest_snap = 0;
@@ -1225,8 +1205,13 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lock(g_video_mutex);
         if (g_video_frame != snaps[newest_snap].frame && !g_boot_skip) {
             newest_snap = (newest_snap + 1) % snaps.size();
-            snaps[newest_snap].frame = g_video_frame;
-            memcpy(snaps[newest_snap].vram.data(), g_video_vram.data(), TILEGEN_SIZE);
+            Snapshot2D& s = snaps[newest_snap];
+            s.frame = g_video_frame;
+            for (uint32_t p = 0; p < TILEGEN_PAGES; p++)   // (the pages copied again since this one was filled)
+                if (s.serial[p] != g_video_page_serial[p]) {
+                    memcpy(&s.vram[p << 16], &g_video_vram[p << 16], 0x10000);
+                    s.serial[p] = g_video_page_serial[p];
+                }
         }
     };
     // Copies the newest 2D layers at or before that vblank into `out` (its
@@ -1359,16 +1344,15 @@ int main(int argc, char** argv) {
     for (int i = 0; i < BOSS_COUNT; i++)
         if (game_state_valid(boss_state_path(i))) frontend.boss_status[i] = Frontend::BOSS_READY;
     auto start_maker = [&](int i) {
-        wchar_t exe[MAX_PATH];
-        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        const std::wstring exe = exe_path_w();
         const std::string& rom = g_rom_zip.empty() ? g_data_dir : g_rom_zip;
-        std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --make-boss-state " + std::to_wstring(i + 1) +
+        std::wstring cmd = L"\"" + exe + L"\" --make-boss-state " + std::to_wstring(i + 1) +
                            (g_rom_zip.empty() ? L" --data \"" : L" --rom \"") + std::wstring(rom.begin(), rom.end()) +
                            L"\"";
         STARTUPINFOW si{};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE,
+        if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE,
                             CREATE_NO_WINDOW | CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi)) {
             frontend.boss_status[i] = Frontend::BOSS_FAILED;
             return;
@@ -1438,7 +1422,7 @@ int main(int argc, char** argv) {
     toast.set_volume(g_opt.volume);
     MenuMusic music;   // over the menus' backdrop, when there is a music file
     if (g_opt.menu && !g_opt.headless) music.open();
-    double music_time = qpc_seconds();
+    double music_time = now_seconds();
 
     // Composes the 2D layers of a vblank (out.frame, its layer memory in
     // out.vram) for the renderer. One composition at a time (prep_mutex): the
@@ -1636,15 +1620,15 @@ int main(int argc, char** argv) {
                 std::future<void> layers;
                 if (p->layers.frame != ~0ull)
                     layers = std::async(std::launch::async, [&] { compose_2d(p->layers); });
-                double from = qpc_seconds();
+                double from = now_seconds();
                 builder.build(*state, p->scene);
-                double built_at = qpc_seconds();
+                double built_at = now_seconds();
                 pictures.replacements = pack.take_new_images();
                 if (layers.valid()) layers.get();
-                double took = qpc_seconds() - from;
+                double took = now_seconds() - from;
                 prep_us += uint64_t(took * 1e6);
                 prep_frames++;
-                frame_log("R %llu %.6f %.3f %.3f\n", (unsigned long long)state->frame, qpc_seconds(),
+                frame_log("R %llu %.6f %.3f %.3f\n", (unsigned long long)state->frame, now_seconds(),
                           (built_at - from) * 1000, took * 1000);
                 pictures.overlays.swap(p->layers.overlays);
                 pictures.sky.swap(p->layers.sky_pictures);
@@ -1653,7 +1637,7 @@ int main(int argc, char** argv) {
             }
             std::lock_guard<std::mutex> lock(ready_mutex);
             ready_pictures.push_back(std::move(pictures));
-            p->ready_at = qpc_seconds();
+            p->ready_at = now_seconds();
             if (prep_on) {
                 ready_frames.push_back(p);
                 if (ready_frames.size() > 8) ready_frames.pop_front();
@@ -1672,7 +1656,7 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 if (presenter.wait_present(next, 100'000'000))
-                    frame_log("S %llu %.6f\n", (unsigned long long)next, qpc_seconds());
+                    frame_log("S %llu %.6f\n", (unsigned long long)next, now_seconds());
                 next++;
             }
         });
@@ -1722,7 +1706,7 @@ int main(int argc, char** argv) {
             went_out = out;
         }
         if (!g_opt.vsync) {   // the next image a refresh after the last (from now after a slow one)
-            double period = display_clock.period, now = qpc_seconds();
+            double period = display_clock.period, now = now_seconds();
             if (now - next_image > period) next_image = now;
             if (image_timer && next_image - now > 0.001) {   // to ~0.5 ms before, then a spin
                 LARGE_INTEGER due;
@@ -1730,13 +1714,13 @@ int main(int argc, char** argv) {
                 if (SetWaitableTimer(image_timer, &due, 0, nullptr, nullptr, FALSE))
                     WaitForSingleObject(image_timer, 100);
             } else if (!image_timer) {
-                while (next_image - now > 0.002) Sleep(1), now = qpc_seconds();
+                while (next_image - now > 0.002) Sleep(1), now = now_seconds();
             }
-            while (qpc_seconds() < next_image) YieldProcessor();
+            while (now_seconds() < next_image) YieldProcessor();
             next_image += period;
         }
         if (!presenter.pump()) break;
-        double loop_from = qpc_seconds();
+        double loop_from = now_seconds();
         if (survival_cli_pending && !g_boot_skip) {   // at the SEGA logo: the home state is the game from here
             survival_cli_pending = false;
             start_survival(cli_stage, cli_zone);
@@ -1765,7 +1749,7 @@ int main(int argc, char** argv) {
             for (int i = 0; i < Gamepads::MAX; i++) down |= fg && g_pads.pad(i).fire;
             // (the results only after a moment: the player is still shooting when the hunt ends)
             bool waiting = sv.mode == SurvivalMode::Ready ||
-                           (sv.mode == SurvivalMode::Results && survival_now() - sv.results_at > SURVIVAL_RESULTS_DELAY);
+                           (sv.mode == SurvivalMode::Results && now_seconds() - sv.results_at > SURVIVAL_RESULTS_DELAY);
             // Where the game screen is in the window: for the BONUS target
             RECT rc;
             GetClientRect(hw, &rc);
@@ -1782,8 +1766,8 @@ int main(int argc, char** argv) {
             static SurvivalMode shot_mode = SurvivalMode::Off;
             static double shot_since = 0;
             if (surv_shots) {
-                if (sv.mode != shot_mode) shot_mode = sv.mode, shot_since = survival_now();
-                double t = survival_now() - shot_since;
+                if (sv.mode != shot_mode) shot_mode = sv.mode, shot_since = now_seconds();
+                double t = now_seconds() - shot_since;
                 if (t > 1.5 && t < 1.6 && shot_mode != SurvivalMode::Off) {
                     shot_since -= 1;   // once
                     presenter.capture_next("out/survival_" + std::to_string(int(shot_mode)) + ".bmp");
@@ -1797,7 +1781,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            if (survival_ui.draw(rc.right, rc.bottom, sv, survival_now(), survival_pixels, surv_lay))
+            if (survival_ui.draw(rc.right, rc.bottom, sv, now_seconds(), survival_pixels, surv_lay))
                 survival_layer.set_image(survival_pixels.data(), rc.right, rc.bottom);
         }
         if (toast_shown) {
@@ -1808,7 +1792,7 @@ int main(int argc, char** argv) {
                                   L"Play it from PLAY > SURVIVAL");
             RECT rc;
             GetClientRect(presenter.hwnd(), &rc);
-            if (toast.draw(rc.right, rc.bottom, qpc_seconds(), toast_pixels))
+            if (toast.draw(rc.right, rc.bottom, now_seconds(), toast_pixels))
                 toast_layer.set_image(toast_pixels.data(), rc.right, rc.bottom);
         }
         if (g_opt.menu) {
@@ -1975,17 +1959,17 @@ int main(int argc, char** argv) {
                 // gets its time (12 s) after player 2's last life
                 uint8_t p1 = rd8(0x1A3791), p2 = rd8(0x1A37A1);
                 bool p2_playing = p2 == 1 || p2 == 2;
-                double t_now = qpc_seconds();
+                double t_now = now_seconds();
                 if (p2_playing) boss_p2_played = true, boss_p2_idle_at = 0;
                 else if (boss_p2_idle_at == 0) boss_p2_idle_at = t_now;
                 bool p2_done = !boss_p2_played || p2 == 3 || t_now - boss_p2_idle_at > 12;
                 bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || (p1 == 3 && !p2_playing && p2_done);
                 if (!over) boss_over_at = 0;
                 else if (boss_over_at == 0) {
-                    boss_over_at = qpc_seconds();
+                    boss_over_at = now_seconds();
                     stats_boss_end(rd8(0x1A623C) != BOSSES[boss_fight].stage_index);   // the stage ended: the boss is down
                 }
-                else if (qpc_seconds() - boss_over_at > 3) {
+                else if (now_seconds() - boss_over_at > 3) {
                     boss_fight = -1;
                     frontend.boss_mode = false;
                     game_state_load_home();
@@ -2073,7 +2057,7 @@ int main(int argc, char** argv) {
             }
             menu_was = frontend.screen();
             {
-                double t = qpc_seconds();
+                double t = now_seconds();
                 music.update(frontend.active() && !frontend.over_game() && frontend.settings.menu_music,
                              frontend.settings.volume, t - music_time);
                 music_time = t;
@@ -2122,15 +2106,15 @@ int main(int argc, char** argv) {
             if (frontend.active()) {
                 RECT rc;
                 GetClientRect(presenter.hwnd(), &rc);
-                double t0 = qpc_seconds();
+                double t0 = now_seconds();
                 if (frontend.draw(rc.right, rc.bottom, ui_pixels)) {
                     int y0, y1;
                     if (frontend.partial_rows(y0, y1)) ui.update_rows(ui_pixels.data(), rc.right, rc.bottom, y0, y1);
                     else ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
-                    double ms = (qpc_seconds() - t0) * 1000;
+                    double ms = (now_seconds() - t0) * 1000;
                     if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
                     static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
-                    if (menu_shot) save_bmp(menu_shot, ui_pixels.data(), rc.right, rc.bottom);
+                    if (menu_shot) bmp_save(menu_shot, rc.right, rc.bottom, ui_pixels.data());
                 }
             }
         }
@@ -2182,10 +2166,10 @@ int main(int argc, char** argv) {
         // plays (not in the menus), 60 at most, for reports without a keyboard
         bool auto_snap = false;
         if (g_opt.snap_every > 0 && !frontend.active() && (g_inputs.p[0].playing || g_inputs.p[1].playing)) {
-            static double last_snap = qpc_seconds();
+            static double last_snap = now_seconds();
             static int snaps = 0;
-            if (snaps < 60 && qpc_seconds() - last_snap >= g_opt.snap_every) {
-                last_snap = qpc_seconds();
+            if (snaps < 60 && now_seconds() - last_snap >= g_opt.snap_every) {
+                last_snap = now_seconds();
                 snaps++;
                 auto_snap = true;
             }
@@ -2245,13 +2229,13 @@ int main(int argc, char** argv) {
         // here, before the picture is prepared (the game keeps its own pace)
         if (g_opt.frame_cap > 0 && film.empty() && g_opt.replay.empty() && !g_opt.shot_frame) {
             static double next_picture = 0;
-            double period = 1.0 / g_opt.frame_cap, now = qpc_seconds();
+            double period = 1.0 / g_opt.frame_cap, now = now_seconds();
             if (next_picture - now > period) next_picture = now;   // the cap changed, or a pause
             while (now < next_picture) {
                 double left = next_picture - now;
                 if (left > 0.002) Sleep(DWORD((left - 0.0015) * 1000));   // timeBeginPeriod(1): ~1 ms steps
                 else SwitchToThread();
-                now = qpc_seconds();
+                now = now_seconds();
             }
             next_picture = now - next_picture < period ? next_picture + period : now + period;
         }
@@ -2344,7 +2328,7 @@ int main(int argc, char** argv) {
         // not run ahead of it in the meantime)
         const R3DFrameState* game_newest = newest ? newest->state.get() : latest ? latest.get() : built.get();
         bool follow = interpolating && game_newest && newest_2d != ~0ull && newest_2d <= game_newest->vblank + 4;
-        double scene_from = qpc_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
+        double scene_from = now_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
         const uint64_t shown_before = shown;
         // (shown = ~0: composed again here, as after a change of settings in the pause menu)
         uint64_t compose_up_to = !follow ? (newest_2d != shown ? newest_2d : ~0ull)
@@ -2359,13 +2343,13 @@ int main(int argc, char** argv) {
             own_layers.overlays.clear();
             apply_2d(own_layers);
             layers_prep.reset();
-            scene_seconds += qpc_seconds() - scene_from;
+            scene_seconds += now_seconds() - scene_from;
         }
         if (take) {
             if (ready) frame_period = ready->period;   // its vertices move from the frame built before it
             else if (built) frame_period = std::clamp(latest->time - built->time, 1.0 / 240, 0.1);
             built_from = built ? built->vblank : ~0ull;
-            scene_from = qpc_seconds();
+            scene_from = now_seconds();
             if (ready) {   // made ready by the preparation thread, with the 2D layers of its vblank
                 give_pictures(ready->serial);
                 built_prep = ready;
@@ -2384,7 +2368,7 @@ int main(int argc, char** argv) {
                 built_prep.reset();
                 scene = &own_scene;
             }
-            scene_seconds += qpc_seconds() - scene_from;
+            scene_seconds += now_seconds() - scene_from;
             g_select_aim = select_dot_on_screen(*scene);
             built = latest;
             // The weather (weather.h): --weather in any game, or the one rolled
@@ -2491,7 +2475,7 @@ int main(int argc, char** argv) {
         // on the game's own evenly spaced timeline
         static const char* fixed_interp = getenv("LW_INTERP");   // debugging aid: fixed position, e.g. 0.5
         if ((interpolating || fixed_interp) && built) {
-            double now = qpc_seconds();
+            double now = now_seconds();
             double t = std::clamp((shown_time - built->time) / frame_period + 1.0, 0.0, 1.0);
             if (fixed_interp) t = std::clamp(atof(fixed_interp), 0.0, 1.0);
             renderer.set_interpolation(float(t));
@@ -2534,7 +2518,7 @@ int main(int argc, char** argv) {
                       (unsigned long long)(built ? built->frame : 0), (unsigned long long)(latest ? latest->frame : 0),
                       latest ? latest->time : 0.0, int(take), int(shown != shown_before), scene_seconds * 1000,
                       tex_dirty_rows, f.fence * 1000, f.acquire * 1000, f.record * 1000, f.present * 1000,
-                      (qpc_seconds() - loop_from) * 1000, lateness);
+                      (now_seconds() - loop_from) * 1000, lateness);
             if (f.present_id) presented_id = f.present_id;
         }
         if (!film.empty() && film_presents >= 4) {   // next snapshot of the sequence

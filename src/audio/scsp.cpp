@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <type_traits>
 
 namespace {
 
@@ -62,15 +63,22 @@ struct Tables {
             1.39, 1.60, 1.87, 2.27, 2.87, 3.31, 3.92, 4.79, 6.15, 7.18, 8.60, 10.8, 14.4, 17.2, 21.5, 28.7, 43.1,
             57.4, 86.1, 172.3};
         for (int i = 0; i < 32; i++) lfo_step[i] = uint16_t(256.0 * (freq[i] * 256.0 / 44100.0));
+        // The noise waveforms: the numbers std::rand() gives a fresh MSVC
+        // program (seed 1), by its formula, so any C library makes the same sound
+        uint32_t noise = 1;
+        auto rand15 = [&noise] {
+            noise = noise * 214013u + 2531011u;
+            return int((noise >> 16) & 0x7FFF);
+        };
         for (int i = 0; i < 256; i++) {
             plfo[0][i] = i < 128 ? i : i - 256;
             plfo[1][i] = i < 128 ? 127 : -128;
             plfo[2][i] = i < 64 ? 2 * i : i < 128 ? 255 - 2 * i : i < 192 ? 256 - 2 * i : 2 * i - 511;
-            plfo[3][i] = 128 - (std::rand() & 0xFF);
+            plfo[3][i] = 128 - (rand15() & 0xFF);
             alfo[0][i] = 255 - i;
             alfo[1][i] = i < 128 ? 255 : 0;
             alfo[2][i] = i < 128 ? 255 - 2 * i : 2 * i - 256;
-            alfo[3][i] = std::rand() & 0xFF;
+            alfo[3][i] = rand15() & 0xFF;
         }
         static const double pscale[8] = {0, 7, 13.5, 27, 55, 112, 230, 494};
         static const double ascale[8] = {0, 0.4, 0.8, 1.5, 3, 6, 12, 24};
@@ -747,4 +755,151 @@ void Scsp::render(float& left, float& right) {
         left = float(l) * 0.25f;
         right = float(r) * 0.25f;
     }
+}
+
+// ---- Game states ----
+
+namespace {
+
+// Each field with its own width, in order: bools and enums as one byte
+struct StateOut {
+    std::vector<uint8_t>& v;
+    template <class T>
+    void operator()(T& x) {
+        if constexpr (std::is_same_v<T, bool> || std::is_enum_v<T>) {
+            v.push_back(uint8_t(x));
+        } else {
+            static_assert(std::is_arithmetic_v<std::remove_all_extents_t<T>>);
+            const uint8_t* b = reinterpret_cast<const uint8_t*>(&x);
+            v.insert(v.end(), b, b + sizeof(T));
+        }
+    }
+};
+struct StateIn {
+    const uint8_t* p;
+    template <class T>
+    void operator()(T& x) {
+        if constexpr (std::is_same_v<T, bool>) {
+            x = *p++ != 0;
+        } else if constexpr (std::is_enum_v<T>) {
+            x = T(*p++);
+        } else {
+            memcpy(&x, p, sizeof(T));
+            p += sizeof(T);
+        }
+    }
+};
+// How many bytes the fields take
+struct StateSize {
+    size_t n = 0;
+    template <class T>
+    void operator()(T&) {
+        n += std::is_same_v<T, bool> || std::is_enum_v<T> ? 1 : sizeof(T);
+    }
+};
+
+// The chip as it was copied into the states before that: Scsp's members then
+struct LegacySlot {
+    bool active, back;
+    int32_t cur, nxt;
+    uint32_t base, step;
+    int32_t level;
+    int state;
+    uint32_t ar, d1r, d2r, rr;
+    int dl_thr;
+    bool eg_hold;
+    uint16_t plfo_phase, alfo_phase, plfo_step, alfo_step;
+};
+struct LegacyScsp {
+    uint8_t* ram;
+    uint32_t ram_mask;
+    bool master;
+    uint16_t slot_regs[32][16];
+    uint16_t common[0x18];
+    LegacySlot slots[32];
+    int16_t stack[64];
+    int stack_ptr;
+    bool dsp_on;
+    uint32_t timer[3];
+    uint8_t midi_fifo[256];
+    uint8_t midi_r, midi_w;
+    uint32_t midi_dropped;
+    int monitor_slot;
+    int16_t coef[64];
+    uint16_t madrs[32];
+    uint16_t mpro[128 * 4];
+    int32_t temp[128], mems[32], mixs[16];
+    int16_t efreg[16];
+    uint32_t dec;
+    bool dsp_running;
+};
+
+}  // namespace
+
+template <class F>
+void Scsp::state_fields(F& f) {
+    f(slot_regs_);
+    f(common_);
+    for (Slot& s : slots_) {
+        f(s.active), f(s.back), f(s.cur), f(s.nxt), f(s.base), f(s.step), f(s.level), f(s.state);
+        f(s.ar), f(s.d1r), f(s.d2r), f(s.rr), f(s.dl_thr), f(s.eg_hold);
+        f(s.plfo_phase), f(s.alfo_phase), f(s.plfo_step), f(s.alfo_step);
+    }
+    f(stack_), f(stack_ptr_);
+    f(timer_), f(midi_fifo_), f(midi_r_), f(midi_w_), f(midi_dropped_), f(monitor_slot_);
+    f(coef_), f(madrs_), f(mpro_), f(temp_), f(mems_), f(mixs_), f(efreg_), f(dec_), f(dsp_running_);
+}
+
+void Scsp::save_state(std::vector<uint8_t>& out) const {
+    StateOut w{out};
+    const_cast<Scsp*>(this)->state_fields(w);   // (only reads them)
+}
+
+size_t Scsp::state_size() {
+    static const size_t n = [] {
+        Scsp chip;
+        StateSize size;
+        chip.state_fields(size);
+        return size.n;
+    }();
+    return n;
+}
+
+void Scsp::load_state(const uint8_t*& p) {
+    StateIn r{p};
+    state_fields(r);
+    p = r.p;
+}
+
+size_t Scsp::legacy_size() { return sizeof(LegacyScsp); }
+
+void Scsp::load_legacy(const uint8_t* p) {
+    LegacyScsp c;
+    memcpy(&c, p, sizeof c);
+    ram_mask_ = c.ram_mask;
+    master_ = c.master;
+    memcpy(slot_regs_, c.slot_regs, sizeof slot_regs_);
+    memcpy(common_, c.common, sizeof common_);
+    for (int i = 0; i < 32; i++) {
+        const LegacySlot& o = c.slots[i];
+        Slot& s = slots_[i];
+        s.active = o.active, s.back = o.back, s.cur = o.cur, s.nxt = o.nxt, s.base = o.base, s.step = o.step;
+        s.level = o.level, s.state = EgState(o.state), s.ar = o.ar, s.d1r = o.d1r, s.d2r = o.d2r, s.rr = o.rr;
+        s.dl_thr = o.dl_thr, s.eg_hold = o.eg_hold;
+        s.plfo_phase = o.plfo_phase, s.alfo_phase = o.alfo_phase, s.plfo_step = o.plfo_step, s.alfo_step = o.alfo_step;
+    }
+    memcpy(stack_, c.stack, sizeof stack_);
+    stack_ptr_ = c.stack_ptr;
+    memcpy(timer_, c.timer, sizeof timer_);
+    memcpy(midi_fifo_, c.midi_fifo, sizeof midi_fifo_);
+    midi_r_ = c.midi_r, midi_w_ = c.midi_w, midi_dropped_ = c.midi_dropped, monitor_slot_ = c.monitor_slot;
+    memcpy(coef_, c.coef, sizeof coef_);
+    memcpy(madrs_, c.madrs, sizeof madrs_);
+    memcpy(mpro_, c.mpro, sizeof mpro_);
+    memcpy(temp_, c.temp, sizeof temp_);
+    memcpy(mems_, c.mems, sizeof mems_);
+    memcpy(mixs_, c.mixs, sizeof mixs_);
+    memcpy(efreg_, c.efreg, sizeof efreg_);
+    dec_ = c.dec;
+    dsp_running_ = c.dsp_running;
 }

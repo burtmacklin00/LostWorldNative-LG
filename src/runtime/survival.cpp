@@ -33,12 +33,10 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-#include <ctime>
 #include <array>
 #include <atomic>
 #include <map>
@@ -46,7 +44,10 @@
 #include <set>
 #include <vector>
 
+#include "../common/clock.h"
+#include "../common/random_seed.h"
 #include "bosses.h"
+#include "encounter_script.h"
 #include "inputs.h"
 #include "ppc_rt.h"
 #include "weather.h"
@@ -71,13 +72,11 @@ constexpr uint32_t PLAYLIST = 0x1C2AFC;    // 5 ints: stages of the course, in o
 constexpr uint32_t PLAYLIST_INDEX = 0x1C2B10;
 constexpr uint32_t FN_NEXT_STAGE = 0x00081364;   // stage byte = PLAYLIST[++PLAYLIST_INDEX]
 constexpr uint32_t FN_PLAYLIST_INIT = 0x000812DC;   // PLAYLIST = 0..4, PLAYLIST_INDEX = -1 (new game)
-// Encounter machine
-constexpr uint32_t FN_ENCOUNTER_START = 0x00039428;   // zone trigger: (record) with record+0x14 = encounter
+// Encounter machine (its script: encounter_script.h)
+using script::FN_ENCOUNTER_START;
 constexpr uint32_t FN_ENCOUNTER = 0x0003951C;         // the task that runs the script
 constexpr uint32_t FN_STOP = 0x0003B3F4;              // zone trigger: the camera stops (CAM_WALK = 0)
 constexpr uint32_t TRIGGER_TASK = 0x1C12A0;           // the zone trigger task (fn_00014764); +0: its first node
-constexpr uint32_t SCRIPT = 0x1268B8;       // words; the machine reads SCRIPT + 4 * pc
-constexpr uint32_t SCRIPT_WORDS = 0x13DF;
 constexpr uint32_t VM_PC = 0x1A847C;
 constexpr uint32_t VM_ALIVE = 0x1A8468;     // enemies alive (what op -1 waits for)
 constexpr uint32_t VM_ALIVE2 = 0x1A83D4;    // the count op -1 waits for while flag 0x200 is set
@@ -100,7 +99,7 @@ constexpr uint64_t WALK_LONGEST = 3600;     // a walk that never reaches a stop 
 constexpr uint64_t FADE_FRAMES = 40;        // the fade to black at the end of a lap, and back
 constexpr int32_t COUNTDOWN_FRAMES = int32_t(SURVIVAL_COUNTDOWN * 57.5);   // the countdown, as a -21 wait
 constexpr int WAVE_MIN = 8, WAVE_MAX = 30;  // dinosaurs in a wave: at least as many as the arena's first (the game's own)
-constexpr uint32_t FN_RAPTOR = 0x00053BB4;  // (slot 1..5, type, group of spawn positions)
+using script::FN_RAPTOR;
 // The dead triceratops of the arcade's story (task 0x5B830, only in encounter 3,
 // the Jungle shack): survival's first wave runs that encounter, so it is left out
 constexpr uint32_t FN_DEAD_TRICERATOPS = 0x0005B758;
@@ -142,14 +141,10 @@ uint64_t g_frame_no = 0;
 
 float rdf(uint32_t a) { return float(f2d(rd32(a))); }
 
-double now_seconds() {
-    using namespace std::chrono;
-    return duration<double>(steady_clock::now().time_since_epoch()).count();
-}
 
 void hook(uint32_t fn) {
     g_hooks.insert(fn);
-    g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7));
+    rt_hook_function(fn);
 }
 
 void log(const char* fmt, ...) {
@@ -165,28 +160,6 @@ std::map<uint32_t, uint32_t> tasks() {
     std::map<uint32_t, uint32_t> m;
     for (uint32_t t = rd32(TASK_HEAD); t && t < RAM_SIZE && m.size() < 4096; t = rd32(t + 8)) m[t] = rd32(t + 0xC);
     return m;
-}
-
-// Words that follow each negative opcode of the encounter machine (tools/encounters.py)
-int op_args(int32_t op) {
-    switch (op) {
-    case -1: case -12: case -13: case -14: case -15: case -22: case -29: case -30: case -31: case -32: case -33:
-    case -998: case -999: return 0;
-    case -5: case -8: case -10: case -19: case -20: case -21: case -23: case -27: case -28: return 1;
-    case -17: case -24: case -26: return 2;
-    case -9: case -25: return 3;
-    case -11: return 4;
-    default: return -1;
-    }
-}
-
-// Calls that bring in enemies counted by the machine (seen in the trace)
-bool is_enemy_fn(uint32_t fn) {
-    switch (fn) {
-    case 0x53BB4: case 0x61AF8: case 0x627E8: case 0x46B50: case 0x536CC: case 0x63ADC: case 0x7409C:
-    case 0x71914: return true;
-    default: return false;
-    }
 }
 
 }  // namespace
@@ -305,39 +278,24 @@ const wchar_t* survival_zone_name(int stage, int zone) {
 
 namespace {
 
-uint32_t script_addr(uint32_t pc) { return SCRIPT + 4 * pc; }
-uint32_t script_pc(uint32_t addr) { return (addr - SCRIPT) / 4; }
+uint32_t script_addr(uint32_t pc) { return script::BASE + 4 * pc; }
+uint32_t script_pc(uint32_t addr) { return (addr - script::BASE) / 4; }
+int32_t ram_word(uint32_t pc) { return int32_t(rd32(script_addr(pc))); }
 
-// The call at word i of encounter `id`'s script (delay, function, nargs, args), as survival runs it
-std::vector<int32_t> script_call(uint32_t i, int id) {
-    std::vector<int32_t> item;
-    for (uint32_t k = 0; k < 3 + rd32(script_addr(i + 2)); k++) item.push_back(int32_t(rd32(script_addr(i + k))));
-    if (id == TRICERATOPS_ENCOUNTER && uint32_t(item[1]) == FN_RAPTOR && item.size() >= 6 &&
-        item[5] == TRICERATOPS_GROUP)
+// The words of a call of encounter `id` (delay, function, nargs, args), as survival runs it
+std::vector<int32_t> as_run(const script::Item& it, int id) {
+    std::vector<int32_t> item = it.w;
+    if (id == TRICERATOPS_ENCOUNTER && it.fn() == FN_RAPTOR && item.size() >= 6 && item[5] == TRICERATOPS_GROUP)
         item[5] = GROUND_GROUP;
     return item;
 }
 
-// Calls of known enemies in encounter `id` (for the trace: which zones can be arenas)
+// Calls of known enemies in encounter `id` (for the trace: which zones can be arenas; -1 unreadable)
 int encounter_enemies(int id) {
-    uint32_t i = 0;
-    bool in = false;
+    uint32_t h = script::find(ram_word, id);
+    if (h == script::NOT_FOUND) return 0;
     int n = 0;
-    while (i < SCRIPT_WORDS) {
-        int32_t op = int32_t(rd32(script_addr(i)));
-        if (op == -10) {
-            if (in) break;
-            in = int32_t(rd32(script_addr(i + 1))) == id;
-        }
-        if (op < 0) {
-            int k = op_args(op);
-            if (k < 0) return -1;
-            i += 1 + uint32_t(k);
-        } else {
-            if (in && is_enemy_fn(rd32(script_addr(i + 1)))) n++;
-            i += 3 + rd32(script_addr(i + 2));
-        }
-    }
+    if (!script::walk(ram_word, h, [&](const script::Item& it) { n += it.enemy(); })) return -1;
     return n;
 }
 
@@ -383,9 +341,9 @@ void keep_record(int stage, int zone, const Best& b) {
     }
 }
 
-struct Survival {
-    bool on = false;
-    bool gate = false;            // the window is still putting the game back at the attract
+// One run of the mode, from the menu's choice to its results: reset() starts
+// each one from these values
+struct Run {
     uint64_t loading_frames = 0;
     SurvivalStep step = SurvivalStep::Preparing;
     int stage = 0, zone = 0;      // 0-based stage byte, zone nibble
@@ -400,7 +358,6 @@ struct Survival {
     std::vector<uint32_t> enemy_pcs;   // where the script being run calls an enemy
     int wave = 0;                 // 0: the encounter itself
     bool armed = false;           // a new course: its first stage becomes the chosen one
-    int base_diff = 7;
     int lives = 0, start_lives = 0;
     // The lap: fight at a stop, a pause once it is cleared, the walk on to the
     // next one (maybe an ambush on the way), and after the last stop the fade
@@ -434,22 +391,35 @@ struct Survival {
     int reward = 0;
     double reward_at = 0;
 
-    int alive() const { return std::max(int(rd32(VM_ALIVE)), int(rd32(VM_ALIVE2))); }
     bool last_hit = false;        // a hit function ran with one life left
     uint64_t dying_until = 0;     // the last attack plays out until this frame, then the results
-    bool confirm = false;         // set by the window: start, or play again
-    uint32_t rng = 12345;
     Best best_before;
     bool new_record = false;
     double wave_started = 0;
     double results_at = 0;
+    uint64_t travel_frames = 0;   // on the way to the arena (the loading bar creeps on)
+    uint32_t loading_lives = 0;   // the player's lives as the stage began (kept on the way in)
+    bool shoot_in = false;        // SurvivalZone::shoot_in of this arena
+    // The arena kept the first time it was reached (save/survival/), made
+    // with this LIFE and difficulty setting: the way there only once
+    std::string cache;            // its file: being loaded or saved this run
+    bool cache_loading = false, cache_saving = false, cache_tried = false;
+    uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
+};
+
+struct Survival : Run {
+    // Kept from run to run
+    bool on = false;
+    bool gate = false;            // the window is still putting the game back at the attract
+    int base_diff = 7;            // the settings' difficulty, put back when a run ends
+    bool confirm = false;         // set by the window: start, or play again
+    uint32_t rng = 12345;
     std::mutex view_mutex;        // the window reads mode, wave, score...
     SurvivalView view;
 
-    uint32_t rand(uint32_t n) {
-        rng = rng * 1103515245u + 12345u;
-        return (rng >> 16) % n;
-    }
+    int alive() const { return std::max(int(rd32(VM_ALIVE)), int(rd32(VM_ALIVE2))); }
+
+    uint32_t rand(uint32_t n) { return script::rand_below(rng, n); }
 
     // Copies the encounter starting at header pc h to free RAM, ending in an
     // endless wait, and gathers its enemies and camera turns
@@ -462,18 +432,12 @@ struct Survival {
         int32_t waited = 0;
         size_t count_at = 0;    // the countdown's word in out
         bool first_enemy = true;
-        uint32_t i = h;
-        while (i < SCRIPT_WORDS) {
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if ((op == -10 && i != h) || op == -998 || op == -999) break;
-            if (op < 0) {
-                int n = op_args(op);
-                if (n < 0) {
-                    printf("[survival] unknown operation %d in encounter %d\n", op, encounter);
-                    return false;
-                }
-                std::vector<int32_t> item;
-                for (int k = 0; k <= n; k++) item.push_back(int32_t(rd32(script_addr(i + k))));
+        int32_t bad = 0;
+        bool ok = script::walk(ram_word, h, [&](const script::Item& it) {
+            if (it.end()) return;
+            if (!it.call()) {
+                const std::vector<int32_t>& item = it.w;
+                int32_t op = it.op();
                 if (op == -9) looks.push_back(item);
                 if ((op == -25 || op == -26) && setup.size() < 7) setup.insert(setup.end(), item.begin(), item.end());
                 out.insert(out.end(), item.begin(), item.end());
@@ -485,27 +449,27 @@ struct Survival {
                     out.push_back(-21), out.push_back(std::max(0, COUNTDOWN_FRAMES - waited));
                     count_at = out.size() - 1, counted = true;
                 }
-                i += 1 + n;
-            } else {
-                int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item = script_call(i, encounter);
-                if (uint32_t(item[1]) == FN_DEAD_TRICERATOPS) {   // its delay is kept as a wait
-                    if (item[0] > 0) out.push_back(-21), out.push_back(item[0]);
-                    i += 3 + nargs;
-                    continue;
-                }
-                if (is_enemy_fn(uint32_t(item[1]))) {
-                    if (!counted) {
-                        out.push_back(-21), out.push_back(std::max(0, COUNTDOWN_FRAMES - waited));
-                        count_at = out.size() - 1, counted = true;
-                    }
-                    if (first_enemy) out[count_at] = std::max(0, out[count_at] - item[0]), first_enemy = false;
-                    enemies.push_back(item);
-                    calls.push_back(uint32_t(out.size()));
-                }
-                out.insert(out.end(), item.begin(), item.end());
-                i += 3 + nargs;
+                return;
             }
+            std::vector<int32_t> item = as_run(it, encounter);
+            if (it.fn() == FN_DEAD_TRICERATOPS) {   // its delay is kept as a wait
+                if (item[0] > 0) out.push_back(-21), out.push_back(item[0]);
+                return;
+            }
+            if (it.enemy()) {
+                if (!counted) {
+                    out.push_back(-21), out.push_back(std::max(0, COUNTDOWN_FRAMES - waited));
+                    count_at = out.size() - 1, counted = true;
+                }
+                if (first_enemy) out[count_at] = std::max(0, out[count_at] - item[0]), first_enemy = false;
+                enemies.push_back(item);
+                calls.push_back(uint32_t(out.size()));
+            }
+            out.insert(out.end(), item.begin(), item.end());
+        }, &bad);
+        if (!ok) {
+            printf("[survival] unknown operation %d in encounter %d\n", bad, encounter);
+            return false;
         }
         if (enemies.empty()) {
             printf("[survival] encounter %d has no known enemies\n", encounter);
@@ -519,39 +483,6 @@ struct Survival {
         return true;
     }
 
-    // The enemy calls, camera turns and setup of encounter `id` (false: none of them known)
-    bool read_encounter(int id, std::vector<std::vector<int32_t>>& e, std::vector<std::vector<int32_t>>& l,
-                        std::vector<int32_t>& st) const {
-        uint32_t i = 0;
-        while (i < SCRIPT_WORDS) {   // its header
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if (op == -10 && int32_t(rd32(script_addr(i + 1))) == id) break;
-            int n = op < 0 ? op_args(op) : -2;
-            if (op < 0 && n < 0) return false;
-            i += op < 0 ? 1 + uint32_t(n) : 3 + rd32(script_addr(i + 2));
-        }
-        e.clear(), l.clear(), st.clear();
-        for (uint32_t h = i; i < SCRIPT_WORDS;) {
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if ((op == -10 && i != h) || op == -998 || op == -999) break;
-            if (op < 0) {
-                int n = op_args(op);
-                if (n < 0) return false;
-                std::vector<int32_t> item;
-                for (int k = 0; k <= n; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
-                if (op == -9) l.push_back(item);
-                if ((op == -25 || op == -26) && st.size() < 7) st.insert(st.end(), item.begin(), item.end());
-                i += 1 + uint32_t(n);
-            } else {
-                int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item = script_call(i, id);
-                if (is_enemy_fn(uint32_t(item[1]))) e.push_back(item);
-                i += 3 + uint32_t(nargs);
-            }
-        }
-        return !e.empty();
-    }
-
     // An encounter is a row of sections: a camera turn (-9) to where a group of
     // spawn positions is, maybe its setup (-25 / -26), its enemy calls (the
     // raptor's third argument is that group) and a wait for all of them (-1)
@@ -559,56 +490,56 @@ struct Survival {
         std::vector<int32_t> look, setup;
         std::vector<std::vector<int32_t>> calls;
     };
-    std::vector<Section> sections_of(int id) const {
-        std::vector<Section> out;
-        uint32_t i = 0;
-        while (i < SCRIPT_WORDS) {   // its header
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if (op == -10 && int32_t(rd32(script_addr(i + 1))) == id) break;
-            int n = op < 0 ? op_args(op) : -2;
-            if (op < 0 && n < 0) return out;
-            i += op < 0 ? 1 + uint32_t(n) : 3 + rd32(script_addr(i + 2));
-        }
+    // What survival takes from encounter `id`: its enemy calls, camera turns,
+    // first setup and sections (complete: it was read to its end)
+    struct Encounter {
+        std::vector<std::vector<int32_t>> enemies, looks;
+        std::vector<int32_t> setup;
+        std::vector<Section> sections;
+        bool complete = false;
+    };
+    Encounter encounter_of(int id) const {
+        Encounter enc;
+        uint32_t h = script::find(ram_word, id);
+        if (h == script::NOT_FOUND) return enc;
         Section cur;
         auto close = [&] {
-            if (!cur.calls.empty()) out.push_back(cur);
+            if (!cur.calls.empty()) enc.sections.push_back(cur);
             cur.calls.clear();
             cur.setup.clear();
         };
-        for (uint32_t h = i; i < SCRIPT_WORDS;) {
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if ((op == -10 && i != h) || op == -998 || op == -999) break;
-            if (op < 0) {
-                int n = op_args(op);
-                if (n < 0) break;
-                std::vector<int32_t> item;
-                for (int k = 0; k <= n; k++) item.push_back(int32_t(rd32(script_addr(i + uint32_t(k)))));
-                if (op == -9) close(), cur.look = item;
-                if (op == -25 || op == -26) cur.setup.insert(cur.setup.end(), item.begin(), item.end());
-                if (op == -1) close();
-                i += 1 + uint32_t(n);
-            } else {
-                int32_t nargs = int32_t(rd32(script_addr(i + 2)));
-                std::vector<int32_t> item = script_call(i, id);
-                if (is_enemy_fn(uint32_t(item[1]))) cur.calls.push_back(item);
-                i += 3 + uint32_t(nargs);
+        enc.complete = script::walk(ram_word, h, [&](const script::Item& it) {
+            if (it.call()) {
+                if (!it.enemy()) return;
+                std::vector<int32_t> item = as_run(it, id);
+                enc.enemies.push_back(item);
+                cur.calls.push_back(item);
+                return;
             }
-        }
+            const std::vector<int32_t>& item = it.w;
+            int32_t op = it.op();
+            if (op == -9) enc.looks.push_back(item), close(), cur.look = item;
+            if (op == -25 || op == -26) {
+                if (enc.setup.size() < 7) enc.setup.insert(enc.setup.end(), item.begin(), item.end());
+                cur.setup.insert(cur.setup.end(), item.begin(), item.end());
+            }
+            if (op == -1) close();
+        });
         close();
-        return out;
+        return enc;
     }
 
     // What a wave at this stop can be made of: the sections of its encounter,
     // and those of the zone's other encounters that turn the camera near
     // where one of this stop's turns does (the same place, seen from here)
     std::vector<Section> wave_pool() const {
-        std::vector<Section> pool = sections_of(encounter);
+        std::vector<Section> pool = encounter_of(encounter).sections;
         std::vector<std::vector<int32_t>> own;
         for (const Section& sc : pool)
             if (!sc.look.empty()) own.push_back(sc.look);
         for (int id : zone_encounters) {
             if (id == encounter) continue;
-            for (const Section& sc : sections_of(id)) {
+            for (const Section& sc : encounter_of(id).sections) {
                 if (sc.look.empty()) continue;
                 bool close = false;
                 for (auto& l : own)
@@ -654,10 +585,9 @@ struct Survival {
 
     // The waves come from encounter `id` from now on
     bool adopt(int id) {
-        std::vector<std::vector<int32_t>> e, l;
-        std::vector<int32_t> st;
-        if (!read_encounter(id, e, l, st)) return false;
-        enemies = e, looks = l, setup = st;
+        Encounter e = encounter_of(id);
+        if (!e.complete || e.enemies.empty()) return false;
+        enemies = e.enemies, looks = e.looks, setup = e.setup;
         encounter = id;
         log("  waves from encounter %d\n", id);
         return true;
@@ -714,7 +644,7 @@ struct Survival {
         }
         std::set<int32_t> types;
         for (int id : zone_encounters)
-            for (const Section& sc : sections_of(id))
+            for (const Section& sc : encounter_of(id).sections)
                 for (auto& e : sc.calls)
                     if (uint32_t(e[1]) == FN_RAPTOR && e.size() >= 6) types.insert(e[4]);
         raptor_types.assign(types.begin(), types.end());
@@ -762,7 +692,7 @@ struct Survival {
     void start_ambush() {
         halt();
         int id = pending >= 0 ? pending : next_encounter();   // (its trigger may be behind already)
-        std::vector<Section> pool = id >= 0 ? sections_of(id) : std::vector<Section>{};
+        std::vector<Section> pool = id >= 0 ? encounter_of(id).sections : std::vector<Section>{};
         if (pool.empty()) pool = wave_pool();
         int count = std::min(5, 2 + lap), slot = 1;
         uint32_t sig = 0;
@@ -1067,16 +997,12 @@ struct Survival {
         uint64_t f = loading_frames;
         uint32_t select = rd32(COURSE_SELECT);
         bool boot = g_frame_no < 900;   // a button held during the boot changes what it does
-        g_inputs.p[0].coin = !boot && select == 0 && f % 240 < 6;
-        g_inputs.p[0].start = !boot && select == 0 && f % 240 >= 60 && f % 240 < 66;
+        auto_coin_start(g_inputs.p[0], f, !boot && select == 0);
         g_inputs.p[0].trigger = !boot && (select == 1 || select == 2) && f % 90 < 6;
         g_inputs.p[0].offscreen = false;
         g_inputs.p[0].gun_x = 128, g_inputs.p[0].gun_y = 128;
         if (select == 0xC && shoot_in) {   // in the stage: shoots its way to the arena, lives kept
-            g_inputs.p[0].trigger = f % 12 < 3;
-            g_inputs.p[0].offscreen = f % 240 < 3;
-            g_inputs.p[0].gun_x = int(40 + (f * 7) % 180);
-            g_inputs.p[0].gun_y = int(40 + (f * 3) % 170);
+            auto_sweep_fire(g_inputs.p[0], f);
             if (!loading_lives) loading_lives = rd32(PLAYER_LIFE);
             if (loading_lives) wr32(PLAYER_LIFE, loading_lives);
         }
@@ -1096,9 +1022,6 @@ struct Survival {
         default: return 1;
         }
     }
-    uint64_t travel_frames = 0;
-    uint32_t loading_lives = 0;   // the player's lives as the stage began (kept on the way in)
-    bool shoot_in = false;        // SurvivalZone::shoot_in of this arena
 
     // The arena's first encounter is ours (take_over): the start screen
     void at_arena() {
@@ -1115,11 +1038,7 @@ struct Survival {
         unlock(stage + 1, zone, start_lives, false);
     }
 
-    // The arena kept the first time it was reached (save/survival/), made
-    // with this LIFE and difficulty setting: the way there only once
-    std::string cache;            // its file: being loaded or saved this run
-    bool cache_loading = false, cache_saving = false, cache_tried = false;
-    uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
+    // The arena kept the first time it was reached (Run::cache)
     std::string cache_path() const { return arena_state_path(stage + 1, zone); }
     // Loaded: the arena's first encounter (where survival or the arcade game
     // kept the state) is taken over from its start, with the lives of a new game
@@ -1128,19 +1047,12 @@ struct Survival {
         for (const SurvivalZone& sz : SURVIVAL_ZONES)
             if (sz.stage == stage + 1 && sz.zone == zone) id = sz.encounter;
         if (id < 0) return false;
-        uint32_t i = 0;
-        while (i < SCRIPT_WORDS) {   // its header in the script
-            int32_t op = int32_t(rd32(script_addr(i)));
-            if (op == -10 && int32_t(rd32(script_addr(i + 1))) == id) break;
-            int n = op < 0 ? op_args(op) : -2;
-            if (op < 0 && n < 0) return false;
-            i += op < 0 ? 1 + uint32_t(n) : 3 + rd32(script_addr(i + 2));
-        }
-        if (i >= SCRIPT_WORDS) return false;
+        uint32_t h = script::find(ram_word, id);   // its header in the script
+        if (h == script::NOT_FOUND) return false;
         if (rd8(STAGE) != stage || int(rd32(ZONE) & 15) != zone) return false;
         encounter = id;
         enemies.clear(), looks.clear(), setup.clear();
-        if (!take_over(i)) return false;
+        if (!take_over(h)) return false;
         if (int l = unlock_lives(stage + 1, zone, rd8(SETTING_LIFE)); l > 0) wr32(PLAYER_LIFE, uint32_t(l));
         at_arena();
         return true;
@@ -1148,46 +1060,14 @@ struct Survival {
 
     // A new run: everything as at the start
     void reset(int s, int z) {
+        static_cast<Run&>(*this) = Run{};
         stage = s - 1;
         zone = z;
-        state = WAITING;
-        zone_empty = false;
         mode = SurvivalMode::Loading;
-        encounter = -1;
-        enemies.clear(), looks.clear(), setup.clear();
-        wave = 0;
-        armed = false;
-        lives = start_lives = 0;
-        last_hit = false;
-        dying_until = 0;
         confirm = false;
-        enemy_pcs.clear();
-        phase = FIGHT;
-        lap = 1;
-        stop = 0;
-        last_stop = false;
-        pending = -1;
-        ambush_planned = false;
-        bonus_at = fade_in_at = 0;
-        first_encounter = -1;
-        first_enemies.clear(), first_looks.clear(), first_setup.clear();
-        first_count = 0;
-        zone_encounters.clear(), raptor_types.clear();
-        last_sig = 0;
-        bonus_on = false;
-        reward = 0;
-        lap_started = ambush_started = 0;
-        loading_frames = travel_frames = 0;
-        loading_lives = 0;
-        cache.clear();
-        cache_loading = cache_saving = cache_tried = false;
-        shoot_in = false;
         for (const SurvivalZone& sz : SURVIVAL_ZONES)
             if (sz.stage == s && sz.zone == z) shoot_in = sz.shoot_in;
-        step = SurvivalStep::Preparing;
-        new_record = false;
         best_before = record_of(s, z);
-        wave_started = 0;
     }
 
     void publish() {
@@ -1313,7 +1193,6 @@ bool survival_owns_inputs() {
 
 void survival_confirm() { g_surv.confirm = true; }
 
-double survival_now() { return now_seconds(); }
 
 void survival_enter(Ctx& c, uint32_t fn) {
     if (!g_hooks.count(fn)) return;
@@ -1423,7 +1302,7 @@ bool survival_frame(Ctx&) {
         if (s.on) s.restore();
         s.on = true;
         s.gate = true;
-        s.rng = uint32_t(time(nullptr));
+        s.rng = random_seed();
         s.reset(g_begin_stage, g_begin_zone);
         printf("[survival] stage %d, zone %d\n", s.stage + 1, s.zone);
     }
@@ -1532,13 +1411,8 @@ bool survival_frame(Ctx&) {
         uint32_t life = rd32(PLAYER_LIFE);
         if (life > 0 && life < 5) wr32(PLAYER_LIFE, 5);
     }
-    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC) {   // testing aid: shoots all over the screen
-        uint64_t f = g_frame_no;
-        g_inputs.p[0].trigger = f % 12 < 3;
-        g_inputs.p[0].offscreen = f % 240 < 3;
-        g_inputs.p[0].gun_x = int(40 + (f * 7) % 180);
-        g_inputs.p[0].gun_y = int(40 + (f * 3) % 170);
-    }
+    if (test_env().autoplay && rd32(COURSE_SELECT) == 0xC)   // testing aid: shoots all over the screen
+        auto_sweep_fire(g_inputs.p[0], g_frame_no);
     static std::map<uint32_t, uint32_t> last;
     auto now = tasks();
     for (auto& [t, fn] : last)

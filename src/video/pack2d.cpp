@@ -20,15 +20,7 @@ void Pack2D::hash_cells(const uint32_t* front, std::vector<uint64_t>& out) {
 }
 
 void Pack2D::save_capture(const uint32_t* front, const std::string& path) {
-    std::vector<uint8_t> rgba(SCREEN_W * SCREEN_H * 4);
-    for (int i = 0; i < SCREEN_W * SCREEN_H; i++) {
-        uint32_t c = front[i];
-        rgba[i * 4 + 0] = uint8_t(c >> 16);
-        rgba[i * 4 + 1] = uint8_t(c >> 8);
-        rgba[i * 4 + 2] = uint8_t(c);
-        rgba[i * 4 + 3] = uint8_t(c >> 24);
-    }
-    png_save(path + ".png", SCREEN_W, SCREEN_H, rgba.data());
+    png_save_bgra(path + ".png", SCREEN_W, SCREEN_H, front);
     std::vector<uint64_t> cells;
     hash_cells(front, cells);
     if (FILE* f = fopen((path + ".cells").c_str(), "w")) {

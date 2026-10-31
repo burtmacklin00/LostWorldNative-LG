@@ -10,11 +10,10 @@
 #include <cstring>
 #include <cwctype>
 #include <ctime>
-#include <initializer_list>
 #include <thread>
 
 #include <shellapi.h>
-#include <wincodec.h>
+#include "../video/image_io.h"
 
 namespace {
 
@@ -58,7 +57,7 @@ struct Frontend::Setting {
     int other = 0;
     std::vector<std::pair<const char*, int>> also = {};
     int lo = 0, hi = 0;       // a number's range
-    int grain = 1;            // and the steps it is read in (REAR BOOST: 3 dB)
+    int grain = 1;            // and the steps it is read in (REAR LEVEL: 3 dB)
     bool hundredths = false;  // kept as a decimal (GAMMA 1.00)
     // The row
     Kind kind = PLAIN;
@@ -136,7 +135,7 @@ std::wstring decimal(int v) {   // GAMMA
     swprintf(text, 16, L"%.2f", v / 100.0);
     return text;
 }
-std::wstring decibels(int v) { return v ? L"+" + std::to_wstring(v) + L" DB" : std::wstring(L"OFF"); }
+std::wstring decibels(int v) { return (v > 0 ? L"+" : L"") + std::to_wstring(v) + L" DB"; }
 std::wstring seconds(int v) { return v ? L"AFTER " + std::to_wstring(v) + L" S" : std::wstring(L"NEVER"); }
 std::wstring fps(int v) { return v ? std::to_wstring(v) + L" FPS" : std::wstring(L"OFF"); }   // FRAME CAP
 
@@ -244,9 +243,9 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hints = {L"Front and rear sound mixed on two speakers",
                    L"Rear sound on your rear speakers, as on the cabinet (4.0, 5.1 or 7.1)",
                    L"Two ears: gentle crossfeed, and the rear sound placed behind you"}},
-        {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR BOOST", .key = "rear_boost", .number = &FS::rear_boost, .lo = 0,
-         .hi = 12, .grain = 3, .kind = CHOICE, .steps = {0, 3, 6, 9, 12}, .levels = true, .text = decibels,
-         .hint = L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
+        {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR LEVEL", .key = "rear_boost", .number = &FS::rear_boost, .lo = -6,
+         .hi = 12, .grain = 3, .kind = CHOICE, .steps = {-6, -3, 0, 3, 6, 9, 12}, .text = decibels,
+         .hint = L"Rear speakers quieter or louder, as the cabinet's seat speakers: T-Rex roars and many effects"},
         {.id = OPT_SAMPLES, .tab = AUDIO_TAB, .label = L"SAMPLE QUALITY", .key = "sample_interpolation",
          .flag = &FS::cubic_samples, .words = {"linear", "cubic"}, .other = 1, .kind = CHOICE,
          .shown = {L"ORIGINAL", L"SMOOTH"},
@@ -410,36 +409,12 @@ bool Frontend::init(const std::string& font_dir) {
 
 namespace {
 
-// Any picture format Windows can read (WIC), as BGRA
-bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out) {
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    IWICImagingFactory* wic = nullptr;
-    IWICBitmapDecoder* dec = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* conv = nullptr;
-    UINT w = 0, h = 0;
-    bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                         IID_PPV_ARGS(&wic))) &&
-              SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                       WICDecodeMetadataCacheOnDemand, &dec)) &&
-              SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
-              SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0,
-                                         WICBitmapPaletteTypeCustom)) &&
-              SUCCEEDED(conv->GetSize(&w, &h)) && w > 0 && h > 0;
-    if (ok) {
-        px.resize(size_t(w) * h);
-        ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, UINT(px.size() * 4), reinterpret_cast<BYTE*>(px.data())));
-    }
-    for (IUnknown* p : std::initializer_list<IUnknown*>{conv, frame, dec, wic})
-        if (p) p->Release();
-    if (!ok) {
-        px.clear();
-        w_out = h_out = 0;
-        return false;
-    }
-    w_out = int(w);
-    h_out = int(h);
-    return true;
+// Any picture format Windows can read (WIC), as BGRA (nothing when it fails)
+bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w, int& h) {
+    if (image_load_bgra(path, w, h, px)) return true;
+    px.clear();
+    w = h = 0;
+    return false;
 }
 
 }  // namespace

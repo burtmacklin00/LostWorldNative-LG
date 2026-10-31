@@ -97,6 +97,7 @@ R3DTextureRam g_texture_ram;
 std::mutex g_video_mutex;
 std::vector<uint8_t> g_video_vram(TILEGEN_SIZE);
 uint64_t g_video_frame = 0;
+uint64_t g_video_page_serial[TILEGEN_PAGES] = {};
 bool g_realtime = false;
 LARGE_INTEGER g_qpf, g_start_time;
 // CPU time of the game thread per emulated frame, without the waits (frame
@@ -115,17 +116,6 @@ std::atomic<bool> g_hold{false};
 std::atomic<bool> g_quit{false}, g_parked{false};
 // --subtitles off|en|jp / settings: 0 none, 1 English, 2 Japanese (the board's own)
 std::atomic<int> g_subtitles{0};
-
-double qpc_seconds() {
-    static LARGE_INTEGER freq = [] {
-        LARGE_INTEGER f;
-        QueryPerformanceFrequency(&f);
-        return f;
-    }();
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    return double(now.QuadPart) / double(freq.QuadPart);
-}
 
 namespace {
 
@@ -226,6 +216,13 @@ inline void mark_r3d_dirty(uint32_t page) {
     g_r3d_last_dirty = page;
 }
 
+// The tilegen pages written since the last video_snapshot, one bit each
+uint32_t g_tilegen_dirty = (1u << TILEGEN_PAGES) - 1;
+inline void mark_tilegen_dirty(uint32_t a) {
+    uint32_t page = (a - TILEGEN_BASE) >> 16;   // (huge below the tilegen)
+    if (page < TILEGEN_PAGES) g_tilegen_dirty |= 1u << page;
+}
+
 // Plain device memories, where nothing in dev_read8 / dev_write8 reacts to
 // an access besides the dirty pages and the FIFO stream: the Real3D culling
 // and polygon memories (0x8C, 0x8E, 0x98), the texture FIFO (0x94) and the
@@ -306,6 +303,7 @@ void dev_write8(uint32_t a, uint8_t v) {
     if (a == 0xF0040000) g_eeprom.write_pins(v);
     if (a == 0xF004003C) g_adc_channel = v & 7;
     *dev_ptr(a) = v;
+    mark_tilegen_dirty(a);
     if (a == 0xF0C00CFF)
         g_pci_cfg[le32_at(dev_ptr(0xF0800CF8)) & 0xFFFFFFFC] = le32_at(dev_ptr(0xF0C00CFC));
     if (a >= 0xC1000000 && a < 0xC1000100) g_scsi.wrote8(a & 0xFF, v, dev_ptr(0xC1000000));
@@ -352,7 +350,7 @@ void texture_port_word(uint32_t w) {
 
 void r3d_flush() {
     auto state = std::make_shared<R3DFrameState>();
-    state->flushed = state->time = qpc_seconds();
+    state->flushed = state->time = now_seconds();
     state->vblank = g_frame;
     // At real speed the frame is dated by its vblank: the game finishes its
     // frames a few ms after the vblank, by a varying amount, and that jitter
@@ -433,13 +431,18 @@ void note(uint32_t a, bool write, uint32_t v) {
     s.last = v;
 }
 
+// The recompiled function at addr (g_fn_table is sorted by address), or null
+static inline const FnEntry* fn_lookup(uint32_t addr) {
+    const FnEntry* end = g_fn_table + g_fn_count;
+    const FnEntry* e = std::lower_bound(g_fn_table, end, addr, [](const FnEntry& f, uint32_t a) { return f.addr < a; });
+    return e != end && e->addr == addr ? e : nullptr;
+}
+
+// The start of the function holding pc (0: before the first one)
 uint32_t find_function(uint32_t pc) {
-    int lo = 0, hi = g_fn_count - 1, best = -1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (g_fn_table[mid].addr <= pc) { best = mid; lo = mid + 1; } else hi = mid - 1;
-    }
-    return best >= 0 ? g_fn_table[best].addr : 0;
+    const FnEntry* e = std::upper_bound(g_fn_table, g_fn_table + g_fn_count, pc,
+                                        [](uint32_t a, const FnEntry& f) { return a < f.addr; });
+    return e != g_fn_table ? e[-1].addr : 0;
 }
 
 // Ping-pong flip line: tilegen register 0x08 (device word = LE bytes)
@@ -621,6 +624,7 @@ void rt_wr8_slow(uint32_t a, uint8_t v) { check_wild_write(a, v); note(a, true, 
 static void plain_write(uint32_t a, const uint8_t* bytes, uint32_t n, Plain kind) {
     memcpy(dev_ptr(a), bytes, n);
     if (kind == Plain::R3D) mark_r3d_dirty(a >> 16);
+    else if (kind == Plain::Memory) mark_tilegen_dirty(a);
     else if (kind == Plain::Fifo) g_texture_fifo.insert(g_texture_fifo.end(), bytes, bytes + n);
 }
 
@@ -704,12 +708,7 @@ void diff_run(Ctx& c, uint32_t fn) {
     g_diff_active = true;
     c.next_event = ~0ull;
     diff_save("out/diff_before.bin", c, fn);
-    int lo = 0, hi = g_fn_count - 1;
-    while (lo <= hi) {   // run the function once, with events held off
-        int mid = (lo + hi) / 2;
-        if (g_fn_table[mid].addr == fn) { g_fn_table[mid].fn(c); break; }
-        if (g_fn_table[mid].addr < fn) lo = mid + 1; else hi = mid - 1;
-    }
+    if (const FnEntry* e = fn_lookup(fn)) e->fn(c);   // run the function once, with events held off
     diff_save("out/diff_after.bin", c, fn);
     if (FILE* f = fopen("out/diff_mmio.bin", "wb")) {
         fwrite(g_diff_mmio.data(), 4, g_diff_mmio.size(), f);
@@ -733,11 +732,9 @@ void rt_call(Ctx& c, uint32_t addr) {
             rt_print_recent();
         }
     }
-    int lo = 0, hi = g_fn_count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (g_fn_table[mid].addr == addr) { g_fn_table[mid].fn(c); return; }
-        if (g_fn_table[mid].addr < addr) lo = mid + 1; else hi = mid - 1;
+    if (const FnEntry* e = fn_lookup(addr)) {
+        e->fn(c);
+        return;
     }
     if (g_missing[addr]++ == 0) {
         fprintf(stderr, "[warning] call to %08X, not recompiled (from ~%08X)\n", addr, c.pc_hint);
@@ -762,12 +759,16 @@ void rt_sc(Ctx& c, uint32_t addr) {
 // ---- Video: copy of the 2D layer on every vblank for the window thread ----
 namespace {
 
+// (only the pages written since the last one)
 void video_snapshot() {
     std::lock_guard<std::mutex> lock(g_video_mutex);
-    for (uint32_t off = 0; off < TILEGEN_SIZE; off += 0x10000) {
-        auto it = g_dev.find((TILEGEN_BASE + off) >> 16);
-        if (it != g_dev.end()) memcpy(&g_video_vram[off], it->second.data(), std::min<uint32_t>(0x10000, TILEGEN_SIZE - off));
+    for (uint32_t p = 0; p < TILEGEN_PAGES; p++) {
+        if (!(g_tilegen_dirty >> p & 1)) continue;
+        auto it = g_dev.find((TILEGEN_BASE >> 16) + p);
+        if (it != g_dev.end()) memcpy(&g_video_vram[p << 16], it->second.data(), 0x10000);
+        g_video_page_serial[p]++;
     }
+    g_tilegen_dirty = 0;
     g_video_frame = g_frame;
 }
 
@@ -775,10 +776,10 @@ double g_wait_seconds = 0;   // time spent waiting since the last frame event (g
 
 // Keeps the game at the original speed (vblank at FRAME_HZ)
 void pace_frame() {
-    double wait_from = qpc_seconds();
+    double wait_from = now_seconds();
     struct Done {   // whichever way pace_frame returns, the wait is counted
         double from;
-        ~Done() { g_wait_seconds += qpc_seconds() - from; }
+        ~Done() { g_wait_seconds += now_seconds() - from; }
     } done{wait_from};
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -976,6 +977,7 @@ void apply_state(Ctx& c, const GameState& st) {
     for (auto& [key, page] : st.pages) memcpy(dev_ptr(key << 16), page.data(), 0x10000);
     for (auto& [key, page] : g_dev)
         if ((key >> 8) == 0x8C || (key >> 8) == 0x8E || (key >> 8) == 0x98) g_r3d_dirty.insert(key);
+    g_tilegen_dirty = (1u << TILEGEN_PAGES) - 1;
     g_texture_fifo.clear();
     g_fifo_consumed = 0;
     g_texture_ram.load_all(st.texture);
@@ -1144,8 +1146,7 @@ static void boss_maker_frame() {
     if (f < 900) return;   // past the boot (a button held there changes what it does)
     uint32_t select = rd32(0x1C2AD8);   // course select: 0 attract, 1-2 choosing, 0xC playing
     if (select == 0) {                  // a credit and start, again until the course select opens
-        g_inputs.p[0].coin = f % 240 < 6;
-        g_inputs.p[0].start = f % 240 >= 60 && f % 240 < 66;
+        auto_coin_start(g_inputs.p[0], f);
         return;
     }
     g_inputs.p[0].coin = g_inputs.p[0].start = false;
@@ -1163,11 +1164,7 @@ static void boss_maker_frame() {
         saving = true;
         return;
     }
-    // Tap the trigger, reload now and then, sweep the aim over the screen
-    g_inputs.p[0].trigger = f % 12 < 3;
-    g_inputs.p[0].offscreen = f % 240 < 3;
-    g_inputs.p[0].gun_x = int(40 + (f * 7) % 180);
-    g_inputs.p[0].gun_y = int(40 + (f * 3) % 170);
+    auto_sweep_fire(g_inputs.p[0], f);
 }
 
 static void enemy_marks_frame();
@@ -1185,7 +1182,7 @@ void rt_event(Ctx& c) {
             enemy_marks_frame();
             {   // CPU time of the frame just finished, without the waits
                 static double last_frame_time = 0;
-                double now_s = qpc_seconds();
+                double now_s = now_seconds();
                 if (last_frame_time > 0) {
                     g_game_busy_us += uint64_t(std::max(now_s - last_frame_time - g_wait_seconds, 0.0) * 1e6);
                     g_game_frames++;
@@ -1246,15 +1243,15 @@ void rt_event(Ctx& c) {
                 g_start_time.QuadPart = now.QuadPart - LONGLONG(double(g_frame) / FRAME_HZ * double(g_qpf.QuadPart));
             }
             if (g_hold && !g_boot_skip) {
-                double hold_from = qpc_seconds();
+                double hold_from = now_seconds();
                 while (g_hold && !g_quit) Sleep(4);
-                g_wait_seconds += qpc_seconds() - hold_from;
+                g_wait_seconds += now_seconds() - hold_from;
                 LARGE_INTEGER now;   // carry on at real speed from here, without catching up
                 QueryPerformanceCounter(&now);
                 g_start_time.QuadPart = now.QuadPart - LONGLONG(double(g_frame) / FRAME_HZ * double(g_qpf.QuadPart));
             }
             if (g_realtime && !g_boot_skip) pace_frame();
-            frame_log("G %llu %.6f\n", (unsigned long long)g_frame, qpc_seconds());
+            frame_log("G %llu %.6f\n", (unsigned long long)g_frame, now_seconds());
             if (g_frame >= uint64_t(g_frame_limit)) {
                 report();
                 exit_from_game_thread(0);
