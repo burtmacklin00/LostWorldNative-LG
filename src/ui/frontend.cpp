@@ -183,7 +183,7 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hint = L"Sharp fonts for menus, captions and score instead of the original pixels"},
         {.id = OPT_MENU_FX, .tab = DISPLAY_TAB, .label = L"MENU EFFECTS", .key = "menu_effects", .flag = &FS::menu_effects,
          .kind = TOGGLE,
-         .hint = L"Fog rolling along the bottom of the menu, and a glint across the logo now and then.  Only in the menus"},
+         .hint = L"A glint sweeping across the menu logo now and then, and a gentle glow.  Only in the menus"},
         {.id = OPT_SAT, .tab = DISPLAY_TAB, .label = L"COLOR SATURATION", .key = "saturation", .number = &FS::saturation,
          .lo = 0, .hi = 200, .kind = SLIDER, .step = 10, .text = percent,
          .hint = L"How vivid the colours are (100% = original, 80% by default)"},
