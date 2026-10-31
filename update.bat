@@ -10,7 +10,7 @@ setlocal
 cd /d "%~dp0"
 
 set "REPO=burtmacklin00/LostWorldNative-LG"
-set "BRANCH=master"
+set "BRANCH=lightgun-controls"
 set "TMPDIR=%TEMP%\lw_update"
 
 if not exist build.bat (
