@@ -68,7 +68,7 @@ struct Options {
     bool free_play = true;           // --no-free-play: coins needed (free play: 1 / 2 insert the credit themselves)
     bool outputs = true;             // --no-outputs: no Hook of the Reaper outputs (TCP port 8000)
     bool gamepads = false;           // --gamepads: controllers play too (off: light guns, or the mouse without them)
-    bool menu_effects = true;        // --no-menu-effects: no glint or glow on the menu logo
+    bool menu_effects = true;        // --no-menu-effects: no rolling fog or logo glint in the menus
     bool all_arenas = true;          // --no-all-arenas: SURVIVAL's arenas only once reached in the arcade game
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
