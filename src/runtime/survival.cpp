@@ -59,6 +59,7 @@
 #include "bosses.h"
 #include "encounter_script.h"
 #include "inputs.h"
+#include "outputs.h"
 #include "ppc_rt.h"
 #include "weather.h"
 
@@ -76,7 +77,7 @@ constexpr uint32_t SLOT_STATE = 0x1A3791;   // +0x10 for player 2: 1 / 2 playing
 // Player 2's score block follows player 1's (0x80 bytes on), its counter +4
 constexpr uint32_t P2_SCORE = 0x1A85FC, P2_STAGE_SCORE = 0x1A860C, P2_SHOWN = 0x1C1D58;
 constexpr int TWO_PLAYER_RECORDS = 100;     // a two-player record is kept as zone + 100 in save/survival.ini
-constexpr uint64_t NOBODY_FRAMES = 30;      // no one playing for this long (both out at once): the hunt is over
+constexpr uint64_t NOBODY_FRAMES = 60;      // no one playing for this long (both out at once): the hunt is over
 constexpr uint32_t FN_PLAYER_HIT[2] = {0x000463D4, 0x00071460};   // hurt the player: lives - 1
 // Player 1's score, the score its counter shows (fn_0003E800 draws the digits
 // again when the two differ; the game writes -1 there to force it), then the score of each
@@ -405,6 +406,7 @@ struct Run {
     unsigned marked = 1;          // who was playing when the lap's state was kept (bit per player)
     bool remarking = false;       // that state being taken again, with the players now
     uint64_t nobody_since = 0;    // frame no one was playing any more (0: someone is)
+    bool someone_played = false;  // since the hunt (or the lap) began: the game takes a moment to put player 1 in
     uint64_t fade_in_at = 0;      // the picture comes back from black (after a new lap)
     double lap_started = 0;       // banner
     double ambush_started = 0;
@@ -875,6 +877,7 @@ struct Survival : Run {
         }
         lives = lives_of(0);
         nobody_since = 0;
+        someone_played = false;
         lap++;
         stop = 0;
         last_stop = false;
@@ -1040,6 +1043,7 @@ struct Survival : Run {
         was_playing[0] = true, was_playing[1] = false;   // player 2 (if in the kept state) as they were then
         joined[0] = true, joined[1] = (marked & 2) != 0;
         nobody_since = 0;
+        someone_played = false;
         dying_until = 0;
         best_before = record_of(stage + 1, zone + (joined[1] ? TWO_PLAYER_RECORDS : 0));
         new_record = false;
@@ -1067,7 +1071,8 @@ struct Survival : Run {
         // No one left (both lost their last life to the same attack, or the
         // other one's CONTINUE ran out): over too
         bool anyone = playing(0) || playing(1);
-        if (anyone || dying_until || phase == LAP_OUT || phase == LAP_LOAD) {
+        if (anyone) someone_played = true;
+        if (anyone || !someone_played || dying_until || phase == LAP_OUT || phase == LAP_LOAD) {
             nobody_since = 0;
         } else if (!nobody_since) {
             nobody_since = g_frame_no;
@@ -1473,6 +1478,7 @@ bool survival_frame(Ctx&) {
                 wr32(SCORE[1], ~0u);   // the counter shows the 0 (it still showed the score of the way in)
                 s.joined[0] = true, s.joined[1] = false;
                 s.marked = 1;
+                s.nobody_since = 0, s.someone_played = false;
                 game_state_mark();   // the first stop: every lap starts again from here
                 log("  survival wave 1 count %zu (the encounter itself)\n", s.enemies.size());
                 s.set_phase(Survival::FIGHT);
@@ -1504,6 +1510,9 @@ bool survival_frame(Ctx&) {
         default: break;
         }
         s.publish();
+        // The way in presses the buttons and shoots by itself, and the start
+        // screen waits: no recoil or lights for any of it (outputs.h)
+        if (s.mode == SurvivalMode::Loading || s.mode == SurvivalMode::Ready) outputs::quiet(3);
     }
     // Joining: in a run only at the first stop of a lap (Survival::can_join)
     bool join_ok = !s.on || s.mode != SurvivalMode::Playing || s.can_join();
