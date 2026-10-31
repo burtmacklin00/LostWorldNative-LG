@@ -111,6 +111,7 @@ private:
     VkInstance instance_ = VK_NULL_HANDLE;
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice gpu_ = VK_NULL_HANDLE;
+    VkPhysicalDeviceMemoryProperties memory_{};   // the GPU's memory types
     VkDevice device_ = VK_NULL_HANDLE;
     uint32_t queue_family_ = 0;
     VkQueue queue_ = VK_NULL_HANDLE;

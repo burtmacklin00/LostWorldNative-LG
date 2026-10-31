@@ -43,31 +43,14 @@ inline void layer_position(const uint8_t* vram, int layer, int x, int y, uint32_
     py = (y + ys) & 511;
 }
 
-// Pixel (px, py) of a layer's picture, 0 if transparent/empty
-uint32_t plane_pixel(const uint8_t* vram, int layer, int px, int py, bool four_bpp, const int* offset) {
-    uint32_t pair = le32(vram + NAME_TABLES + 0x2000 * layer + ((py / 8) * 32 + px / 16) * 4);
-    uint32_t e = (px & 8) ? (pair & 0xFFFF) : (pair >> 16);
-    int fx = px & 7, fy = py & 7;
-    uint32_t index;
-    if (four_bpp) {
-        uint32_t pattern = ((e & 0x3FFF) << 1) | (e >> 15);
-        uint32_t row = le32(vram + ((pattern * 32 + fy * 4) % LINE_SCROLL));
-        index = (e & 0x7FF0) | ((row >> ((7 - fx) * 4)) & 15);
-    } else {
-        uint32_t pattern = e & 0x3FFF;
-        uint32_t row = le32(vram + ((pattern * 64 + fy * 8 + (fx & 4)) % LINE_SCROLL));
-        index = (e & 0x7F00) | ((row >> ((3 - (fx & 3)) * 8)) & 0xFF);
-    }
-    return to_bgra(le32(vram + PALETTE + index * 4), offset);
-}
-
-// One row (py) of a layer's 512-pixel picture as palette indices: the same
-// lookups as plane_pixel, with the name table entry and the pattern row read
-// once per tile instead of once per pixel
-void decode_row(const uint8_t* vram, int layer, int py, bool four_bpp, uint16_t* row) {
+// Tiles first..first+count-1 (wrapping at 64) of row py of a layer's 512-pixel
+// picture as palette indices, at row[tx * 8]. The name table has a 16-bit entry
+// per 8x8 tile (pattern and palette bank); the pattern row is read once per tile
+void decode_tiles(const uint8_t* vram, int layer, int py, bool four_bpp, int first, int count, uint16_t* row) {
     const uint8_t* names = vram + NAME_TABLES + 0x2000 * layer + (py / 8) * 32 * 4;
     int fy = py & 7;
-    for (int tx = 0; tx < 64; tx++) {
+    for (int i = 0; i < count; i++) {
+        int tx = (first + i) & 63;
         uint32_t pair = le32(names + (tx / 2) * 4);
         uint32_t e = (tx & 1) ? (pair & 0xFFFF) : (pair >> 16);
         uint16_t* out = row + tx * 8;
@@ -83,6 +66,11 @@ void decode_row(const uint8_t* vram, int layer, int py, bool four_bpp, uint16_t*
                 out[fx] = uint16_t((e & 0x7F00) | (((fx & 4) ? hi : lo) >> ((3 - (fx & 3)) * 8) & 0xFF));
         }
     }
+}
+
+// A whole row (py) of a layer's picture
+void decode_row(const uint8_t* vram, int layer, int py, bool four_bpp, uint16_t* row) {
+    decode_tiles(vram, layer, py, four_bpp, 0, 64, row);
 }
 
 // Palette entry -> colour for one set of offsets, remembered within a
@@ -103,14 +91,6 @@ PaletteCaches& palette_caches() {
     thread_local std::unique_ptr<PaletteCaches> caches;
     if (!caches) caches = std::make_unique<PaletteCaches>();
     return *caches;
-}
-
-// Pixel of one layer at screen position (x, y), 0 if transparent/empty
-uint32_t layer_pixel(const uint8_t* vram, int layer, int x, int y, bool four_bpp, uint32_t scroll,
-                     const int* offset) {
-    int px, py;
-    layer_position(vram, layer, x, y, scroll, px, py);
-    return plane_pixel(vram, layer, px, py, four_bpp, offset);
 }
 
 // A BGRA colour with a layer pair's colour offset
@@ -183,8 +163,11 @@ void TileGen::front_offset(const uint8_t* vram, int out[3]) {
 void TileGen::layer_plane(const uint8_t* vram, int layer, bool four_bpp, std::vector<uint32_t>& out) {
     static const int no_offset[3] = {0, 0, 0};
     out.resize(512 * 512);
-    for (int py = 0; py < 512; py++)
-        for (int px = 0; px < 512; px++) out[py * 512 + px] = plane_pixel(vram, layer, px, py, four_bpp, no_offset);
+    uint16_t row[512];
+    for (int py = 0; py < 512; py++) {
+        decode_row(vram, layer, py, four_bpp, row);
+        for (int px = 0; px < 512; px++) out[py * 512 + px] = to_bgra(le32(vram + PALETTE + row[px] * 4), no_offset);
+    }
 }
 
 uint64_t TileGen::layer_key(const uint8_t* vram, int layer, bool four_bpp) {
@@ -254,13 +237,20 @@ void TileGen::compose(const uint8_t* vram, const Output& out, const TextHD* text
     for (int layer = 0; layer < 4; layer++) {
         if (!(scroll[layer] & 0x80000000u) || (format & (1u << (8 + layer)))) continue;
         int dark = 0, total = 0;
-        for (int y = 0; y < SCREEN_H; y += 2)
+        uint16_t row[512];
+        for (int y = 0; y < SCREEN_H; y += 2) {
+            // Only the tiles under the 16 columns are decoded
+            int px0, py;
+            layer_position(vram, layer, SCREEN_W, y, scroll[layer], px0, py);
+            decode_tiles(vram, layer, py, format & (1u << (12 + layer)), px0 / 8, (px0 % 8 + 512 - SCREEN_W + 7) / 8,
+                         row);
             for (int x = SCREEN_W; x < 512; x++) {
-                uint32_t c = layer_pixel(vram, layer, x, y, format & (1u << (12 + layer)), scroll[layer],
-                                         offsets[layer / 2]);
+                uint16_t index = row[(px0 + x - SCREEN_W) & 511];
+                uint32_t c = to_bgra(le32(vram + PALETTE + index * 4), offsets[layer / 2]);
                 total++;
                 if (((c >> 16) & 0xFF) < 24 && ((c >> 8) & 0xFF) < 24 && (c & 0xFF) < 24) dark++;
             }
+        }
         extend[layer] = dark * 10 < total * 9;
     }
 
