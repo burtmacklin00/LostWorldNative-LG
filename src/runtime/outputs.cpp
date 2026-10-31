@@ -188,8 +188,12 @@ void frame(unsigned long long game_frame) {
         int weapon = playing ? weapon_of(delay, autofire) : 0;
 
         // Recoil: one per bullet the game counted. The counter restarts at 0
-        // each stage (a drop is no shot); outside play nothing kicks
-        if (pl.shots >= 0 && shots > pl.shots && playing) pl.pending += shots - pl.shots;
+        // each stage (a drop is no shot); outside play nothing kicks. A jump
+        // of more than a few in one frame is not shooting either: a saved
+        // game state was loaded (the boss fights, survival) with its own count
+        constexpr int MAX_SHOTS_PER_FRAME = 4;   // the fastest gun fires once in 12 frames
+        int fired = shots - pl.shots;
+        if (pl.shots >= 0 && fired > 0 && fired <= MAX_SHOTS_PER_FRAME && playing) pl.pending += fired;
         pl.shots = shots;
         if (!playing) pl.pending = 0;
         if (pl.recoil_on > 0) {
