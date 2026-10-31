@@ -35,6 +35,12 @@ $skipDirs = @('textures\text\')
 
 $files = New-Object System.Collections.Generic.List[string]
 foreach ($f in $topFiles) { if (Test-Path -LiteralPath $f -PathType Leaf) { $files.Add($f) } }
+# A release has its own readme: 'Getting Started - Release Copy.txt' here (kept
+# out of the repo) is shipped as its '1 - Getting Started Readme.txt'
+$from = @{}
+$releaseReadme = 'Getting Started - Release Copy.txt'
+if (Test-Path -LiteralPath $releaseReadme -PathType Leaf) { $from['1 - Getting Started Readme.txt'] = $releaseReadme }
+function Source($f) { if ($from.ContainsKey($f)) { $from[$f] } else { $f } }
 foreach ($p in $topPatterns) { Get-ChildItem -File -Filter $p | ForEach-Object { $files.Add($_.Name) } }
 foreach ($d in $folders) {
     if (-not (Test-Path -LiteralPath $d)) { continue }
@@ -60,7 +66,7 @@ if (Test-Path $manifestPath) {
 $hashes = @{}
 $changed = New-Object System.Collections.Generic.List[string]
 foreach ($f in $files) {
-    $h = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash
+    $h = (Get-FileHash -LiteralPath (Source $f) -Algorithm SHA256).Hash
     $hashes[$f] = $h
     if ($Full -or -not $old.ContainsKey($f) -or $old[$f] -ne $h) { $changed.Add($f) }
 }
@@ -89,7 +95,7 @@ New-Item -ItemType Directory -Force -Path $dir | Out-Null
 foreach ($f in $changed) {
     $dst = Join-Path $dir $f
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
-    Copy-Item -LiteralPath $f -Destination $dst -Force
+    Copy-Item -LiteralPath (Source $f) -Destination $dst -Force
 }
 $removed = @($old.Keys | Where-Object { -not $hashes.ContainsKey($_) } | Sort-Object)
 $readme = @(

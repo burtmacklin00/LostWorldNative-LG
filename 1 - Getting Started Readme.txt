@@ -5,7 +5,8 @@
 =====================================================================
 
 You need your own copy of the arcade ROM: lostwsga.zip (Japan, Rev. A,
-Sega Model 3 Step 1.5). Nothing from the ROM is included.
+Sega Model 3 Step 1.5). Nothing from the ROM is included. Needs
+Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
 
 
 ---------------------------------------------------------------------
@@ -20,6 +21,10 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
       - It ends with "Done: LostWorld.exe".
  3. Set up your light guns (next section).
  4. Play: double-click  Launch Lost World.ahk  (or LostWorld.exe).
+
+ Every SURVIVAL arena is open from the start (Options > GAME > ALL
+ ARENAS OPEN; with it off, each arena opens once you reach it in
+ CLASSIC ARCADE).
 
 
 ---------------------------------------------------------------------
@@ -39,7 +44,7 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
 
  Guns must be in mouse mode (absolute position), as for MAME.
  To check them: Options > CONTROLS > GUN TEST shows every gun and
- where it points.
+ where it points. LightgunHID.ini decides which gun is which player.
 
 
 ---------------------------------------------------------------------
@@ -54,6 +59,8 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Start button (key 1) .... Start
    During play, the trigger is also your START: when the game says
    to keep pressing START, just keep shooting.
+   Special guns from pickups (sniper, shotgun...) fire with the
+   normal trigger; they have no extra button.
 
  IN THE MENUS
    Player 1's gun moves the crosshair; the trigger selects and the
@@ -71,10 +78,7 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    F2 / F3 .......... Arcade test / service buttons
    F9 ............... Debug snapshot (out\snap), for reporting problems
 
- CONTROLLERS
-   Ignored: only the light guns play (or the mouse without guns), so
-   a cabinet's XInput controls never take over a player. To play with
-   a gamepad, start LostWorld.exe with --gamepads.
+ Only the light guns play (or the mouse without guns).
 
 
 ---------------------------------------------------------------------
@@ -113,18 +117,23 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Each step up turns on more; slow on a PC? Go one step down.
    Crosshairs - On.bat / Crosshairs - Off.bat
    Text - Jurassic Park.bat / Text - Original.bat
-      In-game captions (FREE PLAY, INSERT COIN, ECHO, HIT...) in the
-      Jurassic Park font, or the standard sharp fonts. Numbers keep
-      their font. The menus use it for their headings anyway.
+      The game's captions (FREE PLAY, INSERT COIN, PUSH 1P / 2P START,
+      CONTINUE, the boss and stage names...) in the Jurassic Park
+      font, or the arcade's original lettering. Numbers keep their
+      font, and the shot popups (ECHO, HIT!...) always keep the
+      arcade's look. The menus use the Jurassic Park font either way.
 
  With FREE PLAY on, the game runs in the arcade's own FREE PLAY mode:
  the screen says FREE PLAY instead of CREDIT 0.
 
  Everything else is in the game: Options (main menu) or the pause
- menu > Settings. FREE PLAY and TRIGGER STARTS are in the GAME tab;
- FRAME CAP (Off, 30, 60, 120 FPS), VSYNC and WIDESCREEN are in the
- DISPLAY tab. PLAY > CLASSIC ARCADE > RANDOM SPAWNS shuffles where
- and when the dinosaurs come.
+ menu > Settings.
+   GAME tab ...... FREE PLAY, TRIGGER STARTS, ALL ARENAS OPEN
+   DISPLAY tab ... FRAME CAP (Off, 30, 60, 120 FPS), VSYNC, WIDESCREEN,
+                   MENU EFFECTS (a glint across the main menu's logo;
+                   Graphics - Low turns it off)
+ PLAY > CLASSIC ARCADE > RANDOM SPAWNS shuffles where and when the
+ dinosaurs come.
 
 
 ---------------------------------------------------------------------
@@ -160,7 +169,8 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
 ---------------------------------------------------------------------
 
  In  third_party\menu\ :
-   logo.png ........... Title logo (transparent PNG)
+   logo.png ........... Title logo (transparent PNG); this folder has
+                        the Native LG Edition logo
    background.jpg ..... Main menu background (1920x1080)
    music.mp3 .......... Menu music (Options > Audio > Menu music)
    sega.png ........... SEGA logo for the credit at the bottom
@@ -174,6 +184,12 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
  Double-click  update.bat . It downloads the latest version, installs
  anything missing and rebuilds. It keeps your ROM, saves, settings,
  LightgunHID.ini, your bezel and your menu artwork.
+
+ A play-only copy (for a cabinet): copy this whole folder, then run
+ Cleanup - Remove Build Files.bat in the COPY. To update that copy
+ later, run  Make Update Pack.bat  here after building: it makes an
+ "Update Packs\LostWorld LG Update <date>" folder (and .zip) with only
+ the changed files, to drag into the copy (see its READ ME).
 
 
 ---------------------------------------------------------------------
