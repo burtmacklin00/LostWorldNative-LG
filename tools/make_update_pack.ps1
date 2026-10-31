@@ -23,7 +23,7 @@ Set-Location $root
 if (-not (Test-Path 'LostWorld.exe')) { Write-Host 'LostWorld.exe is missing: run build.bat first.'; exit 1 }
 
 # ---- What a release has --------------------------------------------------------
-$topFiles = @('LostWorld.exe', 'nvngx_dlss.dll', 'Launch Lost World.ahk', 'LICENSE', 'game poster.webp',
+$topFiles = @('LostWorld.exe', 'nvngx_dlss.dll', 'Launch Lost World.ahk', 'Launch Lost World MLGB.ahk', 'LICENSE', 'game poster.webp',
               '1 - Light Gun Setup.exe', '1 - Getting Started Readme.txt')
 $topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat', 'Debug - *.bat',
                  'Cleanup - *.bat')
