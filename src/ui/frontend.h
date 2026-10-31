@@ -57,6 +57,7 @@ struct FrontendSettings {
     int crosshair_style = 1; // 0 the drawn rings, 1 the crosshair.png pictures when there are any (ui/crosshair_file.h)
     int crosshair_hide = 0; // seconds without use before a crosshair hides: 0 never, 3, 5 or 10
     bool free_play = true;  // 1 / 2 (or a gun's start button) insert the credit themselves
+    bool all_arenas = true;    // every SURVIVAL arena open from the start
     bool trigger_start = true; // a gun's trigger starts / continues a player who is not playing
     bool smooth = true;     // the 3D drawn between game frames at the monitor's refresh rate
     bool second_mouse = true;   // a second mouse is player 2's gun
@@ -169,7 +170,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
         NO_ROW,   // a setting only kept in the file
     };
     // How an option row shows its value: a switch, a choice with a dot per

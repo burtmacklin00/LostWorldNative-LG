@@ -156,6 +156,7 @@ static void options_from_settings(const FrontendSettings& s, Options& o) {
     o.crosshair_hide = s.crosshair_hide;
     o.free_play = s.free_play;
     o.trigger_start = s.trigger_start;
+    o.all_arenas = s.all_arenas;
     o.interp = s.smooth;
     o.several_mice = s.second_mouse;
     o.saturation = s.saturation / 100.0f;
@@ -201,6 +202,7 @@ static void settings_from_options(const Options& o, FrontendSettings& s) {
     s.crosshair_hide = o.crosshair_hide;
     s.free_play = o.free_play;
     s.trigger_start = o.trigger_start;
+    s.all_arenas = o.all_arenas;
     s.smooth = o.interp;
     s.second_mouse = o.several_mice;
     s.saturation = std::clamp(int(o.saturation * 100 + 0.5f), 0, 200);
@@ -2177,6 +2179,7 @@ int main(int argc, char** argv) {
             g_menu_open = g_hold = true;
         }
         free_play::set(g_opt.free_play);
+        survival_set_all_open(g_opt.all_arenas);
         join_update();
         bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
         if (f12 && !f12_was_down) capture_2d = true;

@@ -42,6 +42,11 @@
 - **Free play** on by default, and **the trigger starts and continues** each player's game.
 - **Fixed guns per player**: put `LightgunHID.ini` (made by `1 - Light Gun Setup.exe`) next to
   `LostWorld.exe` and each gun always belongs to its player.
+- **Drag-and-drop updates for a release copy**: `Make Update Pack.bat` (in the build folder, after
+  `build.bat`) puts the files that changed since the last update in `Update Packs\` (a folder and a
+  .zip, with a READ ME). Drag its contents into the release folder and replace the files; settings,
+  records, `LightgunHID.ini`, `display.ini`, the ROM data and the chosen lettering are never in it.
+  `-Full` makes a complete one; `-Baseline` records the current files as released without a pack.
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,

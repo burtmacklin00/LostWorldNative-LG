@@ -29,6 +29,7 @@ bool survival_record(int stage, int zone, int& wave, int& score, int* lap = null
 // Arenas are unlocked by reaching them in the arcade game (or having a record
 // there); the arcade game keeps the arena's state on the way (save/survival/)
 bool survival_unlocked(int stage, int zone);
+void survival_set_all_open(bool on);   // Settings > ALL ARENAS OPEN: every arena counts as unlocked
 std::vector<int> survival_take_unlocked();   // indices in SURVIVAL_ZONES unlocked since the last call (the notice)
 
 // What the window shows and does
