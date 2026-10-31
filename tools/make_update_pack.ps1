@@ -10,7 +10,8 @@
 #
 # Never included, so an update never overwrites them: the ROM data, save
 # (settings, records), out, LightgunHID.ini, display.ini and textures\text
-# (the lettering picked with the Text bats).
+# (the lettering picked with the Text bats), and the Debug bats (kept in the
+# build folder only).
 #
 #   -Full       every release file, whatever changed (a complete update)
 #   -Baseline   only record the current files as released, no pack (for a
@@ -25,7 +26,7 @@ if (-not (Test-Path 'LostWorld.exe')) { Write-Host 'LostWorld.exe is missing: ru
 # ---- What a release has --------------------------------------------------------
 $topFiles = @('LostWorld.exe', 'nvngx_dlss.dll', 'Launch Lost World.ahk', 'Launch Lost World MLGB.ahk', 'LICENSE', 'game poster.webp',
               '1 - Light Gun Setup.exe', '1 - Getting Started Readme.txt')
-$topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat', 'Debug - *.bat',
+$topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat',
                  'Cleanup - *.bat')
 $folders = @('16x9', '4x3', 'res', 'textures', 'third_party\fonts', 'third_party\menu', 'Hook Of The Reaper')
 # Inside those folders: build-only files and what belongs to the player
