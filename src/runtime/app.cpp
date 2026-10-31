@@ -1236,6 +1236,7 @@ int main(int argc, char** argv) {
 
     // PC front end: main menu at launch, pause menu on Esc
     Frontend frontend;
+    frontend.gamepad_options = g_opt.gamepads;   // gamepads off: no gamepad settings or hints
     // The menus are being driven with a gamepad: no mouse pointer until the mouse moves
     bool pad_in_menu = false;
     raw_mice::init(presenter.hwnd());   // a second mouse can be player 2's gun

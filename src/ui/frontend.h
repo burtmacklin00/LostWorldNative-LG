@@ -114,6 +114,7 @@ public:
     int aa_at_launch = 0;   // anti-aliasing the renderer was started with
     bool rt_available = false;   // the GPU can trace rays (RAY TRACING option)
     std::wstring gamepads;  // the pads connected, for the CONTROLS tab ("" = none)
+    bool gamepad_options = false;   // --gamepads: the gamepad settings and hints are shown
     bool gyro_pad = false;  // one of them has a gyroscope
     bool pad_prompts = false;   // a gamepad drives the menu: its buttons in the key help, not the keyboard's
 

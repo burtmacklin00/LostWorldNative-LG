@@ -559,9 +559,10 @@ std::vector<Frontend::Item> Frontend::items() const {
     case Screen::Classic: {
         // How to start: free play (no coin) and the gun's trigger, as set
         std::wstring how = settings.free_play
-                               ? (settings.trigger_start ? L"The original arcade game.  Free play: pull the trigger or press 1 to start, or START on a gamepad"
-                                                         : L"The original arcade game.  Free play: press 1 to start, or START on a gamepad")
-                               : L"The original arcade game.  Insert a coin with 5 and press 1, or START on a gamepad";
+                               ? (settings.trigger_start ? L"The original arcade game.  Free play: pull the trigger or press 1 to start"
+                                                         : L"The original arcade game.  Free play: press 1 to start")
+                               : L"The original arcade game.  Insert a coin with 5 and press 1";
+        if (gamepad_options) how += L", or START on a gamepad";
         return {{ARCADE, L"ARCADE", L"", how},
                 {RANDOM, L"RANDOM SPAWNS", L"",
                  L"Dinosaurs come from new places and at new times, and every boss takes a different number of shots.  "
@@ -622,9 +623,13 @@ std::vector<Frontend::Item> Frontend::items() const {
         return list;
     }
     case Screen::Options: {
-        std::vector<Item> list = {{TABS, L"", L"", L"Left / Right here, Q / E or L1 / R1 change the tab"}};
+        std::vector<Item> list = {{TABS, L"", L"", gamepad_options ? L"Left / Right here, Q / E or L1 / R1 change the tab"
+                                                                   : L"Left / Right here, or Q / E, change the tab"}};
+        auto pad_only = [](int id) {   // gamepad settings: only shown with --gamepads (guns, else the mouse)
+            return id == OPT_PAD_SPEED || id == OPT_GYRO || id == OPT_GYRO_SPEED || id == OPT_VIBRATION || id == OPT_ASSIST;
+        };
         for (const Item& it : option_items(settings))   // the tab's options, in the table's order
-            if (setting_of(it.id)->tab == tab_) list.push_back(it);
+            if (setting_of(it.id)->tab == tab_ && (gamepad_options || !pad_only(it.id))) list.push_back(it);
         list.push_back(
             {BACK, L"BACK", L"", options_from_pause_ ? L"Return to the pause menu" : L"Return to the main menu"});
         return list;
