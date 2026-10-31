@@ -128,6 +128,7 @@ struct Player {
     int damaged = 0;         // frames left with P_Damaged at 1
 };
 Player g_player[2];
+std::atomic<int> g_quiet{0};   // frames left without feedback (quiet())
 
 }  // namespace
 
@@ -175,8 +176,25 @@ void stop() {
     WSACleanup();
 }
 
+void quiet(int frames) {
+    int now = g_quiet.load();
+    while (frames > now && !g_quiet.compare_exchange_weak(now, frames)) {}
+}
+
 void frame(unsigned long long game_frame) {
     if (!g_running) return;
+    if (g_quiet > 0) {   // nothing sent; the players are read again afterwards
+        g_quiet--;
+        for (int p = 0; p < 2; p++) {
+            Player& pl = g_player[p];
+            std::string P = "P" + std::to_string(p + 1);
+            if (pl.recoil_on > 0) set(P + "_CtmRecoil", 0);
+            if (pl.damaged > 0) set(P + "_Damaged", 0);
+            pl = Player{};
+            set(P + "_LmpStart", 0);
+        }
+        return;
+    }
     for (int p = 0; p < 2; p++) {
         Player& pl = g_player[p];
         std::string P = "P" + std::to_string(p + 1);

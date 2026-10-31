@@ -24,5 +24,9 @@ namespace outputs {
 void start();                          // the server (no-op if it can't listen)
 void stop();                           // mame_stop to the clients, then closes
 void frame(unsigned long long game_frame);   // game thread, every frame
+// No feedback for the next `frames` game frames (any thread): while a game
+// state is loaded and settles (the boss fights, survival), the jumps in lives
+// and shots are not the players'. Then everything is read again from scratch
+void quiet(int frames);
 
 }  // namespace outputs

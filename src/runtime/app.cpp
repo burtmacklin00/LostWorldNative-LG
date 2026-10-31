@@ -1965,6 +1965,7 @@ int main(int argc, char** argv) {
                 }
                 boss_pending = -1;
             }
+            if (boss_loading) outputs::quiet(30);   // no feedback until the fight is on
             if (boss_loading && game_state_result() != 0) {
                 boss_loading = false;
                 if (game_state_result() > 0) stats_boss_begin(boss_fight);
