@@ -129,6 +129,9 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  Everything else is in the game: Options (main menu) or the pause
  menu > Settings.
    GAME tab ...... FREE PLAY, TRIGGER STARTS, ALL ARENAS OPEN
+                   AMMO (cheat, NORMAL by default): AUTO RELOAD refills the
+                   gun when it runs dry, UNLIMITED never runs out. Only the
+                   standard gun; no records or achievements while it is on
    DISPLAY tab ... FRAME CAP (Off, 30, 60, 120 FPS), VSYNC, WIDESCREEN,
                    MENU EFFECTS (a glint across the main menu's logo;
                    Graphics - Low turns it off)

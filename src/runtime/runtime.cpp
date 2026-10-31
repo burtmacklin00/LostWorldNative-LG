@@ -32,6 +32,7 @@
 #include "../audio/sound_board.h"
 #include "../video/r3d_state.h"
 #include "stats.h"
+#include "cheats.h"
 #include "random_spawns.h"
 #include "survival.h"
 
@@ -1204,6 +1205,7 @@ void rt_event(Ctx& c) {
                 g_inputs.p[p].playing = state == 1 || state == 2;
             }
             g_inputs.block_p2 = survival_enabled();   // survival is a one-player mode
+            cheats_frame();              // Settings > GAME > AMMO (cheats.h)
             outputs::frame(g_frame);     // Hook of the Reaper (outputs.h)
             if (g_frame % 60 == 0) {
                 static ULONGLONG last_ms = GetTickCount64();

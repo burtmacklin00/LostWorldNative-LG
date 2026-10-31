@@ -146,6 +146,10 @@ const std::vector<Entry>& table() {
         flag("--gamepads", &Options::gamepads, "controllers play too (off by default: light guns, or the mouse)"),
         off("--no-menu-effects", &Options::menu_effects, "no glint or glow on the menu logo"),
         off("--no-all-arenas", &Options::all_arenas, "SURVIVAL's arenas open only once reached in the arcade game"),
+        custom("--ammo", "off|auto|unlimited", "cheat: the standard gun reloads itself when empty, or never runs out", false,
+               [](Options& o, const char* v) {
+                   o.ammo = strcmp(v, "unlimited") == 0 ? 2 : strcmp(v, "auto") == 0 ? 1 : 0;
+               }),
         off("--no-trigger-start", &Options::trigger_start, "the gun's trigger does not start or continue a game"),
         num("--crosshair-hide", &Options::crosshair_hide, "hide a crosshair after N seconds unused (0 = never)"),
         section("Debugging and tests"),

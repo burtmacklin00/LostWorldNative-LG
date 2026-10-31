@@ -107,6 +107,7 @@ add_executable(LostWorld
     src/runtime/encounter_script.cpp
     src/runtime/weather.cpp
     src/runtime/stats.cpp
+    src/runtime/cheats.cpp
     src/ui/gdi_text.cpp
     src/ui/survival_ui.cpp
     src/ui/achievement_toast.cpp

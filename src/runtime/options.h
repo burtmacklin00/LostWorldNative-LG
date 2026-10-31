@@ -70,6 +70,7 @@ struct Options {
     bool gamepads = false;           // --gamepads: controllers play too (off: light guns, or the mouse without them)
     bool menu_effects = true;        // --no-menu-effects: no glint or glow on the menu logo
     bool all_arenas = true;          // --no-all-arenas: SURVIVAL's arenas only once reached in the arcade game
+    int ammo = 0;                    // --ammo off|auto|unlimited: 0, 1 the gun reloads itself when empty, 2 never runs out
     bool trigger_start = true;       // --no-trigger-start: a gun's trigger starts / continues a player who is not playing
     // Debugging and tests
     uint64_t shot_frame = 0;         // --shot N: screenshot of frame N, then exit

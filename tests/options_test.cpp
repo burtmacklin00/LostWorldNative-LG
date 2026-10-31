@@ -54,6 +54,11 @@ int main() {
         CHECK(parse(o, {}) && !o.gamepads);
         CHECK(parse(o, {"--gamepads"}) && o.gamepads);
         CHECK(parse(o, {"--free-play", "--crosshair-hide", "5"}) && o.free_play && o.crosshair_hide == 5);
+        Options a;
+        CHECK(a.ammo == 0);
+        CHECK(parse(a, {"--ammo", "auto"}) && a.ammo == 1);
+        CHECK(parse(a, {"--ammo", "unlimited"}) && a.ammo == 2);
+        CHECK(parse(a, {"--ammo", "off"}) && a.ammo == 0);
     }
     {   // custom values
         Options o;

@@ -13,6 +13,7 @@
 // is a copy taken under a mutex. Debug runs (tests, --auto, the survival
 // god mode, the boss state maker) never call stats_init, so they count nothing.
 #include "stats.h"
+#include "cheats.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -204,6 +205,9 @@ struct Tracker {
     int boss_lives_lost = 0;
     uint64_t saved_at = 0;
     bool dirty = false;
+    // A cheat (cheats.h) was on during this game or boss fight: nothing is
+    // counted until the player is out of the game with the cheat off
+    bool cheated = false;
 
     bool playing() const { return state == 1 || state == 2; }
 
@@ -288,6 +292,14 @@ struct Tracker {
         Counters now = Counters::read();
         int lv = rd8(PLAYER_LIFE), al = int(rd32(VM_ALIVE)), sg = rd8(STAGE);
         std::lock_guard<std::mutex> lock(mutex);
+        bool cheat = cheats_active();
+        if (cheat && (st == 1 || st == 2)) cheated = true;
+        if (cheated) {   // the game goes on uncounted, then starts again from what it reads
+            in_game = false;
+            rebase = true;
+            if (!cheat && st != 1 && st != 2) cheated = false;
+            return;
+        }
         if (rebase) {   // nothing counted across the jump
             rebase = false;
             state = st, last = now, lives = lv, alive = al;
@@ -366,6 +378,7 @@ void stats_boss_begin(int boss) {
     g.boss = boss;
     g.boss_from = g.frame;
     g.boss_lives_lost = 0;
+    g.cheated = cheats_active();
     g.in_game = false;
     g.rebase = true;
     g.stats.boss[boss].attempts++;
@@ -375,6 +388,10 @@ void stats_boss_begin(int boss) {
 void stats_boss_end(bool won) {
     if (!g.on || g.boss < 0) return;
     std::lock_guard<std::mutex> lock(g.mutex);
+    if (g.cheated) {   // a cheated fight: no win, no time
+        g.boss = -1;
+        return;
+    }
     Stats::Boss& b = g.stats.boss[g.boss];
     if (won) {
         int frames = int(g.frame - g.boss_from);

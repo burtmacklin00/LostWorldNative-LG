@@ -38,6 +38,7 @@
 #include "stats.h"
 #include "random_spawns.h"
 #include "survival.h"
+#include "cheats.h"
 #include "outputs.h"
 #include "free_play.h"
 #include "weather.h"
@@ -157,6 +158,7 @@ static void options_from_settings(const FrontendSettings& s, Options& o) {
     o.free_play = s.free_play;
     o.trigger_start = s.trigger_start;
     o.all_arenas = s.all_arenas;
+    o.ammo = s.ammo;
     o.menu_effects = s.menu_effects;
     o.interp = s.smooth;
     o.several_mice = s.second_mouse;
@@ -204,6 +206,7 @@ static void settings_from_options(const Options& o, FrontendSettings& s) {
     s.free_play = o.free_play;
     s.trigger_start = o.trigger_start;
     s.all_arenas = o.all_arenas;
+    s.ammo = o.ammo;
     s.menu_effects = o.menu_effects;
     s.smooth = o.interp;
     s.second_mouse = o.several_mice;
@@ -2182,6 +2185,7 @@ int main(int argc, char** argv) {
         }
         free_play::set(g_opt.free_play);
         survival_set_all_open(g_opt.all_arenas);
+        cheats_set_ammo(g_opt.ammo);
         ui.set_effects(g_opt.menu_effects);
         join_update();
         bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
