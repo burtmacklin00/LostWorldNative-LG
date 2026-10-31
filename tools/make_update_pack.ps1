@@ -1,22 +1,26 @@
-# Lost World Native LG: makes a drag-and-drop update for a release copy of the
+# Lost World Native LG: makes drag-and-drop updates for a release copy of the
 # game (a folder made with "Cleanup - Remove Build Files.bat").
 #
-# Run from the build folder (Make Update Pack.bat). It takes the files a
-# release needs to play, compares them with the last update made (Update
-# Packs\release-manifest.txt) and copies only the new or changed ones into
-#   Update Packs\LostWorld LG Update <date>\        (and a .zip of it)
-# with the same folders as the game. Dragging that folder's contents into the
-# release folder (Replace the files) updates it.
+# Run from the build folder (Make Update Pack.bat, Make Release.bat). It takes
+# the files a release needs to play and copies the ones to update into a
+# folder (and a .zip) with the same folders as the game. Dragging that
+# folder's contents into the release folder (Replace the files) updates it.
+#
+#   (nothing)        a test update: the files changed since the last update
+#                    made (Update Packs\release-manifest.txt)
+#   -Full            a test update with every release file
+#   -Baseline        only record the current files as the last update, no pack
+#   -Release 2.0     a version: records it (Update Packs\Versions\v2.0.txt) and
+#                    makes "LostWorld LG v2.0 (full)", every release file, for
+#                    a new copy, and "LostWorld LG v1.0 to v2.0", only what
+#                    differs from the version before, however many test
+#                    updates came in between
 #
 # Never included, so an update never overwrites them: the ROM data, save
 # (settings, records), out, LightgunHID.ini, display.ini and textures\text
 # (the lettering picked with the Text bats), and the Debug bats (kept in the
 # build folder only).
-#
-#   -Full       every release file, whatever changed (a complete update)
-#   -Baseline   only record the current files as released, no pack (for a
-#               release made by hand, such as the first one)
-param([switch]$Full, [switch]$Baseline)
+param([switch]$Full, [switch]$Baseline, [string]$Release)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -52,79 +56,127 @@ foreach ($d in $folders) {
     }
 }
 
-# ---- What changed since the last update -------------------------------------------
+# ---- The files now, and what was released -------------------------------------------
 $packs = Join-Path $root 'Update Packs'
+$versions = Join-Path $packs 'Versions'
 New-Item -ItemType Directory -Force -Path $packs | Out-Null
 $manifestPath = Join-Path $packs 'release-manifest.txt'
-$old = @{}
-if (Test-Path $manifestPath) {
-    foreach ($line in Get-Content $manifestPath) {
-        $i = $line.IndexOf(' ')
-        if ($i -gt 0) { $old[$line.Substring($i + 1)] = $line.Substring(0, $i) }
+function Read-Manifest($path) {
+    $m = @{}
+    if (Test-Path -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path) {
+            $i = $line.IndexOf(' ')
+            if ($i -gt 0) { $m[$line.Substring($i + 1)] = $line.Substring(0, $i) }
+        }
     }
+    return $m
 }
 $hashes = @{}
-$changed = New-Object System.Collections.Generic.List[string]
-foreach ($f in $files) {
-    $h = (Get-FileHash -LiteralPath (Source $f) -Algorithm SHA256).Hash
-    $hashes[$f] = $h
-    if ($Full -or -not $old.ContainsKey($f) -or $old[$f] -ne $h) { $changed.Add($f) }
-}
-function Save-Manifest {
+foreach ($f in $files) { $hashes[$f] = (Get-FileHash -LiteralPath (Source $f) -Algorithm SHA256).Hash }
+function Save-Manifest($path) {
     $lines = $hashes.Keys | Sort-Object | ForEach-Object { "$($hashes[$_]) $_" }
-    Set-Content -Path $manifestPath -Value $lines -Encoding UTF8
+    Set-Content -LiteralPath $path -Value $lines -Encoding UTF8
+}
+function Changed-Since($old) {
+    $list = New-Object System.Collections.Generic.List[string]
+    foreach ($f in ($files | Sort-Object)) { if (-not $old.ContainsKey($f) -or $old[$f] -ne $hashes[$f]) { $list.Add($f) } }
+    return ,$list
 }
 
+# A pack: the files, a READ ME and a .zip of it
+function Make-Pack($name, $title, $list, $removed) {
+    $dir = Join-Path $packs $name
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    foreach ($f in $list) {
+        $dst = Join-Path $dir $f
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+        Copy-Item -LiteralPath (Source $f) -Destination $dst -Force
+    }
+    $readme = @(
+        "Lost World Native LG - $title",
+        "Made $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
+        '',
+        'HOW TO UPDATE',
+        '  1. Close the game.',
+        '  2. Open this folder, select everything in it (Ctrl+A) except this file,',
+        '     and drag it into your game folder (the one with LostWorld.exe).',
+        '  3. When Windows asks, choose "Replace the files in the destination".',
+        '',
+        'Your settings, records, guns (LightgunHID.ini), display.ini, the ROM data',
+        'and your choice of in-game lettering are never in an update: they are kept.',
+        'If this update lists files in textures\text_jurassic or textures\text_original,',
+        'run your Text bat again (Text - Jurassic Park.bat or Text - Original.bat).',
+        'This READ ME can be deleted afterwards.',
+        '',
+        "FILES IN THIS UPDATE ($($list.Count))"
+    ) + ($list | ForEach-Object { '  ' + $_ })
+    if ($removed.Count -gt 0) {
+        $readme += @('', 'NO LONGER USED (you can delete them from your game folder)') + ($removed | ForEach-Object { '  ' + $_ })
+    }
+    Set-Content -LiteralPath (Join-Path $dir '_UPDATE - READ ME.txt') -Value $readme -Encoding UTF8
+    $zip = "$dir.zip"
+    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
+    Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip
+    Write-Host "  $name  ($($list.Count) files)"
+    return $dir
+}
+function Removed-Since($old) { return @($old.Keys | Where-Object { -not $hashes.ContainsKey($_) } | Sort-Object) }
+
+# ---- A version ------------------------------------------------------------------------
+if ($Release) {
+    $ver = $Release.Trim().TrimStart('v', 'V')
+    if ($ver -notmatch '^\d+(\.\d+){0,3}$') { Write-Host "Not a version number: $Release (for example 2.0)"; exit 1 }
+    if ($ver -notmatch '\.') { $ver += '.0' }   # 2 is 2.0
+    New-Item -ItemType Directory -Force -Path $versions | Out-Null
+    function As-Version($v) { $p = $v.Split('.'); while ($p.Count -lt 2) { $p += '0' }; [version]($p -join '.') }
+    $mine = As-Version $ver
+    $prev = Get-ChildItem -LiteralPath $versions -File -Filter 'v*.txt' |
+        ForEach-Object { $v = $_.BaseName.Substring(1); if ($v -match '^\d+(\.\d+){0,3}$') { [pscustomobject]@{ Name = $v; Ver = (As-Version $v); Path = $_.FullName } } } |
+        Where-Object { $_.Ver -lt $mine } | Sort-Object Ver | Select-Object -Last 1
+    $target = Join-Path $versions "v$ver.txt"
+    if (Test-Path -LiteralPath $target) {
+        $answer = Read-Host "v$ver was already released. Replace it with the files now? Type YES"
+        if ($answer -ne 'YES') { Write-Host 'Nothing made.'; exit 0 }
+    }
+    Write-Host ''
+    Write-Host "Version $ver"
+    $all = New-Object System.Collections.Generic.List[string]
+    foreach ($f in ($files | Sort-Object)) { $all.Add($f) }
+    Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete (for a new copy: add the data folder or lostwsga.zip)" $all @() | Out-Null
+    if ($prev) {
+        $old = Read-Manifest $prev.Path
+        $diff = Changed-Since $old
+        if ($diff.Count -eq 0) { Write-Host "  (nothing differs from v$($prev.Name): no v$($prev.Name) to v$ver update)" }
+        else { Make-Pack "LostWorld LG v$($prev.Name) to v$ver" "update from version $($prev.Name) to $ver" $diff (Removed-Since $old) | Out-Null }
+    } else {
+        Write-Host '  (the first version recorded: no update from an earlier one)'
+    }
+    Save-Manifest $target
+    Save-Manifest $manifestPath   # test updates go on from here
+    Write-Host ''
+    Write-Host "Recorded as v$ver ($($files.Count) files), in Update Packs\Versions"
+    exit 0
+}
+
+# ---- A test update ----------------------------------------------------------------------
+$old = Read-Manifest $manifestPath
 if ($Baseline) {
-    Save-Manifest
+    Save-Manifest $manifestPath
     Write-Host "Recorded $($files.Count) files as the current release. The next update holds only what changes after this."
     exit 0
 }
 if ($old.Count -eq 0 -and -not $Full) {
     Write-Host 'No earlier update recorded: this one holds every release file (a complete update).'
 }
+$changed = if ($Full) { $l = New-Object System.Collections.Generic.List[string]; foreach ($f in ($files | Sort-Object)) { $l.Add($f) }; ,$l } else { Changed-Since $old }
 if ($changed.Count -eq 0) {
     Write-Host 'Nothing changed since the last update: no pack made.'
     exit 0
 }
-
-# ---- The pack ---------------------------------------------------------------------
 $name = 'LostWorld LG Update ' + (Get-Date -Format 'yyyy-MM-dd HHmm')
-$dir = Join-Path $packs $name
-New-Item -ItemType Directory -Force -Path $dir | Out-Null
-foreach ($f in $changed) {
-    $dst = Join-Path $dir $f
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
-    Copy-Item -LiteralPath (Source $f) -Destination $dst -Force
-}
-$removed = @($old.Keys | Where-Object { -not $hashes.ContainsKey($_) } | Sort-Object)
-$readme = @(
-    "Lost World Native LG - update made $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
-    '',
-    'HOW TO UPDATE',
-    '  1. Close the game.',
-    '  2. Open this folder, select everything in it (Ctrl+A) except this file,',
-    '     and drag it into your game folder (the one with LostWorld.exe).',
-    '  3. When Windows asks, choose "Replace the files in the destination".',
-    '',
-    'Your settings, records, guns (LightgunHID.ini), display.ini, the ROM data',
-    'and your choice of in-game lettering are never in an update: they are kept.',
-    'If this update lists files in textures\text_jurassic or textures\text_original,',
-    'run your Text bat again (Text - Jurassic Park.bat or Text - Original.bat).',
-    '',
-    "FILES IN THIS UPDATE ($($changed.Count))"
-) + ($changed | ForEach-Object { '  ' + $_ })
-if ($removed.Count -gt 0) {
-    $readme += @('', 'NO LONGER USED (you can delete them from your game folder)') + ($removed | ForEach-Object { '  ' + $_ })
-}
-Set-Content -Path (Join-Path $dir '_UPDATE - READ ME.txt') -Value $readme -Encoding UTF8
-$zip = "$dir.zip"
-if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip
-Save-Manifest
-
 Write-Host ''
-Write-Host "Update made: $($changed.Count) files"
-Write-Host "  $dir"
-Write-Host "  $zip"
-if ($removed.Count -gt 0) { Write-Host "  ($($removed.Count) files no longer used: listed in its READ ME)" }
+Write-Host 'Update made:'
+$dir = Make-Pack $name 'test update' $changed (Removed-Since $old)
+Save-Manifest $manifestPath
+Write-Host "  in $packs"

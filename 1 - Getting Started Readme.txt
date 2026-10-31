@@ -194,6 +194,12 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  "Update Packs\LostWorld LG Update <date>" folder (and .zip) with only
  the changed files, to drag into the copy (see its READ ME).
 
+ Giving out a version: when a build is tested, run  Make Release.bat
+ with its number (for example  Make Release.bat 2.0 ). It makes
+ "LostWorld LG v2.0 (full)" for a new copy and "LostWorld LG v1.0 to
+ v2.0" with only what differs from the version before, however many
+ test updates you made in between.
+
 
 ---------------------------------------------------------------------
  10. TROUBLESHOOTING
