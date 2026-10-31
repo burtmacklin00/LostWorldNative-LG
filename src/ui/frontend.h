@@ -328,6 +328,6 @@ private:
     bool has_backdrop() const { return backdrop_.w > 0; }
     void backdrop_background();
     bool has_poster() const { return poster_w_ > 0; }
-    void poster_background(bool stone_only, std::vector<uint32_t>& dst);
+    void poster_background(std::vector<uint32_t>& dst, std::vector<uint32_t>& stone);
     void poster_layout(float& scale, float& x0, float& y0) const;   // the logo at the top left
 };

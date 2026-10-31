@@ -55,7 +55,9 @@ public:
     void set_scene(const R3DScene* scene) {
         scene_ = scene;
         scene_serial_++;
+        has_world_ = false;
         if (scene) {
+            for (const R3DViewport& v : scene->viewports) has_world_ |= v.world;
             step_weather(*scene);
             rain_.observe(*scene);
         }
@@ -279,6 +281,7 @@ private:
     VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
     float aniso_ = 0.0f;
     const R3DScene* scene_ = nullptr;
+    bool has_world_ = false;   // a viewport of scene_ shows the game world
 
     Image text_cells_;   // per 8x8 cell of the foreground: high-resolution text slot and colours
     Image sky_coords_;   // per back layer pixel: backdrop replacement picture and position (tilegen.h)
