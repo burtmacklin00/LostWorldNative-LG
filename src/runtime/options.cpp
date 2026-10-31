@@ -149,6 +149,7 @@ const std::vector<Entry>& table() {
         section("Debugging and tests"),
         custom("--shot", "N", "save frame N to out/capture.bmp and the scene to out/scene.txt, then exit", true,
                [](Options& o, const char* v) { o.shot_frame = strtoull(v, nullptr, 10); }),
+        flag("--capture-popups", &Options::capture_popups, "an F12 capture whenever a shot's popup (ECHO, HIT...) shows, 80 at most"),
         num("--snap-every", &Options::snap_every, "a debug snapshot (as F9) every N seconds while someone plays (60 at most)"),
         text("--replay", "FILE", &Options::replay,
              "show a snapshot (F9) or play back a folder of them (LW_FILM)", true),

@@ -1435,7 +1435,7 @@ int main(int argc, char** argv) {
         if (capture) sky.capture();   // F12 also saves the backdrops, for textures/sky
         bool sky_on = sky.active();
         // Raw layers for recognising the 2D replacements (and for F12)
-        bool raw_front = !pack2d.empty() || capture, raw_back = !pack2d_back.empty() || capture;
+        bool raw_front = !pack2d.empty() || capture || g_opt.capture_popups, raw_back = !pack2d_back.empty() || capture;
         TileGen::compose(out.vram.data(),
                          {.back = out.back.data(),
                           .front = out.front.data(),
@@ -1480,6 +1480,25 @@ int main(int argc, char** argv) {
             out.shift_to = back_rows_frame = out.frame;
         }
         out.sky_pictures = sky.take_new_images();
+        // --capture-popups: a capture whenever the band under the scores
+        // (where a shot's ECHO, HIT... shows) holds more than a number, once
+        // per new picture there, for making their 2D replacements
+        if (g_opt.capture_popups && !capture) {
+            static uint64_t last_hash = 0;
+            static double last_at = 0;
+            static int captures = 0;
+            int lit = 0;
+            uint64_t h = 1469598103934665603ull;
+            for (int y = 58; y < hud_split::POPUP_ROWS; y++)   // (below the scores' second line)
+                for (int x = 0; x < SCREEN_W; x++) {
+                    uint32_t p = front_raw_top[y * SCREEN_W + x];
+                    if (p >> 24) lit++, h = (h ^ (uint64_t(y * SCREEN_W + x) << 32 ^ p)) * 1099511628211ull;
+                }
+            if (lit > 120 && h != last_hash && captures < 80 && now_seconds() - last_at > 0.25) {
+                last_hash = h, last_at = now_seconds(), captures++;
+                capture = true;
+            }
+        }
         if (capture) {   // F12 or --shot: capture for tools/make_2d_replacement.py
             CreateDirectoryA("out/2d", nullptr);
             std::string path = "out/2d/capture_" + std::to_string(out.frame);
