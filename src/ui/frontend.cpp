@@ -1196,6 +1196,16 @@ void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
         }
 }
 
+// Labels made only of letters (the menus' entries, the settings' tabs) in the
+// Jurassic Park font when it is there: it draws digits as claw marks and has no
+// punctuation, so anything else stays in Saira
+Frontend::Family Frontend::words(const std::wstring& s) const {
+    if (!jurassic_ || s.empty()) return TITLE;
+    for (wchar_t c : s)
+        if (c != L' ' && !(c >= L'A' && c <= L'Z') && !(c >= L'a' && c <= L'z')) return TITLE;
+    return JURASSIC;
+}
+
 int Frontend::measure(Family f, int px, const std::wstring& s) {
     if (f == JURASSIC) px = int(px * 1.34f + 0.5f);   // as text() draws it
     return mask(f, px, s, 0).text_w;
@@ -1702,9 +1712,9 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
                          : sel       ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2), 1, U(3)}
                                      : Style{PALE_TOP, PALE_BOTTOM, INK, U(2), 0.95f, U(3)};
         int ty = y + spacing / 2 - item_px * 55 / 100;
-        text(TITLE, item_px, it.label, tx, ty, talign, st);
+        text(words(it.label), item_px, it.label, tx, ty, talign, st);
         if (!it.value.empty())   // e.g. the stage of a boss, "NOT READY" or a record
-            text(ITEM, U(24), it.value, right ? tx - measure(TITLE, item_px, it.label) - U(30) : left + col_w - U(60),
+            text(ITEM, U(24), it.value, right ? tx - measure(words(it.label), item_px, it.label) - U(30) : left + col_w - U(60),
                  y + spacing / 2 - U(14), 2, {0xF4D27A, 0xE0A848});
         hit_.push_back({band0, y, band1, y + spacing});
         values_.push_back({-1, 0});
@@ -1766,7 +1776,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
             if (rail_focus) frame(rail0, y, rail1, y + cat_h, std::max(1, U(1.5f)), AMBER, 0.6f);
         }
         const Style cs = open_tab ? Style{WHITE_TOP, WHITE_BOTTOM, INK, U(2)} : Style{0xA9A390, 0x8F8978, INK, U(2), 0.95f};
-        text(TITLE, U(30), tab_name(t), rail0 + U(26), y + cat_h / 2 - U(17), 0, cs);
+        text(words(tab_name(t)), U(30), tab_name(t), rail0 + U(26), y + cat_h / 2 - U(17), 0, cs);
         tab_rects_.push_back({rail0, y, rail1, y + cat_h});
     }
     hit_.push_back({rail0, cat_y, rail1, cat_y + tab_count() * cat_h});
@@ -1838,7 +1848,7 @@ void Frontend::draw_options(bool over_game, const std::vector<Item>& list) {
     const Item* cur = selected_ < int(list.size()) ? &list[selected_] : nullptr;
     bool option = cur && cur->id >= OPT_DISPLAY;
     std::wstring title = option ? cur->label : cur && cur->id == BACK ? cur->label : std::wstring(tab_name(tab_));
-    text(TITLE, U(40), title, px0, y, 0, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
+    text(words(title), U(40), title, px0, y, 0, {WHITE_TOP, WHITE_BOTTOM, INK, U(2)});
     y += U(70);
     bool crosshair_row = option && (cur->id == OPT_CROSS || cur->id == OPT_CROSS_STYLE || cur->id == OPT_CROSS_P1 ||
                                     cur->id == OPT_CROSS_P2);

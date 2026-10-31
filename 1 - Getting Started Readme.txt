@@ -112,6 +112,10 @@ Sega Model 3 Step 1.5). Nothing from the ROM is included.
    Graphics - Ultra.bat .... Everything on, with ray tracing (the default)
    Each step up turns on more; slow on a PC? Go one step down.
    Crosshairs - On.bat / Crosshairs - Off.bat
+   Text - Jurassic Park.bat / Text - Original.bat
+      In-game captions (FREE PLAY, INSERT COIN, ECHO, HIT...) in the
+      Jurassic Park font, or the standard sharp fonts. Numbers keep
+      their font. The menus use it for their headings anyway.
 
  With FREE PLAY on, the game runs in the arcade's own FREE PLAY mode:
  the screen says FREE PLAY instead of CREDIT 0.

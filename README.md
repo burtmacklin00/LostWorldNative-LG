@@ -45,7 +45,8 @@
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
   `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,
-  `Crosshairs - On.bat`, `Crosshairs - Off.bat`.
+  `Crosshairs - On.bat`, `Crosshairs - Off.bat`, `Text - Jurassic Park.bat`, `Text - Original.bat`
+  (the game's captions in the Jurassic Park font, made with `tools/make_text_atlas.py --jurassic`).
 - **Widescreen aim** (from the original project): in 16:9 or 21:9 the guns aim and shoot over the
   whole picture, side areas too; pointing away from the screen still reloads. In 4:3 (with the
   bezel) the crosshair stops at the picture's edge, and a shot there reloads as on the cabinet.

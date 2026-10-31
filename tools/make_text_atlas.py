@@ -20,7 +20,7 @@ import struct
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 import lwhash  # tools/ is on sys.path when run as `python tools/<script>.py`
 
@@ -34,6 +34,13 @@ COLS = 16          # slots per atlas row (shader: ATLAS_COLS)
 VRAM_SIZE = 0x190000
 
 args = sys.argv[1:]
+# --jurassic: the letters of the menu font and of the yellow captions in the
+# Jurassic Park font (third_party/fonts/Jurassic_Park.ttf, not versioned); its
+# digits are claw marks and it has no punctuation, so those keep their font
+jurassic = "--jurassic" in args
+if jurassic:
+    args.remove("--jurassic")
+JURASSIC_FONT = "Jurassic_Park.ttf"
 preview = None
 if "--preview" in args:
     k = args.index("--preview")
@@ -115,6 +122,8 @@ SETS = [
 ]
 for s in SETS:
     s["font"] = os.environ.get("LW_FONT_" + s["name"].upper(), s["font"])
+    if jurassic and s["name"] in ("menu", "yellow"):
+        s["letters"] = JURASSIC_FONT
 
 
 # ---- Analysis of the original pixel art ------------------------------------
@@ -167,6 +176,42 @@ def shift(mask, dx, dy):
     return np.roll(np.roll(mask, dy, 0), dx, 1)
 
 
+def inner_line(layer, cap_px):
+    """The Jurassic Park font's letters are outlines: the thin gap inside them
+    (not the counters of an O or an A, which stay see-through), as a mask. As
+    tools/make_title.py: each hole is measured by how many 1-pixel erosions it
+    survives at a capital height of 240 pixels: the gaps 3-5, counters 12+"""
+    an = 240.0 / cap_px
+    big = layer.resize((max(1, int(layer.width * an)), max(1, int(layer.height * an))), Image.LANCZOS)
+    solid = np.pad((np.asarray(big) > 127).astype(np.uint8) * 255, 1)
+    filled = Image.fromarray(solid).copy()
+    ImageDraw.floodfill(filled, (0, 0), 128)   # outside
+    filled = np.asarray(filled)[1:-1, 1:-1] != 128
+    holes = Image.fromarray(((filled & (solid[1:-1, 1:-1] == 0)) * 255).astype(np.uint8))
+    depth = np.zeros(filled.shape, np.int32)
+    eroded = holes
+    for i in range(1, 12):
+        eroded = eroded.filter(ImageFilter.MinFilter(3))
+        m = np.asarray(eroded) > 0
+        if not m.any():
+            break
+        depth[m] = i
+    gap = np.zeros(filled.shape, bool)
+    work = holes.copy()
+    hole_id = 1
+    while True:
+        ys, xs = np.nonzero(np.asarray(work) == 255)
+        if len(ys) == 0 or hole_id == 255:
+            break
+        ImageDraw.floodfill(work, (int(xs[0]), int(ys[0])), hole_id)
+        m = np.asarray(work) == hole_id
+        if depth[m].max() < 8:
+            gap |= m
+        hole_id += 1
+    inside = Image.fromarray((gap * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3))
+    return inside.resize(layer.size, Image.LANCZOS)
+
+
 def render_set(s):
     font_path = os.path.join(FONTS, s["font"])
     analysed = []
@@ -179,10 +224,13 @@ def render_set(s):
     cap_top = min(a[4][1] for a in caps)
     baseline = max(a[4][3] for a in caps)
     cap_h = baseline - cap_top
-    probe = ImageFont.truetype(font_path, 1000)
-    ref = probe.getbbox("H", anchor="ls")   # ref[1]: top of the capitals, negative
-    size = cap_h * SCALE * SS * 1000.0 / -ref[1]
-    font = ImageFont.truetype(font_path, max(1, int(round(size))))
+    def sized(path):   # capitals as tall as the original's
+        probe = ImageFont.truetype(path, 1000)
+        ref = probe.getbbox("H", anchor="ls")   # ref[1]: top of the capitals, negative
+        size = cap_h * SCALE * SS * 1000.0 / -ref[1]
+        return ImageFont.truetype(path, max(1, int(round(size))))
+    font = sized(font_path)
+    letter_font = sized(os.path.join(FONTS, s["letters"])) if s.get("letters") else None
 
     out = []
     for g, img, base, rl, box in analysed:
@@ -192,10 +240,14 @@ def render_set(s):
         W, H = (tw + 2 * PAD) * k, (th + 2 * PAD) * k
         # Letter drawn alone, then placed: same baseline for the set, centred
         # on the original letter and narrowed if it is wider than it
-        bb = font.getbbox(ch, anchor="ls")
+        f = letter_font if letter_font and ch.isascii() and ch.isalpha() else font
+        bb = f.getbbox(ch, anchor="ls")
         gw, gh = bb[2] - bb[0], bb[3] - bb[1]
         layer = Image.new("L", (gw + 4 * k, gh + 4 * k), 0)
-        ImageDraw.Draw(layer).text((2 * k - bb[0], 2 * k - bb[1]), ch, font=font, fill=255, anchor="ls")
+        ImageDraw.Draw(layer).text((2 * k - bb[0], 2 * k - bb[1]), ch, font=f, fill=255, anchor="ls")
+        inline = None
+        if f is letter_font:   # the font's inner line: the gap inside its letters, filled in below
+            inline = inner_line(layer, cap_h * k)
         glyph = np.asarray(layer, dtype=np.float32) / 255.0
         ox, oy = 2 * k, 2 * k   # where the glyph's bbox starts inside `layer`
         orig_w = (box[2] - box[0]) * k
@@ -204,10 +256,15 @@ def render_set(s):
             sx = orig_w * 1.04 / gw
         if sx != 1.0:
             nw = max(1, int(round(layer.width * sx)))
-            glyph = np.asarray(layer.resize((nw, layer.height), Image.LANCZOS), dtype=np.float32) / 255.0
+            layer = layer.resize((nw, layer.height), Image.LANCZOS)
+            glyph = np.asarray(layer, dtype=np.float32) / 255.0
+            if inline is not None:   # (separately: an LA image would be resized with its alpha premultiplied)
+                inline = inline.resize((nw, inline.height), Image.LANCZOS)
             ox *= sx
             gw *= sx
+        gap = np.asarray(inline, dtype=np.float32) / 255.0 if inline is not None else None
         canvas = np.zeros((H, W), np.float32)
+        gap_canvas = np.zeros((H, W), np.float32)
         cx = (PAD + (box[0] + box[2]) / 2.0) * k
         by = (PAD + baseline) * k
         x0 = int(round(cx - gw / 2.0 - ox))
@@ -216,15 +273,22 @@ def render_set(s):
         ys0, xs0 = max(0, -y0), max(0, -x0)
         ys1, xs1 = min(gh_, H - y0), min(gw_, W - x0)
         canvas[y0 + ys0:y0 + ys1, x0 + xs0:x0 + xs1] = glyph[ys0:ys1, xs0:xs1]
+        if gap is not None:
+            gap_canvas[y0 + ys0:y0 + ys1, x0 + xs0:x0 + xs1] = gap[ys0:ys1, xs0:xs1]
         # Down to atlas resolution, then the edge around it
         W, H = W // SS, H // SS
         letter = canvas.reshape(H, SS, W, SS).mean(axis=(1, 3))
+        inner = gap_canvas.reshape(H, SS, W, SS).mean(axis=(1, 3))
+        if s["edge"] == "flat":   # one colour: the whole letter, its shape without the line
+            letter = np.maximum(letter, inner)
+            inner[:] = 0
         if s["edge"] == "outline":
             edge = dilate(letter, 0.85 * SCALE)
         elif s["edge"] == "shadow":
             edge = shift(dilate(letter, 0.3 * SCALE), int(0.7 * SCALE), int(0.9 * SCALE))
         else:
             edge = np.zeros_like(letter)
+        edge = np.maximum(edge, inner)   # the inner line in the edge's colour, as on the logo
         # Gradient position: 0 at the top of the capitals, 1 at the baseline
         ys = ((np.arange(H, dtype=np.float32) + 0.5) / SCALE - PAD - cap_top) / max(cap_h, 1)
         grad = np.repeat(np.clip(ys, 0, 1)[:, None], W, 1)
