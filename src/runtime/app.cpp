@@ -161,7 +161,7 @@ static void settings_from_options(const Options& o, FrontendSettings& s) {
     s.volume = std::clamp(int(o.volume + 0.5f), 0, 10);
     s.speakers = std::clamp(o.speakers, 0, 2);
     s.cubic_samples = o.cubic_samples;
-    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, 0, 12);
+    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, -6, 12);
     s.aa = o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
     s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
     for (int sc : FrontendSettings::SCALES)

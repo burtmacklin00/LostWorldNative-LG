@@ -58,7 +58,7 @@ struct Frontend::Setting {
     int other = 0;
     std::vector<std::pair<const char*, int>> also = {};
     int lo = 0, hi = 0;       // a number's range
-    int grain = 1;            // and the steps it is read in (REAR BOOST: 3 dB)
+    int grain = 1;            // and the steps it is read in (REAR LEVEL: 3 dB)
     bool hundredths = false;  // kept as a decimal (GAMMA 1.00)
     // The row
     Kind kind = PLAIN;
@@ -136,7 +136,7 @@ std::wstring decimal(int v) {   // GAMMA
     swprintf(text, 16, L"%.2f", v / 100.0);
     return text;
 }
-std::wstring decibels(int v) { return v ? L"+" + std::to_wstring(v) + L" DB" : std::wstring(L"OFF"); }
+std::wstring decibels(int v) { return (v > 0 ? L"+" : L"") + std::to_wstring(v) + L" DB"; }
 std::wstring seconds(int v) { return v ? L"AFTER " + std::to_wstring(v) + L" S" : std::wstring(L"NEVER"); }
 
 using FS = FrontendSettings;
@@ -239,9 +239,9 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hints = {L"Front and rear sound mixed on two speakers",
                    L"Rear sound on your rear speakers, as on the cabinet (4.0, 5.1 or 7.1)",
                    L"Two ears: gentle crossfeed, and the rear sound placed behind you"}},
-        {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR BOOST", .key = "rear_boost", .number = &FS::rear_boost, .lo = 0,
-         .hi = 12, .grain = 3, .kind = CHOICE, .steps = {0, 3, 6, 9, 12}, .levels = true, .text = decibels,
-         .hint = L"Louder rear speakers, as the cabinet's seat speakers: T-Rex roars and many effects"},
+        {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR LEVEL", .key = "rear_boost", .number = &FS::rear_boost, .lo = -6,
+         .hi = 12, .grain = 3, .kind = CHOICE, .steps = {-6, -3, 0, 3, 6, 9, 12}, .text = decibels,
+         .hint = L"Rear speakers quieter or louder, as the cabinet's seat speakers: T-Rex roars and many effects"},
         {.id = OPT_SAMPLES, .tab = AUDIO_TAB, .label = L"SAMPLE QUALITY", .key = "sample_interpolation",
          .flag = &FS::cubic_samples, .words = {"linear", "cubic"}, .other = 1, .kind = CHOICE,
          .shown = {L"ORIGINAL", L"SMOOTH"},
