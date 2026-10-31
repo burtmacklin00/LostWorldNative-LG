@@ -10,11 +10,10 @@
 #include <cstring>
 #include <cwctype>
 #include <ctime>
-#include <initializer_list>
 #include <thread>
 
 #include <shellapi.h>
-#include <wincodec.h>
+#include "../video/image_io.h"
 
 namespace {
 
@@ -402,36 +401,12 @@ bool Frontend::init(const std::string& font_dir) {
 
 namespace {
 
-// Any picture format Windows can read (WIC), as BGRA
-bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w_out, int& h_out) {
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    IWICImagingFactory* wic = nullptr;
-    IWICBitmapDecoder* dec = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* conv = nullptr;
-    UINT w = 0, h = 0;
-    bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                         IID_PPV_ARGS(&wic))) &&
-              SUCCEEDED(wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                       WICDecodeMetadataCacheOnDemand, &dec)) &&
-              SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
-              SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0,
-                                         WICBitmapPaletteTypeCustom)) &&
-              SUCCEEDED(conv->GetSize(&w, &h)) && w > 0 && h > 0;
-    if (ok) {
-        px.resize(size_t(w) * h);
-        ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, UINT(px.size() * 4), reinterpret_cast<BYTE*>(px.data())));
-    }
-    for (IUnknown* p : std::initializer_list<IUnknown*>{conv, frame, dec, wic})
-        if (p) p->Release();
-    if (!ok) {
-        px.clear();
-        w_out = h_out = 0;
-        return false;
-    }
-    w_out = int(w);
-    h_out = int(h);
-    return true;
+// Any picture format Windows can read (WIC), as BGRA (nothing when it fails)
+bool load_image(const std::wstring& path, std::vector<uint32_t>& px, int& w, int& h) {
+    if (image_load_bgra(path, w, h, px)) return true;
+    px.clear();
+    w = h = 0;
+    return false;
 }
 
 }  // namespace

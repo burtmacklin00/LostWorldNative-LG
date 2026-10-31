@@ -2,15 +2,10 @@
 
 #include <commdlg.h>
 
+#include "../common/paths.h"
 #include "../video/image_io.h"
 
-std::string crosshair_path(int player) {
-    char path[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string dir(path, n);
-    dir = dir.substr(0, dir.find_last_of("\\/") + 1);
-    return dir + (player ? "crosshair_p2.png" : "crosshair.png");
-}
+std::string crosshair_path(int player) { return exe_folder() + (player ? "crosshair_p2.png" : "crosshair.png"); }
 
 bool crosshair_load(int player, int& w, int& h, std::vector<uint8_t>& rgba) {
     return png_load(crosshair_path(player), w, h, rgba) || (player && png_load(crosshair_path(0), w, h, rgba));

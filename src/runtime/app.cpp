@@ -40,11 +40,13 @@
 #include "survival.h"
 #include "weather.h"
 #include "../audio/sound_board.h"
+#include "../common/paths.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
 #include "../ui/menu_music.h"
 #include "../ui/survival_ui.h"
+#include "../video/image_io.h"
 #include "../video/pack2d.h"
 #include "../video/r3d_renderer.h"
 #include "../video/r3d_scene.h"
@@ -486,25 +488,6 @@ static bool load_snapshot(const char* path) {
     return true;
 }
 
-static void save_bmp(const char* path, const uint32_t* px, int w, int h) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return;
-    BITMAPFILEHEADER fh{};
-    BITMAPINFOHEADER ih{};
-    fh.bfType = 0x4D42;
-    fh.bfOffBits = sizeof(fh) + sizeof(ih);
-    fh.bfSize = fh.bfOffBits + DWORD(w) * h * 4;
-    ih.biSize = sizeof(ih);
-    ih.biWidth = w;
-    ih.biHeight = -h;   // top-down
-    ih.biPlanes = 1;
-    ih.biBitCount = 32;
-    fwrite(&fh, sizeof(fh), 1, f);
-    fwrite(&ih, sizeof(ih), 1, f);
-    fwrite(px, 4, size_t(w) * h, f);
-    fclose(f);
-}
-
 // When the image being recorded will be on screen: with vsync the images go
 // out once per refresh, evenly, while this thread wakes up for them at uneven
 // moments (it waits for the GPU and the display, then builds the scene). The
@@ -686,12 +669,6 @@ static void pacing_sample(double now, double display, double shown, const R3DFra
 }
 
 // The folder of LostWorld.exe, with its trailing backslash
-static std::string exe_folder() {
-    char path[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string s(path, n);
-    return s.substr(0, s.find_last_of("\\/") + 1);
-}
 static bool file_exists(const std::string& path) { return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
 static std::string full_path(const std::string& path) {
     char full[MAX_PATH];
@@ -1229,16 +1206,15 @@ int main(int argc, char** argv) {
     for (int i = 0; i < BOSS_COUNT; i++)
         if (game_state_valid(boss_state_path(i))) frontend.boss_status[i] = Frontend::BOSS_READY;
     auto start_maker = [&](int i) {
-        wchar_t exe[MAX_PATH];
-        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        const std::wstring exe = exe_path_w();
         const std::string& rom = g_rom_zip.empty() ? g_data_dir : g_rom_zip;
-        std::wstring cmd = L"\"" + std::wstring(exe) + L"\" --make-boss-state " + std::to_wstring(i + 1) +
+        std::wstring cmd = L"\"" + exe + L"\" --make-boss-state " + std::to_wstring(i + 1) +
                            (g_rom_zip.empty() ? L" --data \"" : L" --rom \"") + std::wstring(rom.begin(), rom.end()) +
                            L"\"";
         STARTUPINFOW si{};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE,
+        if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE,
                             CREATE_NO_WINDOW | CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi)) {
             frontend.boss_status[i] = Frontend::BOSS_FAILED;
             return;
@@ -1920,7 +1896,7 @@ int main(int argc, char** argv) {
                     double ms = (qpc_seconds() - t0) * 1000;
                     if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
                     static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
-                    if (menu_shot) save_bmp(menu_shot, ui_pixels.data(), rc.right, rc.bottom);
+                    if (menu_shot) bmp_save(menu_shot, rc.right, rc.bottom, ui_pixels.data());
                 }
             }
         }

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "dlss.h"
+#include "image_io.h"
 
 namespace {
 
@@ -203,30 +204,26 @@ bool VkPresenter::init(const char* title, int width, int height, bool with_ngx) 
     qci.queueCount = 1;
     qci.pQueuePriorities = &prio;
     std::vector<std::string> dev_names = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    if (with_ngx) {   // only the ones this GPU/driver actually offers
-        uint32_t count = 0;
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, nullptr);
-        std::vector<VkExtensionProperties> avail(count);
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, avail.data());
+    // The extensions this GPU/driver offers
+    uint32_t ext_count = 0;
+    vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &ext_count, nullptr);
+    std::vector<VkExtensionProperties> avail(ext_count);
+    vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &ext_count, avail.data());
+    auto has_extension = [&](const char* name) {
+        for (const VkExtensionProperties& a : avail)
+            if (!strcmp(a.extensionName, name)) return true;
+        return false;
+    };
+    if (with_ngx)   // only the ones offered
         for (const std::string& e : dlss::device_extensions(instance_, gpu_))
-            for (auto& a : avail)
-                if (e == a.extensionName && std::find(dev_names.begin(), dev_names.end(), e) == dev_names.end())
-                    dev_names.push_back(e);
-    }
+            if (has_extension(e.c_str()) && std::find(dev_names.begin(), dev_names.end(), e) == dev_names.end())
+                dev_names.push_back(e);
     // Present ids and waiting for them: when each image is really on screen
     VkPhysicalDevicePresentWaitFeaturesKHR fwait{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR};
     VkPhysicalDevicePresentIdFeaturesKHR fid{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR};
     fid.pNext = &fwait;
     {
-        uint32_t count = 0;
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, nullptr);
-        std::vector<VkExtensionProperties> avail(count);
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, avail.data());
-        int found = 0;
-        for (auto& a : avail)
-            found += !strcmp(a.extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME) ||
-                     !strcmp(a.extensionName, VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
-        if (found == 2) {
+        if (has_extension(VK_KHR_PRESENT_ID_EXTENSION_NAME) && has_extension(VK_KHR_PRESENT_WAIT_EXTENSION_NAME)) {
             VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
             query.pNext = &fid;
             vkGetPhysicalDeviceFeatures2(gpu_, &query);
@@ -242,16 +239,8 @@ bool VkPresenter::init(const char* title, int width, int height, bool with_ngx) 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR fas{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
     VkPhysicalDeviceRayQueryFeaturesKHR frq{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
     {
-        uint32_t count = 0;
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, nullptr);
-        std::vector<VkExtensionProperties> avail(count);
-        vkEnumerateDeviceExtensionProperties(gpu_, nullptr, &count, avail.data());
-        int found = 0;
-        for (auto& a : avail)
-            found += !strcmp(a.extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
-                     !strcmp(a.extensionName, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
-                     !strcmp(a.extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-        if (found == 3) {
+        if (has_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) && has_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+            has_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) {
             VkPhysicalDeviceVulkan12Features have{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
             frq.pNext = &have;
             fas.pNext = &frq;
@@ -533,22 +522,7 @@ void VkPresenter::frame(const RecordFn& record) {
         vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX);
         void* data = nullptr;
         vkMapMemory(device_, capture_memory_, 0, VK_WHOLE_SIZE, 0, &data);
-        if (FILE* f = fopen(capture_path_.c_str(), "wb")) {
-            BITMAPFILEHEADER fh{};
-            BITMAPINFOHEADER ih{};
-            fh.bfType = 0x4D42;
-            fh.bfOffBits = sizeof(fh) + sizeof(ih);
-            fh.bfSize = fh.bfOffBits + extent_.width * extent_.height * 4;
-            ih.biSize = sizeof(ih);
-            ih.biWidth = LONG(extent_.width);
-            ih.biHeight = -LONG(extent_.height);   // top-down
-            ih.biPlanes = 1;
-            ih.biBitCount = 32;
-            fwrite(&fh, sizeof(fh), 1, f);
-            fwrite(&ih, sizeof(ih), 1, f);
-            fwrite(data, 4, size_t(extent_.width) * extent_.height, f);   // BGRA swapchain = BMP order
-            fclose(f);
-        }
+        bmp_save(capture_path_, int(extent_.width), int(extent_.height), data);   // BGRA swapchain = BMP order
         vkUnmapMemory(device_, capture_memory_);
         capture_path_.clear();
     }

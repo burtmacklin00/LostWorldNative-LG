@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 
 #include "sky_pack.h"
 #include "text_hd.h"
@@ -91,8 +92,18 @@ struct PaletteCache {
     uint32_t colour[32768];
     uint32_t stamp[32768];
 };
-thread_local PaletteCache g_palette_cache[3];   // offsets of pair A/A', of pair B/B', none
-thread_local uint32_t g_palette_generation = 0;
+struct PaletteCaches {
+    PaletteCache sets[3];   // offsets of pair A/A', of pair B/B', none
+    uint32_t generation = 0;
+};
+// One per thread that composes (the window, the preparation thread, the game
+// thread's logo check), made on its first compose: as a thread_local array
+// its 768 KB would be in the TLS block of every thread of the process
+PaletteCaches& palette_caches() {
+    thread_local std::unique_ptr<PaletteCaches> caches;
+    if (!caches) caches = std::make_unique<PaletteCaches>();
+    return *caches;
+}
 
 // Pixel of one layer at screen position (x, y), 0 if transparent/empty
 uint32_t layer_pixel(const uint8_t* vram, int layer, int x, int y, bool four_bpp, uint32_t scroll,
@@ -289,9 +300,10 @@ void TileGen::compose(const uint8_t* vram, const Output& out, const TextHD* text
     if (back_raw_top) memset(back_raw_top, 0, SCREEN_W * SCREEN_H * 4);
     if (back_under) memset(back_under, 0, SCREEN_W * SCREEN_H * 4);
     if (front_under) memset(front_under, 0, SCREEN_W * SCREEN_H * 4);
-    if (++g_palette_generation == 0) {   // wrapped: forget every entry
-        for (PaletteCache& pc : g_palette_cache) memset(pc.stamp, 0, sizeof(pc.stamp));
-        g_palette_generation = 1;
+    PaletteCaches& palette = palette_caches();
+    if (++palette.generation == 0) {   // wrapped: forget every entry
+        for (PaletteCache& pc : palette.sets) memset(pc.stamp, 0, sizeof(pc.stamp));
+        palette.generation = 1;
     }
     const int* offset_sets[3] = {offsets[0], offsets[1], no_offset};
     // A layer is decoded at most once per screen row (its picture row and
@@ -315,9 +327,9 @@ void TileGen::compose(const uint8_t* vram, const Output& out, const TextHD* text
         auto pixel_at = [&](int layer, int x, int which) {
             row_of(layer);
             uint16_t index = rows[layer][(x + row_xs[layer]) & 511];
-            PaletteCache& pc = g_palette_cache[which];
-            if (pc.stamp[index] != g_palette_generation) {
-                pc.stamp[index] = g_palette_generation;
+            PaletteCache& pc = palette.sets[which];
+            if (pc.stamp[index] != palette.generation) {
+                pc.stamp[index] = palette.generation;
                 pc.colour[index] = to_bgra(le32(vram + PALETTE + index * 4), offset_sets[which]);
             }
             return pc.colour[index];

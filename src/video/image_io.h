@@ -16,6 +16,12 @@ struct RgbaImage {
 
 bool png_load(const std::string& path, int& w, int& h, std::vector<uint8_t>& rgba);
 bool png_save(const std::string& path, int w, int h, const uint8_t* rgba);
+// The same with pixels as 0xAARRGGBB words (BGRA bytes): what the tilegen and
+// the menus draw. image_load_bgra reads any format Windows can (WIC)
+bool image_load_bgra(const std::wstring& path, int& w, int& h, std::vector<uint32_t>& px);
+bool png_save_bgra(const std::string& path, int w, int h, const uint32_t* px);
+// 32-bit top-down BMP of BGRA pixels (screenshots)
+bool bmp_save(const std::string& path, int w, int h, const void* bgra);
 
 // Names (without the directory) of the files in dir that match pattern ("*.png")
 std::vector<std::string> list_files(const std::string& dir, const char* pattern);
