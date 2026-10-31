@@ -1725,12 +1725,9 @@ void R3DRenderer::record_world(const Frame& f) {
     ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     // The ambient occlusion splits the 3D pass in two: the first part must keep everything
-    bool ao_on = ao_strength_ > 0 && scene_ &&
-                 std::any_of(scene_->viewports.begin(), scene_->viewports.end(), [](const R3DViewport& v) { return v.world; });
+    bool ao_on = ao_strength_ > 0 && has_world_;
     // Soft particles need the world's depth too, so they split it as well
-    bool split = ao_on || (soft_particles_ && scene_ &&
-                           std::any_of(scene_->viewports.begin(), scene_->viewports.end(),
-                                       [](const R3DViewport& v) { return v.world; }));
+    bool split = ao_on || (soft_particles_ && has_world_);
     ca.storeOp = msaa && !split ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     if (msaa) {   // samples are averaged into the single-sample image at the end of the pass
         ca.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
@@ -2065,11 +2062,9 @@ void R3DRenderer::record_bloom(const Frame& f, const ComposePush& pc) {
                       // A second, wider round: the glow spreads across the screen
                       {1, &bloom_a_, &bloom_b_, 1, 5.0f},
                       {2, &bloom_b_, &bloom_a_, 2, 5.0f}};
-        bool world = scene_ && std::any_of(scene_->viewports.begin(), scene_->viewports.end(),
-                                           [](const R3DViewport& v) { return v.world; });
         // The sky glows less than fire: it is large and only its brightest part
         // counts. Only behind the game world: title and menu screens are 2D pictures
-        float sky_glow = world ? 0.6f : 0.0f;
+        float sky_glow = has_world_ ? 0.6f : 0.0f;
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_);
         for (const Step& st : steps) {
             st.to->layout = VK_IMAGE_LAYOUT_UNDEFINED;   // fully rewritten

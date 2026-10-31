@@ -37,10 +37,8 @@ void vk_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, Vk
 }
 
 uint32_t VkPresenter::find_memory(uint32_t type_bits, VkMemoryPropertyFlags flags) const {
-    VkPhysicalDeviceMemoryProperties props;
-    vkGetPhysicalDeviceMemoryProperties(gpu_, &props);
-    for (uint32_t i = 0; i < props.memoryTypeCount; i++)
-        if ((type_bits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags) return i;
+    for (uint32_t i = 0; i < memory_.memoryTypeCount; i++)
+        if ((type_bits & (1u << i)) && (memory_.memoryTypes[i].propertyFlags & flags) == flags) return i;
     return UINT32_MAX;
 }
 
@@ -187,6 +185,7 @@ bool VkPresenter::init(const char* title, int width, int height, bool with_ngx) 
         fprintf(stderr, "[vulkan] no GPU with Vulkan 1.3 that can present to the window\n");
         return false;
     }
+    vkGetPhysicalDeviceMemoryProperties(gpu_, &memory_);   // for find_memory
 
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};

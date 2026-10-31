@@ -1254,9 +1254,11 @@ void Frontend::poster_layout(float& scale, float& x0, float& y0) const {
 
 // The poster at the top left; around and below it, its plain stone repeated in
 // mirror image with the brightness of the poster's edges at that height,
-// cross-faded into the poster and darkened away from it
-void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
+// cross-faded into the poster and darkened away from it. stone gets the same
+// without the poster: both come from one pass, as they share the stone samples
+void Frontend::poster_background(std::vector<uint32_t>& dst, std::vector<uint32_t>& stone) {
     dst.resize(size_t(w_) * h_);
+    stone.resize(size_t(w_) * h_);
     float s, x0, y0;
     poster_layout(s, x0, y0);
     float pw = poster_w_ * s;
@@ -1314,22 +1316,26 @@ void Frontend::poster_background(bool stone_only, std::vector<uint32_t>& dst) {
                                 0.6f, 1.8f);
         for (int x = 0; x < w_; x++) {
             float poster_rgb[3] = {0, 0, 0}, stone_rgb[3] = {0, 0, 0};
+            const float none[3] = {0, 0, 0};
             float px = (x - x0) / s;
-            float inside = stone_only ? 0.0f : std::clamp(std::min(x - x0, x0 + pw - x) / seam, 0.0f, 1.0f) * rows;
+            float inside = std::clamp(std::min(x - x0, x0 + pw - x) / seam, 0.0f, 1.0f) * rows;
             if (inside > 0)
                 for (int k = 0; k < 4; k++) texel(px + (k & 1) * step, py + (k >> 1) * step, poster_rgb);
-            if (inside < 1)
-                for (int k = 0; k < 4; k++)
-                    texel(pingpong(px + (k & 1) * step, float(poster_w_ - 1)),
-                          stone0 + pingpong(py + (k >> 1) * step, stone_h), stone_rgb);
+            for (int k = 0; k < 4; k++)
+                texel(pingpong(px + (k & 1) * step, float(poster_w_ - 1)),
+                      stone0 + pingpong(py + (k >> 1) * step, stone_h), stone_rgb);
             float side = std::min(1.0f, std::abs(x - (x0 + pw * 0.5f)) / float(w_));
             float dark = 1 - 0.4f * side * side;
-            uint32_t out = 0xFF000000u;
-            for (int k = 0; k < 3; k++) {
-                float v = (poster_rgb[k] * inside + stone_rgb[k] * gain * (1 - inside)) * 0.25f * dark;
-                out |= uint32_t(std::clamp(v, 0.0f, 1.0f) * 255 + 0.5f) << (16 - 8 * k);
-            }
-            dst[size_t(y) * w_ + x] = out;
+            auto pixel = [&](const float* poster, float in) {
+                uint32_t out = 0xFF000000u;
+                for (int k = 0; k < 3; k++) {
+                    float v = (poster[k] * in + stone_rgb[k] * gain * (1 - in)) * 0.25f * dark;
+                    out |= uint32_t(std::clamp(v, 0.0f, 1.0f) * 255 + 0.5f) << (16 - 8 * k);
+                }
+                return out;
+            };
+            dst[size_t(y) * w_ + x] = pixel(poster_rgb, inside);
+            stone[size_t(y) * w_ + x] = pixel(none, 0.0f);
         }
     }
     };
@@ -1432,8 +1438,7 @@ void Frontend::background() {
         return;
     }
     if (has_poster()) {   // both versions at once: switching screens must not stall
-        poster_background(false, bg_);
-        poster_background(true, bg_stone_);   // the long options list goes on plain stone
+        poster_background(bg_, bg_stone_);   // the long options list goes on plain stone
         return;
     }
     float cx = LOGO_CENTER_X * u_, gy = 250 * u_;   // the glow behind the title
