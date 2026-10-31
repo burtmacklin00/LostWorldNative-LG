@@ -479,6 +479,7 @@ static bool load_snapshot(const char* path) {
         std::lock_guard<std::mutex> lock(g_video_mutex);
         g_video_vram = vram;
         g_video_frame = state->frame;
+        for (uint64_t& serial : g_video_page_serial) serial++;
     }
     std::lock_guard<std::mutex> lock(g_r3d_mutex);
     g_r3d_latest = std::move(state);
@@ -1090,6 +1091,8 @@ int main(int argc, char** argv) {
     struct Snapshot2D {
         uint64_t frame = ~0ull;
         std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);
+        std::array<uint64_t, TILEGEN_PAGES> serial;   // g_video_page_serial of each page copied
+        Snapshot2D() { serial.fill(~0ull); }
     };
     std::array<Snapshot2D, 4> snaps;   // the 2D layers of the last vblanks (snaps_mutex)
     size_t newest_snap = 0;
@@ -1100,8 +1103,13 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lock(g_video_mutex);
         if (g_video_frame != snaps[newest_snap].frame && !g_boot_skip) {
             newest_snap = (newest_snap + 1) % snaps.size();
-            snaps[newest_snap].frame = g_video_frame;
-            memcpy(snaps[newest_snap].vram.data(), g_video_vram.data(), TILEGEN_SIZE);
+            Snapshot2D& s = snaps[newest_snap];
+            s.frame = g_video_frame;
+            for (uint32_t p = 0; p < TILEGEN_PAGES; p++)   // (the pages copied again since this one was filled)
+                if (s.serial[p] != g_video_page_serial[p]) {
+                    memcpy(&s.vram[p << 16], &g_video_vram[p << 16], 0x10000);
+                    s.serial[p] = g_video_page_serial[p];
+                }
         }
     };
     // Copies the newest 2D layers at or before that vblank into `out` (its
