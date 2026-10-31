@@ -34,6 +34,9 @@ void cheats_frame() {
         if (rd32(UNLIMITED + 4 * p) != 0) continue;      // a pickup gun: as the game has it
         int32_t clip = int32_t(rd32(CLIP + 4 * p)), ammo = int32_t(rd32(AMMO + 4 * p));
         if (clip <= 0 || clip > 99) continue;            // not set up (yet)
-        if (mode == AmmoCheat::Unlimited ? ammo < clip : ammo <= 0) wr32(AMMO + 4 * p, uint32_t(clip));
+        // AUTO RELOAD refills as the last bullet comes up: at 0 the game has
+        // already put up its RELOAD prompt, which then stays on for a moment
+        bool refill = mode == AmmoCheat::Unlimited ? ammo < clip : ammo <= 1 && clip > 1;
+        if (refill) wr32(AMMO + 4 * p, uint32_t(clip));
     }
 }
