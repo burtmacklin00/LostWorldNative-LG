@@ -1196,17 +1196,42 @@ void Frontend::sprite(const Picture& p, int x0, int y0, int w, int h) {
         }
 }
 
-// Labels made only of letters (the menus' entries, the settings' tabs) in the
-// Jurassic Park font when it is there: it draws digits as claw marks and has no
-// punctuation, so anything else stays in Saira
-Frontend::Family Frontend::words(const std::wstring& s) const {
-    if (!jurassic_ || s.empty()) return TITLE;
+// A Jurassic Park label with digits or punctuation (T.REX): the letters in
+// that font, the rest in Saira, drawn one after the other
+namespace {
+bool is_letter(wchar_t c) { return c == L' ' || (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z'); }
+std::vector<std::pair<bool, std::wstring>> letter_runs(const std::wstring& s) {
+    std::vector<std::pair<bool, std::wstring>> runs;
+    for (wchar_t c : s) {
+        bool l = is_letter(c);
+        if (runs.empty() || runs.back().first != l) runs.push_back({l, L""});
+        runs.back().second += c;
+    }
+    return runs;
+}
+bool mixed(const std::wstring& s) {
     for (wchar_t c : s)
-        if (c != L' ' && !(c >= L'A' && c <= L'Z') && !(c >= L'a' && c <= L'z')) return TITLE;
-    return JURASSIC;
+        if (!is_letter(c)) return true;
+    return false;
+}
+}  // namespace
+
+// The menus' entries, the settings' tabs and the panel's title in the Jurassic
+// Park font when it is there: it draws digits as claw marks and has no
+// punctuation, so those characters come from Saira
+Frontend::Family Frontend::words(const std::wstring& s) const {
+    if (!jurassic_) return TITLE;
+    for (wchar_t c : s)   // its letters in it, anything else in Saira (Frontend::text)
+        if ((c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z')) return JURASSIC;
+    return TITLE;
 }
 
 int Frontend::measure(Family f, int px, const std::wstring& s) {
+    if (f == JURASSIC && mixed(s)) {
+        int w = 0;
+        for (auto& [letters, run] : letter_runs(s)) w += measure(letters ? JURASSIC : TITLE, px, run);
+        return w;
+    }
     if (f == JURASSIC) px = int(px * 1.34f + 0.5f);   // as text() draws it
     return mask(f, px, s, 0).text_w;
 }
@@ -1238,7 +1263,15 @@ std::vector<std::wstring> Frontend::wrap(Family f, int px, const std::wstring& s
 }
 
 // Draws text with its box's top at y; align 0 = left of x, 1 = centred, 2 = right
+
 int Frontend::text(Family f, int px, const std::wstring& s, int x, int y, int align, const Style& st) {
+    if (f == JURASSIC && mixed(s)) {
+        auto runs = letter_runs(s);
+        int total = measure(f, px, s);
+        int at = x - (align == 1 ? total / 2 : align == 2 ? total : 0);
+        for (auto& [letters, run] : runs) at += text(letters ? JURASSIC : TITLE, px, run, at, y, 0, st);
+        return total;
+    }
     if (f == JURASSIC) {   // same capital height and position as Saira at this size
         y += int(px * 0.42f + 0.5f);
         px = int(px * 1.34f + 0.5f);

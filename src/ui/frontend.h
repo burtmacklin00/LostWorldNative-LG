@@ -196,7 +196,7 @@ private:
     enum Family { TITLE, ITEM, MONO, JURASSIC, BODY };   // in the order of GdiText::Face
     // Titles and menu entries: the Jurassic Park font when it is installed
     Family display() const { return jurassic_ ? JURASSIC : TITLE; }
-    Family words(const std::wstring& s) const;   // JURASSIC for a label of letters only
+    Family words(const std::wstring& s) const;   // JURASSIC for a label with letters (the rest in Saira)
 
     std::vector<Item> items() const;
     // Every setting: where save/settings.ini keeps it and its row in the
