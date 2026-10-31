@@ -86,7 +86,9 @@ void rt_lswi(Ctx& c, uint32_t ea, int rd, int nb);
 void rt_stswi(Ctx& c, uint32_t ea, int rs, int nb);
 
 // Debugging: --trace ADDR prints the registers on entry to that function
-extern uint8_t g_trace_bits[512];   // fast filter for --trace
+extern uint8_t g_trace_bits[512];   // fast filter for --trace and the hooks
+// Makes ENTER call rt_trace on entry to fn (its bit in g_trace_bits)
+inline void rt_hook_function(uint32_t fn) { g_trace_bits[(fn >> 5) & 511] |= uint8_t(1 << ((fn >> 2) & 7)); }
 void rt_trace(Ctx& c, uint32_t fn);
 extern uint32_t g_recent_fn[64];
 extern uint32_t g_recent_idx;

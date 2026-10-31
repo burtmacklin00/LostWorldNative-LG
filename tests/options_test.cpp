@@ -117,11 +117,23 @@ int main() {
     {   // test runs leave the menu out
         const char* a1[] = {"x", "--bloom", "1.6", "--shot", "1400"};
         const char* a2[] = {"x", "--bloom", "1.6", "--no-hdr"};
-        const char* a3[] = {"x", "--trace-survival"};
+        const char* a3[] = {"x", "--trace-survival"};   // (listed in the table, parsed elsewhere)
+        const char* a4[] = {"x", "--other-test"};
         CHECK(options_disable_menu(5, const_cast<char**>(a1)));
         CHECK(!options_disable_menu(4, const_cast<char**>(a2)));
-        CHECK(!options_disable_menu(2, const_cast<char**>(a3)));
-        CHECK(options_disable_menu(2, const_cast<char**>(a3), {"--trace-survival"}));
+        CHECK(options_disable_menu(2, const_cast<char**>(a3)));
+        CHECK(!options_disable_menu(2, const_cast<char**>(a4)));
+        CHECK(options_disable_menu(2, const_cast<char**>(a4), {"--other-test"}));
+    }
+    {   // the help lists the options parsed elsewhere too
+        FILE* f = tmpfile();
+        print_usage(f);
+        std::string help(size_t(ftell(f)), '\0');
+        rewind(f);
+        CHECK(fread(help.data(), 1, help.size(), f) == help.size());
+        fclose(f);
+        CHECK(help.find("--survival STAGE:ZONE") != std::string::npos);
+        CHECK(help.find("Random spawns:") != std::string::npos && help.find("--random-spawns") != std::string::npos);
     }
     if (g_failed) {
         printf("options: %d checks failed\n", g_failed);

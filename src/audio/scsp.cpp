@@ -63,15 +63,22 @@ struct Tables {
             1.39, 1.60, 1.87, 2.27, 2.87, 3.31, 3.92, 4.79, 6.15, 7.18, 8.60, 10.8, 14.4, 17.2, 21.5, 28.7, 43.1,
             57.4, 86.1, 172.3};
         for (int i = 0; i < 32; i++) lfo_step[i] = uint16_t(256.0 * (freq[i] * 256.0 / 44100.0));
+        // The noise waveforms: the numbers std::rand() gives a fresh MSVC
+        // program (seed 1), by its formula, so any C library makes the same sound
+        uint32_t noise = 1;
+        auto rand15 = [&noise] {
+            noise = noise * 214013u + 2531011u;
+            return int((noise >> 16) & 0x7FFF);
+        };
         for (int i = 0; i < 256; i++) {
             plfo[0][i] = i < 128 ? i : i - 256;
             plfo[1][i] = i < 128 ? 127 : -128;
             plfo[2][i] = i < 64 ? 2 * i : i < 128 ? 255 - 2 * i : i < 192 ? 256 - 2 * i : 2 * i - 511;
-            plfo[3][i] = 128 - (std::rand() & 0xFF);
+            plfo[3][i] = 128 - (rand15() & 0xFF);
             alfo[0][i] = 255 - i;
             alfo[1][i] = i < 128 ? 255 : 0;
             alfo[2][i] = i < 128 ? 255 - 2 * i : 2 * i - 256;
-            alfo[3][i] = std::rand() & 0xFF;
+            alfo[3][i] = rand15() & 0xFF;
         }
         static const double pscale[8] = {0, 7, 13.5, 27, 55, 112, 230, 494};
         static const double ascale[8] = {0, 0.4, 0.8, 1.5, 3, 6, 12, 24};

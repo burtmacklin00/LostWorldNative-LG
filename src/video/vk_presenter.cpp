@@ -6,20 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "../common/clock.h"
 #include "dlss.h"
 
 namespace {
-
-double seconds() {
-    static LARGE_INTEGER freq = [] {
-        LARGE_INTEGER f;
-        QueryPerformanceFrequency(&f);
-        return f;
-    }();
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    return double(now.QuadPart) / double(freq.QuadPart);
-}
 
 bool check(VkResult r, const char* what) {
     if (r != VK_SUCCESS) {
@@ -448,14 +438,14 @@ void VkPresenter::frame(const RecordFn& record) {
     }
     if (!swapchain_) return;
 
-    double t0 = seconds();
+    double t0 = now_seconds();
     vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX);
-    double t_fence = seconds();
+    double t_fence = now_seconds();
     uint32_t index = 0;
     VkResult r = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, acquired_, VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) { resized_ = true; return; }
     vkResetFences(device_, 1, &fence_);
-    double t1 = seconds();
+    double t1 = now_seconds();
 
     vkResetCommandBuffer(cmd_, 0);
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -463,7 +453,7 @@ void VkPresenter::frame(const RecordFn& record) {
     vkBeginCommandBuffer(cmd_, &bi);
     vk_image_barrier(cmd_, images_[index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     record(cmd_, views_[index], extent_);
-    double t2 = seconds();
+    double t2 = now_seconds();
     bool capture = !capture_path_.empty();
     if (capture) {
         // Copy the finished image to a host-visible buffer
@@ -523,7 +513,7 @@ void VkPresenter::frame(const RecordFn& record) {
     }
     r = vkQueuePresentKHR(queue_, &pi);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) resized_ = true;
-    double t3 = seconds();
+    double t3 = now_seconds();
     timing_.gpu_wait += t1 - t0;
     timing_.record += t2 - t1;
     timing_.present += t3 - t2;
@@ -565,7 +555,7 @@ double VkPresenter::limit_queue(int depth, uint64_t timeout_ns) {
     if (!present_wait_ || !swapchain_ || depth <= 0 || present_id_ < uint64_t(depth)) return 0;
     uint64_t id = present_id_ + 1 - uint64_t(depth);
     if (id < swapchain_first_id_ || vkWaitForPresentKHR(device_, swapchain_, id, timeout_ns) != VK_SUCCESS) return 0;
-    return seconds();
+    return now_seconds();
 }
 
 void VkPresenter::shutdown() {

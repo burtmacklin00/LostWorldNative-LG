@@ -1,7 +1,6 @@
 #include "r3d_renderer.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +16,7 @@
 #include "r3d_rt.frag.h"
 #include "r3d.vert.h"
 #include "rays.frag.h"
+#include "../common/clock.h"
 #include "tilegen.h"
 
 namespace {
@@ -1988,8 +1988,8 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
     float W = float(extent.width), H = float(extent.height);
     bool extend_back = back_layer_extended();
     // Drift of the procedural clouds
-    static const auto launch = std::chrono::steady_clock::now();
-    float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - launch).count();
+    static const double launch = now_seconds();
+    float seconds = float(now_seconds() - launch);
     ComposePush pc{.scale = {lay.view_w * lay.scale / W, SCREEN_H * lay.scale / H},
                    .offset = {lay.ox / W, lay.oy / H},
                    .crosshair = {-1, -1},
