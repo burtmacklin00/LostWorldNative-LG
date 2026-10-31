@@ -1,5 +1,6 @@
 // Cheats from Settings > GAME > AMMO: the standard gun refills by itself when
-// it gets to its last bullet (AUTO RELOAD) or never runs out (UNLIMITED). The pickup guns
+// it gets to its last bullet (AUTO RELOAD) or never runs out (UNLIMITED, and
+// holding the trigger keeps firing). The pickup guns
 // are left alone. Records and achievements are not kept while one is on
 // (runtime/stats.cpp).
 #pragma once

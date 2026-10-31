@@ -11,6 +11,7 @@ struct PlayerInputs {
     std::atomic<bool> coin{false}, start{false}, trigger{false}, offscreen{false};
     std::atomic<int> gun_x{128}, gun_y{128};   // raw ADC values, 0..255
     std::atomic<bool> playing{false};          // in the game (set by the game thread from its RAM)
+    std::atomic<bool> fire_gap{false};         // AMMO > UNLIMITED's autofire: the held trigger let go a moment (cheats.cpp)
 };
 
 struct Inputs {
@@ -39,7 +40,7 @@ struct Inputs {
     uint8_t player_port(int player) const {
         uint8_t v = 0xFF;
         if (player == 1 && block_p2) return v;
-        if (p[player].trigger) v &= ~0x01;
+        if (p[player].trigger && !p[player].fire_gap) v &= ~0x01;
         if (p[player].offscreen) v &= ~0x02;
         return v;
     }

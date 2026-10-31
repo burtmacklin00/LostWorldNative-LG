@@ -296,7 +296,7 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .hint = L"Every SURVIVAL arena can be played from the start.  Off: each opens once reached in CLASSIC ARCADE"},
         {.id = OPT_AMMO, .tab = GAME_TAB, .label = L"AMMO", .key = "ammo", .number = &FS::ammo,
          .words = {"off", "auto", "unlimited"}, .kind = CHOICE, .shown = {L"NORMAL", L"AUTO RELOAD", L"UNLIMITED"},
-         .hint = L"Cheat for the standard gun: it reloads itself when empty, or never runs out.  "
+         .hint = L"Cheat for the standard gun: it reloads itself when empty, or never runs out and fires while the trigger is held.  "
                  L"Records and achievements are not kept while it is on"},
         {.id = OPT_SUBS, .tab = GAME_TAB, .label = L"SUBTITLES", .key = "subtitles", .number = &FS::subtitles,
          .words = {"off", "english", "japanese"}, .kind = CHOICE, .shown = {L"OFF", L"ENGLISH", L"JAPANESE"},
