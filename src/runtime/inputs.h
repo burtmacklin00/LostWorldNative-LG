@@ -12,6 +12,10 @@ struct PlayerInputs {
     std::atomic<int> gun_x{128}, gun_y{128};   // raw ADC values, 0..255
     std::atomic<bool> playing{false};          // in the game (set by the game thread from its RAM)
     std::atomic<bool> fire_gap{false};         // AMMO > UNLIMITED's autofire: the held trigger let go a moment (cheats.cpp)
+    // The player's own trigger is held (their gun, mouse or pad), not one
+    // pressed for them (survival's way in, scripted input): recoil only
+    // follows these (outputs.cpp). Set by the window thread every frame
+    std::atomic<bool> own_trigger{false};
 };
 
 struct Inputs {

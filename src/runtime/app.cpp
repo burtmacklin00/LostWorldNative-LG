@@ -2062,6 +2062,11 @@ void App::read_inputs() {
         }
     }
     bool pad_pause = poll_gamepads(presenter.hwnd());
+    {   // the players' own triggers, for the recoil (outputs.cpp): not the
+        // shots survival's way in or scripted input fire for them
+        bool theirs = !survival_owns_inputs() && g_auto.events.empty();
+        for (PlayerInputs& pl : g_inputs.p) pl.own_trigger = theirs && pl.trigger;
+    }
     if (g_pads.changed()) {   // the CONTROLS tab names the pads
         std::wstring names;
         bool gyro = false;

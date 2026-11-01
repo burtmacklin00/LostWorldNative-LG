@@ -1471,8 +1471,11 @@ bool survival_frame(Ctx&) {
         }
         s.publish();
         // The way in presses the buttons and shoots by itself, and the start
-        // screen waits: no recoil or lights for any of it (outputs.h)
-        if (s.mode == SurvivalMode::Loading || s.mode == SurvivalMode::Ready) outputs::quiet(3);
+        // screen waits: no recoil or lights for any of it (outputs.h). Nor
+        // while a lap goes back to the first stop (a saved point loads: its
+        // shot count and lives are not the player's doing)
+        bool lap_back = s.mode == SurvivalMode::Playing && (s.phase == Survival::LAP_OUT || s.phase == Survival::LAP_LOAD);
+        if (s.mode == SurvivalMode::Loading || s.mode == SurvivalMode::Ready || lap_back) outputs::quiet(3);
     }
     if (!g_trace) return hold;
     if (const char* life = test_env().life; life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));

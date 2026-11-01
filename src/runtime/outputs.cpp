@@ -126,7 +126,17 @@ struct Player {
     int recoil_off = 0;      // frames at 0 before the next one (so each is a new 0 -> 1)
     int lives = -1;
     int damaged = 0;         // frames left with P_Damaged at 1
+    int since_pull = 1000;   // frames since the player's own trigger was last held
 };
+// Hook of the Reaper also kicks the gun when P_Ammo drops (Ammo_Value in the
+// profile), so the bullets sent only go down with a shot the player fired:
+// a slot that blinks out of play (after a saved state loads, between waves)
+// or a count that jumps with a loaded state keeps the value sent. Kept over
+// quiet(), as Hook of the Reaper keeps the last value it had
+int g_ammo_sent[2] = {-1, -1};
+// Frames after the player's own trigger in which a shot the game counts is
+// theirs (the game counts it a frame or two after the press)
+constexpr int PULL_GRACE = 10;
 Player g_player[2];
 std::atomic<int> g_quiet{0};   // frames left without feedback (quiet())
 // After them, still quiet until the players hold still (STEADY_FRAMES in a
@@ -218,7 +228,10 @@ void frame(unsigned long long game_frame) {
         Player& pl = g_player[p];
         std::string P = "P" + std::to_string(p + 1);
         uint8_t state = rd8(SLOT_STATE + 0x10 * p);
-        bool playing = state == 1 || state == 2;
+        // Survival is for one player: player 2's gun gets nothing there
+        bool playing = (state == 1 || state == 2) && !(p == 1 && g_inputs.block_p2);
+        pl.since_pull = g_inputs.p[p].own_trigger ? 0 : std::min(pl.since_pull + 1, 1000);
+        bool pulled = pl.since_pull <= PULL_GRACE;
         int lives = int(rd32(LIVES[p]));
         int shots = rd16(SHOTS + 0x10 * p);
         int delay = int(rd32(GUN_DELAY + 4 * p)), autofire = int(rd32(GUN_AUTO + 4 * p));
@@ -230,9 +243,12 @@ void frame(unsigned long long game_frame) {
         // game state was loaded (the boss fights, survival) with its own count
         constexpr int MAX_SHOTS_PER_FRAME = 4;   // the fastest gun fires once in 12 frames
         int fired = shots - pl.shots;
-        if (pl.shots >= 0 && fired > 0 && fired <= MAX_SHOTS_PER_FRAME && playing) pl.pending += fired;
+        // Only shots the player fired with their own trigger: none that the game
+        // or this program fired for them (survival's way in, a loaded state)
+        bool shot = pl.shots >= 0 && fired > 0 && fired <= MAX_SHOTS_PER_FRAME && playing && pulled;
+        if (shot) pl.pending += fired;
         pl.shots = shots;
-        if (!playing) pl.pending = 0;
+        if (!playing || !pulled) pl.pending = 0;
         if (pl.recoil_on > 0) {
             if (--pl.recoil_on == 0) {
                 set(P + "_CtmRecoil", 0);
@@ -258,7 +274,12 @@ void frame(unsigned long long game_frame) {
             if (--pl.damaged == 0) set(P + "_Damaged", 0);
         }
 
-        set(P + "_Ammo", playing ? int(rd32(AMMO + 4 * p)) : 0);
+        // The bullets: up at once (a reload, a join), down only with a shot of
+        // the player's own trigger (see g_ammo_sent); out of play the last value stays
+        int ammo = int(rd32(AMMO + 4 * p));
+        int& sent = g_ammo_sent[p];
+        if (playing && (sent < 0 || ammo > sent || (ammo < sent && pulled))) sent = ammo;
+        if (sent >= 0) set(P + "_Ammo", sent);
         set(P + "_Weapon", weapon);
         set(P + "_Special", weapon != 0 ? 1 : 0);
         set(P + "_Unlimited", playing && rd32(UNLIMITED + 4 * p) != 0 ? 1 : 0);
