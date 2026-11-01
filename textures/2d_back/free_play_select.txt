@@ -1,0 +1,23 @@
+# "FREE PLAY" on the stage select screen (the back layer), made from out/2d/capture_1614_back:
+# the Jurassic Park lettering of push_1p_start_attract.png (textures/2d)
+rect 26 45 9 2
+cover
+match 95
+1bc807b50863042d
+e7908dab0261b795
+1bc807b50863042d
+1bc807b50863042d
+b9b23f3a46fd0825
+ae4bc709bd2a3d0f
+19e72e146608e94d
+a7278d615dfad17f
+a7b3534b1f6c8cef
+31ba92ee9bd96625
+5e928ebf33527965
+cfe86b448d804a0d
+cfe86b448d804a0d
+b9b23f3a46fd0825
+56dfc915f51ea025
+146738b30a192c0d
+282b1ca6b9660077
+8df2697bb4347ec7
