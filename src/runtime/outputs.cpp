@@ -134,6 +134,12 @@ struct Player {
 // or a count that jumps with a loaded state keeps the value sent. Kept over
 // quiet(), as Hook of the Reaper keeps the last value it had
 int g_ammo_sent[2] = {-1, -1};
+// Going into play, the game fills the bullets a moment before it shows them
+// (and before a survival wave or a boss fight starts): Hook of the Reaper
+// would take that for a reload (its kick and lights). So after a player goes
+// into play, the bullets are only sent from their first trigger pull or reload
+bool g_armed[2] = {false, false};
+bool g_pull_was[2] = {false, false};   // trigger or reload held last frame (a new press arms)
 // The same for P_Life, which Hook of the Reaper turns into the death effect
 // when it reaches 0 (Death_Value): the lives sent only reach 0 when the player
 // loses the last one in play, not when the slot blinks out of play (before a
@@ -234,6 +240,7 @@ void frame(unsigned long long game_frame) {
             if (pl.recoil_on > 0) set(P + "_CtmRecoil", 0);
             if (pl.damaged > 0) set(P + "_Damaged", 0);
             pl = Player{};
+            g_armed[p] = false;   // a loaded state, a load: the bullets wait for the player again
             set(P + "_LmpStart", 0);
         }
         return;
@@ -280,6 +287,14 @@ void frame(unsigned long long game_frame) {
         // that takes the last life is only the death (P_Life = 0), so the two
         // light effects never collide
         if (playing != g_was_playing[p]) note(p, "in play", g_was_playing[p], playing);
+        // (a new press: the trigger still held from starting the game does not count)
+        bool pull = g_inputs.p[p].own_trigger || g_inputs.p[p].own_reload;
+        if (!playing) g_armed[p] = false;
+        else if (!g_armed[p] && pull && !g_pull_was[p]) {
+            g_armed[p] = true;
+            note(p, "first shot or reload", 0, 1);
+        }
+        g_pull_was[p] = pull;
         int& life = g_life_sent[p];
         g_out_frames[p] = playing ? 0 : std::min(g_out_frames[p] + 1, 1000);
         int shown = playing ? std::max(lives, 0)
@@ -299,7 +314,7 @@ void frame(unsigned long long game_frame) {
         // the player's own trigger (see g_ammo_sent); out of play the last value stays
         int ammo = int(rd32(AMMO + 4 * p));
         int& sent = g_ammo_sent[p];
-        if (playing && (sent < 0 || ammo > sent || (ammo < sent && pulled))) {
+        if (playing && g_armed[p] && (sent < 0 || ammo > sent || (ammo < sent && pulled))) {
             if (ammo > sent) note(p, "ammo up", sent, ammo);   // (a reload, a join; shots are not logged)
             sent = ammo;
         }

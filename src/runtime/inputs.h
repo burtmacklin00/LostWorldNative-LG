@@ -16,6 +16,7 @@ struct PlayerInputs {
     // pressed for them (survival's way in, scripted input): recoil only
     // follows these (outputs.cpp). Set by the window thread every frame
     std::atomic<bool> own_trigger{false};
+    std::atomic<bool> own_reload{false};    // the same for their reload (a shot off the screen)
 };
 
 struct Inputs {
