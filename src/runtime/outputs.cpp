@@ -124,9 +124,9 @@ struct Player {
     int pending = 0;         // bullets fired whose recoil has not been sent yet
     int recoil_on = 0;       // frames left with the recoil signal at 1
     int recoil_off = 0;      // frames at 0 before the next one (so each is a new 0 -> 1)
-    int lives = -1;
     int damaged = 0;         // frames left with P_Damaged at 1
     int since_pull = 1000;   // frames since the player's own trigger was last held
+    int weapon = 0;          // last frame's (for the log)
 };
 // Hook of the Reaper also kicks the gun when P_Ammo drops (Ammo_Value in the
 // profile), so the bullets sent only go down with a shot the player fired:
@@ -134,6 +134,20 @@ struct Player {
 // or a count that jumps with a loaded state keeps the value sent. Kept over
 // quiet(), as Hook of the Reaper keeps the last value it had
 int g_ammo_sent[2] = {-1, -1};
+// The same for P_Life, which Hook of the Reaper turns into the death effect
+// when it reaches 0 (Death_Value): the lives sent only reach 0 when the player
+// loses the last one in play, not when the slot blinks out of play (before a
+// survival wave, after a saved state loads). Out of play the value sent stays
+int g_life_sent[2] = {0, 0};
+bool g_was_playing[2] = {false, false};
+int g_out_frames[2] = {0, 0};   // frames out of play since it was last in
+// Out of play with lives left for this long is the end of the game (a slot
+// blinks out for less), and the lives sent go to 0 then
+constexpr int OUT_FRAMES = 90;
+// The feedback sent, in the log (lives, damage, special gun, in or out of play)
+void note(int p, const char* what, int from, int to) {
+    printf("[outputs] P%d %s %d -> %d\n", p + 1, what, from, to);
+}
 // Frames after the player's own trigger in which a shot the game counts is
 // theirs (the game counts it a frame or two after the press)
 constexpr int PULL_GRACE = 10;
@@ -265,9 +279,16 @@ void frame(unsigned long long game_frame) {
         // Lives, damage and death: a hit that leaves lives is damage; the one
         // that takes the last life is only the death (P_Life = 0), so the two
         // light effects never collide
-        int shown = playing ? std::max(lives, 0) : 0;
-        if (pl.lives > 0 && shown < pl.lives && shown > 0 && playing) pl.damaged = 6;
-        pl.lives = shown;
+        if (playing != g_was_playing[p]) note(p, "in play", g_was_playing[p], playing);
+        int& life = g_life_sent[p];
+        g_out_frames[p] = playing ? 0 : std::min(g_out_frames[p] + 1, 1000);
+        int shown = playing ? std::max(lives, 0)
+                  : lives <= 0 || g_out_frames[p] >= OUT_FRAMES ? 0   // the last life gone, or out for good
+                                                                : life;
+        g_was_playing[p] = playing;
+        if (shown != life) note(p, "lives", life, shown);
+        if (life > 0 && shown < life && shown > 0 && playing) pl.damaged = 6, note(p, "damage", life, shown);
+        life = shown;
         set(P + "_Life", shown);
         if (pl.damaged > 0) {
             set(P + "_Damaged", 1);
@@ -278,9 +299,14 @@ void frame(unsigned long long game_frame) {
         // the player's own trigger (see g_ammo_sent); out of play the last value stays
         int ammo = int(rd32(AMMO + 4 * p));
         int& sent = g_ammo_sent[p];
-        if (playing && (sent < 0 || ammo > sent || (ammo < sent && pulled))) sent = ammo;
+        if (playing && (sent < 0 || ammo > sent || (ammo < sent && pulled))) {
+            if (ammo > sent) note(p, "ammo up", sent, ammo);   // (a reload, a join; shots are not logged)
+            sent = ammo;
+        }
         if (sent >= 0) set(P + "_Ammo", sent);
         set(P + "_Weapon", weapon);
+        if ((weapon != 0) != (pl.weapon != 0)) note(p, "special gun", pl.weapon != 0, weapon != 0);
+        pl.weapon = weapon;
         set(P + "_Special", weapon != 0 ? 1 : 0);
         set(P + "_Unlimited", playing && rd32(UNLIMITED + 4 * p) != 0 ? 1 : 0);
         bool can_join = !(p == 1 && g_inputs.block_p2);   // survival: player 2 can't join
