@@ -262,7 +262,7 @@ void frame(unsigned long long game_frame) {
         set(P + "_Weapon", weapon);
         set(P + "_Special", weapon != 0 ? 1 : 0);
         set(P + "_Unlimited", playing && rd32(UNLIMITED + 4 * p) != 0 ? 1 : 0);
-        bool can_join = !(p == 1 && g_inputs.block_p2) && !g_inputs.p[p].no_join;   // survival: only at times
+        bool can_join = !(p == 1 && g_inputs.block_p2);   // survival: player 2 can't join
         set(P + "_LmpStart", can_join && !playing && (game_frame / 30) % 2 == 0 ? 1 : 0);   // ~1 blink a second
     }
 }

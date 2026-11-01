@@ -1456,12 +1456,10 @@ int main(int argc, char** argv) {
                           .sky_coords = sky_on ? out.sky_coords.data() : nullptr,
                           .back_rows = back_rows.data()},
                          hd_text, sky_on ? &sky : nullptr);
-        // Survival: the game's own "Push 2P Start" in player 2's corner
-        // (fn_0002F338 draws it at cells 41..60, rows 43..46) is left out
-        // while player 2 can't join (only at the first stop of a lap), so
-        // nothing invites a player who can't; player 2's own corner when playing stays
-        if (survival_shown && survival_view().mode != SurvivalMode::Off && !g_inputs.p[1].playing &&
-            (g_inputs.block_p2 || g_inputs.p[1].no_join)) {
+        // Survival is for one player: the game's own "Push 2P Start" in
+        // player 2's corner (fn_0002F338 draws it at cells 41..60, rows
+        // 43..46) is left out, so nothing invites a player who can't join
+        if (survival_shown && survival_view().mode != SurvivalMode::Off) {
             constexpr int X0 = 312, Y0 = 336;   // cells 39.. and 42.. (a margin around the prompt)
             // (the raw layers too: a 2D replacement picture is found from them)
             for (uint32_t* layer : {out.front.data(), raw_front ? front_raw.data() : nullptr,

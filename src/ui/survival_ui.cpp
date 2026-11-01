@@ -64,32 +64,31 @@ void SurvivalUi::draw_intro(const SurvivalView& v, double now) {
     std::wstring where = L"STAGE " + num(v.stage) + L"   \u00B7   ZONE " + num(v.zone);
     if (name) where += L"   \u00B7   " + std::wstring(name);
     text(TEXT, U(40), where, cx, top + U(170), 1, PALE_TOP, PALE_BOTTOM);
-    const wchar_t* rules[6] = {L"The park takes you through the zone, stop after stop: survive every stop.",
+    const wchar_t* rules[5] = {L"The park takes you through the zone, stop after stop: survive every stop.",
                                L"Keep your eyes open on the way: dinosaurs can ambush you.",
                                L"Shoot the golden BONUS target when it shows up, for an extra life.",
                                L"After the last stop, a new lap begins. Every lap is harder.",
-                               L"Player 2 can join at the first stop of every lap. A player who is out is back next lap.",
-                               L"No continues. When the last life is gone, the hunt is over."};
-    for (int i = 0; i < 6; i++)
-        text(TEXT, U(31), rules[i], cx, top + U(226.0f + 38.0f * float(i)), 1, PALE_TOP, PALE_BOTTOM, 0.9f);
+                               L"No continues. When your last life is gone, the hunt is over."};
+    for (int i = 0; i < 5; i++)
+        text(TEXT, U(31), rules[i], cx, top + U(228.0f + 40.0f * float(i)), 1, PALE_TOP, PALE_BOTTOM, 0.9f);
     std::wstring rec = v.best_wave <= 0 ? std::wstring(L"NO RECORD YET \u2014 SET THE FIRST ONE")
                      : (v.best_lap > 0 ? L"YOUR RECORD:  LAP " + num(v.best_lap) + L"   \u00B7   " : std::wstring(L"YOUR RECORD:  ")) +
                            L"WAVE " + num(v.best_wave) + L"   \u00B7   " + num(v.best_score) + L" POINTS";
-    text(TEXT, U(40), rec, cx, top + U(462), 1, AMBER, AMBER);
+    text(TEXT, U(40), rec, cx, top + U(v.mode == SurvivalMode::Loading ? 425 : 435), 1, AMBER, AMBER);
     if (v.mode == SurvivalMode::Loading) {   // what is going on while the game gets there
         std::wstring dots(size_t(int(now * 3) % 4), L'.');
         std::wstring what = v.step == SurvivalStep::Coin     ? L"Inserting a coin"
                           : v.step == SurvivalStep::Course   ? L"Choosing the course"
                           : v.step == SurvivalStep::Travelling ? L"Travelling to " + std::wstring(name ? name : L"the arena")
                                                              : L"Getting the park ready";
-        text(TITLE, U(46), L"PREPARING THE HUNT", cx, top + U(505), 1, GOLD_TOP, GOLD_BOTTOM);
-        bar(cx - U(380), top + U(558), cx + U(380), top + U(574), v.progress);
-        text(TEXT, U(30), what + dots, cx, top + U(582), 1, FOOT, FOOT);
+        text(TITLE, U(46), L"PREPARING THE HUNT", cx, top + U(485), 1, GOLD_TOP, GOLD_BOTTOM);
+        bar(cx - U(380), top + U(540), cx + U(380), top + U(556), v.progress);
+        text(TEXT, U(30), what + dots, cx, top + U(566), 1, FOOT, FOOT);
         if (v.step == SurvivalStep::Travelling)   // or it looks stuck
             text(TEXT, U(24), L"The game is racing through the stage, muted, to reach the arena. This can take a moment.",
-                 cx, top + U(612), 1, FOOT, FOOT, 0.9f);
+                 cx, top + U(602), 1, FOOT, FOOT, 0.9f);
     } else {
-        if (int(now * 2.5) % 2 == 0) text(TITLE, U(64), L"SHOOT TO START", cx, top + U(515), 1, GOLD_TOP, GOLD_BOTTOM);
+        if (int(now * 2.5) % 2 == 0) text(TITLE, U(64), L"SHOOT TO START", cx, top + U(510), 1, GOLD_TOP, GOLD_BOTTOM);
         text(TEXT, U(28), L"TAB: PAUSE", cx, top + U(596), 1, FOOT, FOOT);
     }
 }
@@ -175,13 +174,13 @@ void SurvivalUi::draw_results(const SurvivalView& v, double now) {
     int cx = w_ / 2, top = h_ / 2 - U(320);
     panel(cx - U(560), top, cx + U(560), top + U(640), 0.9f);
     text(TITLE, U(110), L"THE HUNT IS OVER", cx, top + U(30), 1, RED_TOP, RED_BOTTOM);
-    text(TEXT, U(44), L"STAGE " + num(v.stage) + L"   ·   ZONE " + num(v.zone) + (v.players == 2 ? L"   ·   2 PLAYERS" : L""), cx, top + U(165), 1, PALE_TOP,
+    text(TEXT, U(44), L"STAGE " + num(v.stage) + L"   ·   ZONE " + num(v.zone), cx, top + U(165), 1, PALE_TOP,
          PALE_BOTTOM, 0.8f);
     text(TEXT, U(42), L"LAP", cx - U(40), top + U(222), 2, PALE_TOP, PALE_BOTTOM);
     text(TITLE, U(60), num(v.lap), cx + U(40), top + U(210), 0, GOLD_TOP, GOLD_BOTTOM);
     text(TEXT, U(42), L"WAVE REACHED", cx - U(40), top + U(282), 2, PALE_TOP, PALE_BOTTOM);
     text(TITLE, U(60), num(v.wave), cx + U(40), top + U(270), 0, GOLD_TOP, GOLD_BOTTOM);
-    text(TEXT, U(42), v.players == 2 ? L"TEAM SCORE" : L"SCORE", cx - U(40), top + U(342), 2, PALE_TOP, PALE_BOTTOM);
+    text(TEXT, U(42), L"SCORE", cx - U(40), top + U(342), 2, PALE_TOP, PALE_BOTTOM);
     text(TITLE, U(60), num(v.score), cx + U(40), top + U(330), 0, GOLD_TOP, GOLD_BOTTOM);
     bool blink = int(now * 2.5) % 2 == 0;
     if (v.new_record) {
@@ -217,7 +216,7 @@ bool SurvivalUi::draw(int w, int h, const SurvivalView& v, double now, std::vect
     int banner = v.mode == SurvivalMode::Playing && t >= 0 && t < SURVIVAL_COUNTDOWN + 1.0 ? 1 + int(t * 20) : 0;
     int phase = int(now * (v.mode == SurvivalMode::Loading ? 3 : 2.5));
     wchar_t key[160];
-    swprintf(key, 160, L"%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", w, h, int(v.players), int(v.mode), v.wave, v.score,
+    swprintf(key, 160, L"%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", w, h, int(v.mode), v.wave, v.score,
              v.best_wave, v.new_record, banner, v.mode == SurvivalMode::Playing ? 0 : phase, v.lives, int(v.step),
              int(v.progress * 200), v.left, v.total, v.resting * (v.walking ? 2 : 1) + 4 * v.ambush + 8 * v.zone_done,
              int(std::ceil(v.rest_left)) +

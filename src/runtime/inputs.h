@@ -11,16 +11,14 @@ struct PlayerInputs {
     std::atomic<bool> coin{false}, start{false}, trigger{false}, offscreen{false};
     std::atomic<int> gun_x{128}, gun_y{128};   // raw ADC values, 0..255
     std::atomic<bool> playing{false};          // in the game (set by the game thread from its RAM)
-    std::atomic<bool> no_join{false};          // survival: this player's coin and start do nothing now (survival.cpp)
     std::atomic<bool> fire_gap{false};         // AMMO > UNLIMITED's autofire: the held trigger let go a moment (cheats.cpp)
 };
 
 struct Inputs {
     PlayerInputs p[2];
     std::atomic<bool> service{false}, test{false};
-    // Survival: player 2's coin, start and gun buttons don't reach the game
-    // on the way in and on its start and results screens (set by the game
-    // thread every frame)
+    // Survival mode is for one player: player 2's coin, start and gun
+    // buttons don't reach the game (set by the game thread every frame)
     std::atomic<bool> block_p2{false};
 
     // F0040004, active low. Bank 0: bit0 coin 1, bit1 coin 2, bit2 test,
@@ -29,12 +27,12 @@ struct Inputs {
     uint8_t system_port(bool bank1) const {
         uint8_t v = 0xFF;
         if (!bank1) {
-            if (p[0].coin && !p[0].no_join) v &= ~0x01;
-            if (p[1].coin && !block_p2 && !p[1].no_join) v &= ~0x02;
+            if (p[0].coin) v &= ~0x01;
+            if (p[1].coin && !block_p2) v &= ~0x02;
             if (test) v &= ~0x04;
             if (service) v &= ~0x08;
-            if (p[0].start && !p[0].no_join) v &= ~0x10;
-            if (p[1].start && !block_p2 && !p[1].no_join) v &= ~0x20;
+            if (p[0].start) v &= ~0x10;
+            if (p[1].start && !block_p2) v &= ~0x20;
         }
         return v;
     }

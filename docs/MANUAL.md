@@ -366,16 +366,8 @@ a shot starts again from the beginning of the arena and Esc returns to the
 main menu (the arcade game stays as it was). Esc during play opens
 the pause menu as usual.
 
-Two players: player 2 (or a player who is out) joins with their start button
-at the first stop of any lap, while the arena is still there (the game's own
-PUSH 2P START shows then; at other times their start does nothing and the lamp
-stays off). Once that stop is cleared, the state the next lap goes back to is
-kept again with whoever plays, and a player who is out at the end of a lap
-comes back with the next one. Only the last life of the last player still in
-is held back; while the other still plays, a player loses their last life as
-in the arcade (the CONTINUE countdown, without joining again until the first
-stop). The hunt ends when no one is left. The score is the team's, and
-two-player runs keep their own records (zone + 100 in save/survival.ini).
+Survival is for one player: player 2's gun and start do nothing in it (their
+start lamp stays off).
 
 It uses the game's encounter machine (see game_ram.md). Stages 2 and 5
 use a different system, and zone 7 of stage 1 (the T-Rex chase) reloads
