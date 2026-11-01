@@ -15,10 +15,10 @@
 #                    a new copy, and "LostWorld LG v1.0 to v2.0", only what
 #                    differs from the version before, however many test
 #                    updates came in between. The full one also carries
-#                    the arenas and boss fights kept so far (save\survival,
-#                    save\boss): a new copy starts them at once instead of
-#                    playing its way there first. They hold game data from
-#                    the ROM, like the data folder: for full copies only
+#                    the game data (data\) and the arenas and boss fights
+#                    kept so far (save\survival, save\boss): a new copy plays
+#                    at once and starts them without playing its way there.
+#                    All of it is from the ROM: for private full copies only
 #
 # Never included, so an update never overwrites them: the ROM data, save
 # (settings, records), out, LightgunHID.ini, display.ini and textures\text
@@ -103,9 +103,7 @@ function Make-Pack($name, $title, $list, $removed) {
     $how = if ($name -like '*(full)') { @(
         'A NEW COPY',
         '  1. Copy everything in this folder (except this file) into a new folder.',
-        '  2. Add the game data: the data folder from a copy that has it, or your',
-        '     own lostwsga.zip next to LostWorld.exe.',
-        '  3. Read 1 - Getting Started Readme.txt (light guns first).',
+        '  2. Read 1 - Getting Started Readme.txt (light guns first), then play.',
         '',
         'OR, TO UPDATE A COPY YOU HAVE') } else { @('HOW TO UPDATE') }
     $readme = @(
@@ -159,14 +157,14 @@ if ($Release) {
     foreach ($f in ($files | Sort-Object)) { $all.Add($f) }
     # The kept arenas and boss fights (made by this build: start each once first)
     $kept = 0
-    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state')) {
+    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin')) {
         Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
             $all.Add($_.FullName.Substring($root.Length + 1))
             $kept++
         }
     }
-    Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete (for a new copy: add the data folder or lostwsga.zip)" $all @() | Out-Null
-    Write-Host "  (with $kept kept arena and boss files from save\survival and save\boss)"
+    Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete and ready to play (with the game data)" $all @() | Out-Null
+    Write-Host "  (with $kept files of game data, kept arenas and boss fights: data, save\survival, save\boss)"
     if ($prev) {
         $old = Read-Manifest $prev.Path
         $diff = Changed-Since $old
