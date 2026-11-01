@@ -233,7 +233,9 @@ static void poll_keyboard_mouse(HWND hwnd) {
         PlayerInputs& pl = g_inputs.p[p];
         bool start = down(p ? '2' : '1');
         bool pressed = start && !g_start_was[p];
-        if (pl.playing || !g_opt.free_play) {
+        if (p == 0 && pl.playing) {
+            pl.start = false;   // 1 opens the pause menu during play (input_hook); the trigger is START then (trigger_starts)
+        } else if (pl.playing || !g_opt.free_play) {
             pl.start = start;   // during play the game's own START (trigger_starts adds the gun's trigger)
         } else {
             pl.start = false;   // join_update presses it for a join (after this)
@@ -1446,7 +1448,11 @@ bool App::init(int argc, char** argv, bool first_start) {
                     survival_to_menu();
                     return true;
                 }
-                if (msg == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_TAB)) {   // Tab as in MAME (Esc can quit, via the launcher)
+                // 1 (player 1's start button on a cabinet) too, while player 1
+                // plays: their gun's trigger is their START then. Out of play
+                // 1 still starts or joins
+                bool one = wp == '1' && g_inputs.p[0].playing && !(lp & (1 << 30));
+                if (msg == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_TAB || one)) {   // Tab as in MAME (Esc can quit, via the launcher)
                     frontend.open(Frontend::Screen::Pause);
                     g_menu_open = g_hold = true;
                     return true;
@@ -1461,8 +1467,8 @@ bool App::init(int argc, char** argv, bool first_start) {
             else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
             switch (msg) {
             case WM_KEYDOWN:
-                // Tab closes the pause menu it opened (not on its own repeat)
-                if (wp == VK_TAB && frontend.screen() == Frontend::Screen::Pause) {
+                // Tab or 1 closes the pause menu they open (not on their own repeat)
+                if ((wp == VK_TAB || wp == '1') && frontend.screen() == Frontend::Screen::Pause) {
                     if (!(lp & (1 << 30))) frontend.key(VK_ESCAPE);
                     return true;
                 }

@@ -70,7 +70,9 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
 
  KEYBOARD
    Tab .............. Pause menu during play (Tab again resumes)
-   1 / 2 ............ Player 1 / 2 start
+   1 / 2 ............ Player 1 / 2 start. While player 1 plays, 1 opens
+                      the pause menu instead (1 again resumes); their
+                      gun's trigger is their start then
    5 / 6 ............ Coin for player 1 / 2 (only without free play;
                       with free play they do nothing)
    Esc .............. With the launcher: quits the game completely.

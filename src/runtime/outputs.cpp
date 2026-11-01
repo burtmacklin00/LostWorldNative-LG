@@ -137,9 +137,8 @@ int g_ammo_sent[2] = {-1, -1};
 // Going into play, the game fills the bullets a moment before it shows them
 // (and before a survival wave or a boss fight starts): Hook of the Reaper
 // would take that for a reload (its kick and lights). So after a player goes
-// into play, the bullets are only sent from their first trigger pull or reload
+// into play, the bullets are only sent from their first shot the game counts
 bool g_armed[2] = {false, false};
-bool g_pull_was[2] = {false, false};   // trigger or reload held last frame (a new press arms)
 // The same for P_Life, which Hook of the Reaper turns into the death effect
 // when it reaches 0 (Death_Value): the lives sent only reach 0 when the player
 // loses the last one in play, not when the slot blinks out of play (before a
@@ -287,17 +286,13 @@ void frame(unsigned long long game_frame) {
         // that takes the last life is only the death (P_Life = 0), so the two
         // light effects never collide
         if (playing != g_was_playing[p]) note(p, "in play", g_was_playing[p], playing);
-        // (a new press: the trigger still held from starting the game does not
-        // count; nor a shot before the lives are given, as the arcade game's
-        // course select, which is in play: its bullets are filled when the stage
-        // starts, after it)
-        bool pull = g_inputs.p[p].own_trigger || g_inputs.p[p].own_reload;
+        // Only a shot the game counted, with lives (not the arcade game's course
+        // select): pulls it ignores, while a stage loads, release nothing
         if (!playing) g_armed[p] = false;
-        else if (!g_armed[p] && pull && !g_pull_was[p] && lives > 0) {
+        else if (!g_armed[p] && shot && lives > 0) {
             g_armed[p] = true;
-            note(p, "first shot or reload", 0, 1);
+            note(p, "first shot", 0, 1);
         }
-        g_pull_was[p] = pull;
         int& life = g_life_sent[p];
         g_out_frames[p] = playing ? 0 : std::min(g_out_frames[p] + 1, 1000);
         int shown = playing ? std::max(lives, 0)
