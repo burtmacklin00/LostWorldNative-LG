@@ -408,6 +408,7 @@ struct Run {
     bool remarking = false;       // that state being taken again, with the players now
     uint64_t nobody_since = 0;    // frame no one was playing any more (0: someone is)
     bool someone_played = false;  // since the hunt (or the lap) began: the game takes a moment to put player 1 in
+    bool out_this_lap[2] = {};    // lost their last life in this lap: no joining again before the next one
     uint64_t fade_in_at = 0;      // the picture comes back from black (after a new lap)
     double lap_started = 0;       // banner
     double ambush_started = 0;
@@ -453,9 +454,11 @@ struct Survival : Run {
     static int lives_of(int p) { return int(rd32(LIFE[p])); }
     static unsigned roster() { return (playing(0) ? 1u : 0u) | (playing(1) ? 2u : 0u); }
     // A player who is not playing may join (start) now: at the first stop of a
-    // lap, until the state for the next lap is taken again
-    bool can_join() const {
-        return mode == SurvivalMode::Playing && !dying_until && stop == 0 && !remarking &&
+    // lap, until the state for the next lap is taken again, and not after
+    // losing their last life in this lap (an arena with one stop would give
+    // endless continues)
+    bool can_join(int p) const {
+        return mode == SurvivalMode::Playing && !dying_until && stop == 0 && !remarking && !out_this_lap[p] &&
                (phase == FIGHT || phase == CLEARED);
     }
 
@@ -879,6 +882,7 @@ struct Survival : Run {
         lives = lives_of(0);
         nobody_since = 0;
         someone_played = false;
+        out_this_lap[0] = out_this_lap[1] = false;
         lap++;
         stop = 0;
         last_stop = false;
@@ -1064,6 +1068,7 @@ struct Survival : Run {
                 was[p] = playing(p);
                 printf("[survival] player %d %s (slot %d, lives %d)\n", p + 1, was[p] ? "in" : "out",
                        rd8(SLOT_STATE + 0x10 * uint32_t(p)), lives_of(p));
+                if (!was[p] && phase != LAP_OUT && phase != LAP_LOAD) out_this_lap[p] = true;
             }
             if (playing(p)) joined[p] = true;
             if (!last_hit[p]) continue;
@@ -1491,6 +1496,7 @@ bool survival_frame(Ctx&) {
                 s.joined[0] = true, s.joined[1] = false;
                 s.marked = 1;
                 s.nobody_since = 0, s.someone_played = false;
+                s.out_this_lap[0] = s.out_this_lap[1] = false;
                 game_state_mark();   // the first stop: every lap starts again from here
                 log("  survival wave 1 count %zu (the encounter itself)\n", s.enemies.size());
                 s.set_phase(Survival::FIGHT);
@@ -1527,8 +1533,10 @@ bool survival_frame(Ctx&) {
         if (s.mode == SurvivalMode::Loading || s.mode == SurvivalMode::Ready) outputs::quiet(3);
     }
     // Joining: in a run only at the first stop of a lap (Survival::can_join)
-    bool join_ok = !s.on || s.mode != SurvivalMode::Playing || s.can_join();
-    for (int p = 0; p < 2; p++) g_inputs.p[p].no_join = !join_ok && !(s.on && Survival::playing(p));
+    for (int p = 0; p < 2; p++) {
+        bool join_ok = !s.on || s.mode != SurvivalMode::Playing || s.can_join(p);
+        g_inputs.p[p].no_join = !join_ok && !(s.on && Survival::playing(p));
+    }
     if (!g_trace) return hold;
     if (const char* life = test_env().life; life && g_frame_no > 1000) wr8(SETTING_LIFE, uint8_t(atoi(life)));
     if (test_env().god) {   // testing aid: the player's life never drops
