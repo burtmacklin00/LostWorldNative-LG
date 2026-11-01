@@ -217,6 +217,9 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
    their position as Windows reports it).
  - No recoil: Hook of the Reaper must be running before the game,
    with jplostworldsa.txt in its defaultLG folder.
+ - The game won't start, or something goes wrong: run Make Log.bat
+   (it starts the game). Afterwards send the 3 files it saves in the
+   out folder: game_log.txt, vulkan_info.txt and event_log.txt.
  - The build failed: run build.bat from a command prompt to see the
    error, and keep the last lines.
 
