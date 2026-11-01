@@ -45,7 +45,7 @@ set "CTEST=%VSDIR%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.
 if not exist "%CMAKE%" goto no_vs
 echo [5/5] Building
 "%CMAKE%" -S . -B build\cmake -G Ninja -DCMAKE_BUILD_TYPE=Release || goto fail
-"%CMAKE%" --build build\cmake --target LostWorld || goto fail
+"%CMAKE%" --build build\cmake --target LostWorld LostWorldPresets || goto fail
 copy /y build\cmake\LostWorld.exe LostWorld.exe >nul
 rem The quick settings: one silent program under each setting's name (the .bat
 rem files they replace flashed a console window)
