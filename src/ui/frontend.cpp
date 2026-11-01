@@ -823,6 +823,9 @@ bool Frontend::key(int vk) {
             settings.gun_p1.clear(), settings.gun_p2.clear();
             push(Action::SettingsChanged);
             break;
+        case 'N':   // (as ESC while picking: the launcher's ESC closes the game)
+            if (!gun_step_) return false;
+            [[fallthrough]];
         case VK_ESCAPE: case VK_BACK:
             if (gun_step_ == 2) guns_done(false);                   // only player 1's gun
             else if (gun_step_ == 1 && setup_first_) guns_done(true);   // no light guns: mouse play
@@ -2215,9 +2218,9 @@ void Frontend::draw_gun_test(bool over_game) {
         text(TITLE, U(48), gun_step_ == 1 ? L"FIRE PLAYER 1'S GUN" : L"FIRE PLAYER 2'S GUN", margin + U(10), y, 0,
              {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820u : 0x20B8D8u, INK, U(3)});
         y += U(64);
-        text(BODY, U(23), gun_step_ == 1 ? (setup_first_ ? L"Pull its trigger, wherever it points.  ESC: no light guns (play with the mouse; set them up later in Options > CONTROLS)"
-                                                         : L"Pull its trigger, wherever it points.  RELOAD (or ESC): leave the guns as they were")
-                                         : L"Now the other gun.  RELOAD (or ESC): only one gun",
+        text(BODY, U(23), gun_step_ == 1 ? (setup_first_ ? L"Pull its trigger, wherever it points.  N (or ESC): no light guns (play with the mouse; set them up later in Options > CONTROLS)"
+                                                         : L"Pull its trigger, wherever it points.  RELOAD (or N): leave the guns as they were")
+                                         : L"Now the other gun.  RELOAD (or N): only one gun",
              margin + U(10), y, 0, {0xD8D1BD, 0xD8D1BD});
     } else {
         text(BODY, U(23), L"Move and fire each gun: its mark follows it, and its row lights up.  "
@@ -2301,7 +2304,7 @@ void Frontend::draw_gun_test(bool over_game) {
         if (!guns_pinned && (!settings.gun_p1.empty() || !settings.gun_p2.empty())) prompt(x, py, L"Y", L"R", L"AUTOMATIC");
         back_rect_ = prompt(x, py, L"B", L"RELOAD", L"BACK");
     } else {
-        prompt(x, py, L"B", gun_step_ == 1 && setup_first_ ? L"ESC" : L"RELOAD",
+        prompt(x, py, L"B", gun_step_ == 1 && setup_first_ ? L"N" : L"RELOAD",
                gun_step_ == 1 ? (setup_first_ ? L"NO LIGHT GUNS" : L"CANCEL") : L"ONLY ONE GUN");
     }
 }

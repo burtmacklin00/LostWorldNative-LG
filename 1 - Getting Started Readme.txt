@@ -32,9 +32,10 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
 ---------------------------------------------------------------------
 
  The first time the game starts, it asks you to pull the trigger on
- the PLAYER 1 gun, then on the PLAYER 2 gun (RELOAD or Esc at that
- point: only one gun; Esc at the first one: no light guns, mouse
- play). It saves LightgunHID.ini in this folder with each gun's ID
+ the PLAYER 1 gun, then on the PLAYER 2 gun (RELOAD or N at that
+ point: only one gun; N at the first one: no light guns, mouse
+ play; Esc does the same when the game was started without the
+ launcher, whose Esc closes the game). It saves LightgunHID.ini in this folder with each gun's ID
  (VID&PID). To set them up again: Options > CONTROLS > LIGHT GUN SETUP.
 
  With LightgunHID.ini:
