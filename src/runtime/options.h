@@ -49,7 +49,6 @@ struct Options {
     bool soft = true;                // --no-soft: hard edges where translucent effects meet geometry
     bool lightning = true;           // --no-lightning: no lightning in stormy fog
     int rain = 2;                    // --rain off|light|heavy: rain where the game has its own
-    bool random_weather = true;      // menu option: random weather in RANDOM SPAWNS and survival (weather.h)
     int weather = -1;                // --weather NAME: this weather in any game (Weather; -1 = none)
     bool shadows = true;             // --no-shadows: no sun shadows
     int ray_tracing = 2;             // --rt off|shadows|ao (--no-rt): traced sun shadows (1) and ambient occlusion (2)
@@ -62,6 +61,7 @@ struct Options {
     float volume = 5.0f;             // --volume: output gain
     int speakers = 0;                // --speakers stereo|surround|headphones: 0, 1, 2 (AudioStream::Speakers)
     int rear_boost = 0;              // --rear-boost: dB on the rear pair (-6, -3, 0, 3, 6, 9, 12)
+    int weather_sound = 2;           // --weather-sound off|low|medium|high: rain and thunder
     bool cubic_samples = true;       // --linear-samples: the SCSP's own linear interpolation instead of cubic
     std::string wav_path;            // --wav: record the sound output
     bool several_mice = true;        // a second mouse is player 2's gun (--one-mouse: all move player 1's)

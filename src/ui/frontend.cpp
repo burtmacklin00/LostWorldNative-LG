@@ -2,6 +2,7 @@
 
 #include "../runtime/bosses.h"
 #include "../runtime/survival.h"
+#include "../runtime/weather.h"
 #include "crosshair_file.h"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <cwctype>
 #include <ctime>
+#include <iterator>
 #include <thread>
 
 #include <shellapi.h>
@@ -143,6 +145,22 @@ using FS = FrontendSettings;
 const std::vector<const char*> LEVEL_WORDS = {"off", "low", "medium", "high"};
 const std::vector<const wchar_t*> LEVELS = {L"OFF", L"LOW", L"MEDIUM", L"HIGH"};
 const std::vector<std::pair<const char*, int>> ON_IS_2 = {{"1", 2}, {"on", 2}, {"true", 2}};   // once a switch
+
+// The WEATHER screen before RANDOM SPAWNS and survival, in its order
+struct WeatherChoice {
+    const wchar_t *name, *hint;
+    int weather;   // runtime/weather.h
+};
+const WeatherChoice WEATHER_CHOICES[] = {
+    {L"RANDOM", L"A new weather every stage", WEATHER_RANDOM},
+    {L"SUNNY", L"Clear sky and a strong sun", WEATHER_SUNNY},
+    {L"CLOUDY", L"Grey sky, soft light and a light haze", WEATHER_CLOUDY},
+    {L"FOG", L"Thick fog over the jungle", WEATHER_FOG},
+    {L"RAIN", L"Rain all the way", WEATHER_RAIN},
+    {L"STORM", L"Dark sky, heavy rain and lightning", WEATHER_STORM},
+    {L"ORIGINAL", L"The arcade game's own weather", WEATHER_NONE},
+};
+constexpr int WEATHER_CHOICE_COUNT = int(std::size(WEATHER_CHOICES));
 }  // namespace
 
 // In each tab the rows are shown in this order
@@ -151,8 +169,8 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
         // DISPLAY
         {.id = OPT_QUALITY, .tab = DISPLAY_TAB, .label = L"QUALITY", .kind = CHOICE,   // FrontendSettings::quality()
          .shown = {L"LOW", L"MEDIUM", L"HIGH", L"ULTRA", L"CUSTOM"},
-         .hints = {L"Laptops and older cards: 75% resolution, half rate on fast monitors, original sky, no shadows or AO",
-                   L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors",
+         .hints = {L"Laptops and integrated graphics: 75% resolution, half rate, no MSAA, 2x anisotropic, square 2D pixels, original sky, no shadows, AO or surface detail",
+                   L"Mid-range cards (RTX 3060, RX 6600): no ray tracing, half rate on fast monitors, MSAA 2x, 4x anisotropic",
                    L"Fast cards: ray traced sun shadows and every effect",
                    L"Everything on: ray traced sun shadows and ambient occlusion",
                    L"Your own mix of the options.  Pick a level to set the costly ones at once"}},
@@ -177,8 +195,18 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
          .words = {"original", "smooth"}, .other = 1, .kind = CHOICE, .shown = {L"ORIGINAL", L"SMOOTH"},
          .hint = L"Smooth: the 3D is also drawn between the game's 57.5 frames, at your monitor's refresh rate"},
         {.id = OPT_AA, .tab = DISPLAY_TAB, .label = L"ANTI-ALIASING", .key = "aa", .number = &FS::aa,
-         .words = {"msaa", "dlaa", "none"}, .also = {{"off", 2}}, .kind = CHOICE, .shown = {L"MSAA 4X", L"DLAA", L"OFF"},
-         .hint = L"Edge smoothing (MSAA, NVIDIA DLAA or off).  Applies on the next start"},
+         .words = {"msaa", "dlaa", "none"}, .also = {{"off", 2}}, .kind = CHOICE, .shown = {L"MSAA", L"DLAA", L"OFF"},
+         .hint = L"Edge smoothing: MSAA (the samples below), NVIDIA DLAA or none.  DLAA applies on the next start"},
+        {.id = OPT_MSAA, .tab = DISPLAY_TAB, .label = L"MSAA SAMPLES", .key = "msaa", .number = &FS::msaa, .lo = 2, .hi = 8,
+         .kind = CHOICE, .shown = {L"2X", L"4X", L"8X"}, .steps = {2, 4, 8}, .levels = true,
+         .hint = L"Samples per pixel of the edge smoothing: more is smoother and costs more, above all on integrated graphics"},
+        {.id = OPT_ANISO, .tab = DISPLAY_TAB, .label = L"ANISOTROPIC FILTER", .key = "anisotropic", .number = &FS::aniso,
+         .lo = 0, .hi = 16, .kind = CHOICE, .shown = {L"OFF", L"2X", L"4X", L"8X", L"16X"}, .steps = {0, 2, 4, 8, 16},
+         .levels = true,
+         .hint = L"Texture detail on the ground and at grazing angles, with the game's mipmaps.  OFF: the original look, no mipmaps"},
+        {.id = OPT_FILTER_2D, .tab = DISPLAY_TAB, .label = L"2D FILTER", .key = "filter_2d", .flag = &FS::smooth_2d,
+         .words = {"pixels", "smooth"}, .other = 1, .kind = CHOICE, .shown = {L"PIXELS", L"SMOOTH"},
+         .hint = L"Smooth: the HUD and the 2D layers upscaled with xBR (edges redrawn); Pixels: square pixels, cheaper"},
         {.id = OPT_TEXT, .tab = DISPLAY_TAB, .label = L"HD TEXT", .key = "hd_text", .flag = &FS::hd_text, .kind = TOGGLE,
          .hint = L"Sharp fonts for menus, captions and score instead of the original pixels"},
         {.id = OPT_MENU_FX, .tab = DISPLAY_TAB, .label = L"MENU EFFECTS", .key = "menu_effects", .flag = &FS::menu_effects,
@@ -230,9 +258,6 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
         {.id = OPT_RAIN, .tab = ATMOSPHERE_TAB, .label = L"RAIN", .key = "rain", .number = &FS::rain,
          .words = {"off", "light", "heavy"}, .also = ON_IS_2, .kind = CHOICE, .shown = {L"OFF", L"LIGHT", L"HEAVY"},
          .levels = true, .hint = L"Where it rains in the game: a dense fall of drops, wet ground, puddles and ripples"},
-        {.id = OPT_WEATHER, .tab = ATMOSPHERE_TAB, .label = L"RANDOM WEATHER", .key = "random_weather",
-         .flag = &FS::random_weather, .kind = TOGGLE,
-         .hint = L"RANDOM SPAWNS and SURVIVAL: sun, clouds, fog, rain or a storm, new every stage and every run"},
         {.id = OPT_SOFT, .tab = ATMOSPHERE_TAB, .label = L"SOFT PARTICLES", .key = "soft_particles", .flag = &FS::soft,
          .kind = TOGGLE, .hint = L"Smoke, fire and explosions blend softly where they touch the ground and walls"},
         // AUDIO
@@ -249,6 +274,9 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
         {.id = OPT_REAR, .tab = AUDIO_TAB, .label = L"REAR LEVEL", .key = "rear_boost", .number = &FS::rear_boost, .lo = -6,
          .hi = 12, .grain = 3, .kind = CHOICE, .steps = {-6, -3, 0, 3, 6, 9, 12}, .text = decibels,
          .hint = L"Rear speakers quieter or louder, as the cabinet's seat speakers: T-Rex roars and many effects"},
+        {.id = OPT_WEATHER_SOUND, .tab = AUDIO_TAB, .label = L"WEATHER SOUND", .key = "weather_sound",
+         .number = &FS::weather_sound, .words = LEVEL_WORDS, .also = ON_IS_2, .kind = CHOICE, .shown = LEVELS,
+         .levels = true, .hint = L"Rain and thunder when the weather brings them, and thunder after every lightning flash"},
         {.id = OPT_SAMPLES, .tab = AUDIO_TAB, .label = L"SAMPLE QUALITY", .key = "sample_interpolation",
          .flag = &FS::cubic_samples, .words = {"linear", "cubic"}, .other = 1, .kind = CHOICE,
          .shown = {L"ORIGINAL", L"SMOOTH"},
@@ -304,7 +332,10 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
         {.id = OPT_SUBS, .tab = GAME_TAB, .label = L"SUBTITLES", .key = "subtitles", .number = &FS::subtitles,
          .words = {"off", "english", "japanese"}, .kind = CHOICE, .shown = {L"OFF", L"ENGLISH", L"JAPANESE"},
          .hint = L"Captions of what the characters say"},
-        // Only in the file: the guns picked in GUN TEST
+        // Only in the file: the WEATHER last picked before a run (in WEATHER_CHOICES' order)
+        {.id = NO_ROW, .key = "run_weather", .number = &FS::run_weather,
+         .words = {"random", "sunny", "cloudy", "fog", "rain", "storm", "original"}},
+        // and the guns picked in GUN TEST
         {.id = NO_ROW, .key = "gun_p1", .path = &FS::gun_p1},
         {.id = NO_ROW, .key = "gun_p2", .path = &FS::gun_p2},
     };
@@ -338,55 +369,6 @@ void FrontendSettings::save(const char* path) const {
     for (const Frontend::Setting& d : Frontend::setting_table())
         if (d.key) fprintf(f, "%s = %s\n", d.key, d.write(*this).c_str());
     fclose(f);
-}
-
-namespace {
-// What each QUALITY level sets (the other options are left as they are)
-struct QualityLevel {
-    int scale;
-    bool half_rate;
-    int ray_tracing;   // 0 off, 1 sun shadows, 2 also ambient occlusion
-    bool ao, shadows, shafts, soft, sky, relief;
-    int bloom;
-};
-const QualityLevel QUALITY_LEVELS[4] = {
-    // LOW: laptops and older cards. Measured on an RTX 5070 Ti at 1440p, the
-    // costly ones are the ambient occlusion, the 3D resolution, the procedural
-    // sky (its composition) and the sun shadows; the rest cost little
-    {75, true, 0, false, false, false, true, false, true, 1},
-    // MEDIUM: mid-range cards (RTX 3060, RX 6600)
-    {100, true, 0, true, true, true, true, true, true, 1},
-    // HIGH
-    {100, false, 1, true, true, true, true, true, true, 2},
-    // ULTRA: everything (the defaults)
-    {100, false, 2, true, true, true, true, true, true, 2},
-};
-}  // namespace
-
-void FrontendSettings::set_quality(int q) {
-    if (q < LOW || q > ULTRA) return;
-    const QualityLevel& l = QUALITY_LEVELS[q];
-    scale = l.scale;
-    half_rate = l.half_rate;
-    ray_tracing = l.ray_tracing;
-    ao = l.ao;
-    shadows = l.shadows;
-    shafts = l.shafts;
-    soft = l.soft;
-    sky = l.sky;
-    relief = l.relief;
-    bloom = l.bloom;
-}
-
-int FrontendSettings::quality() const {
-    for (int q = LOW; q <= ULTRA; q++) {
-        const QualityLevel& l = QUALITY_LEVELS[q];
-        if (scale == l.scale && half_rate == l.half_rate && ray_tracing == l.ray_tracing && ao == l.ao &&
-            shadows == l.shadows && shafts == l.shafts && soft == l.soft && sky == l.sky && relief == l.relief &&
-            bloom == l.bloom)
-            return q;
-    }
-    return CUSTOM;
 }
 
 // ---- Setup ----
@@ -518,8 +500,14 @@ std::vector<Frontend::Item> Frontend::option_items(const FrontendSettings& s) co
             it.pos = q == FrontendSettings::CUSTOM ? -1 : q, it.count = 4;
             break;
         }
-        case OPT_AA:
-            if (s.aa != aa_at_launch) it.hint = L"Edge smoothing.  Takes effect the next time the game starts";
+        case OPT_AA:   // MSAA and off change at once; DLAA starts (or stops) with the game
+            if ((s.aa == 1) != (aa_at_launch == 1)) it.hint = L"Edge smoothing.  DLAA takes effect the next time the game starts";
+            break;
+        case OPT_MSAA:
+            if (s.aa != 0) {
+                it.enabled = false;
+                it.hint = L"Only with ANTI-ALIASING: MSAA";
+            }
             break;
         case OPT_RT:
             if (!rt_available) {
@@ -581,6 +569,18 @@ std::vector<Frontend::Item> Frontend::items() const {
                  L"Dinosaurs come from new places and at new times, and every boss takes a different number of shots.  "
                  L"Different every game"},
                 {BACK, L"BACK", L"", L"Return to the mode select"}};
+    }
+    case Screen::Weather: {
+        std::vector<Item> list;
+        for (int i = 0; i < WEATHER_CHOICE_COUNT; i++) {
+            std::wstring hint = WEATHER_CHOICES[i].hint;
+            if (weather_for_survival_ && WEATHER_CHOICES[i].weather == WEATHER_RANDOM) hint = L"A new weather every run";
+            if (WEATHER_CHOICES[i].weather != WEATHER_NONE)
+                hint += L".  Outdoors in daylight; caves and the night keep the game's own";
+            list.push_back({WEATHER_ENTRY, WEATHER_CHOICES[i].name, L"", hint, true, i});
+        }
+        list.push_back({BACK, L"BACK", L"", weather_for_survival_ ? L"Return to the arenas" : L"Return to CLASSIC ARCADE"});
+        return list;
     }
     case Screen::Pause:
         if (boss_mode)
@@ -680,6 +680,10 @@ void Frontend::open_boss_list(bool over_game) {
             if (ready(i)) selected_ = i;
 }
 
+int Frontend::run_weather() const {
+    return WEATHER_CHOICES[std::clamp(settings.run_weather, 0, WEATHER_CHOICE_COUNT - 1)].weather;
+}
+
 void Frontend::select(int index) {
     if (index != selected_) dirty_ = true;
     selected_ = index;
@@ -695,7 +699,12 @@ void Frontend::activate(const Item& it, int dir) {
     case QUIT_TO_MENU: push(Action::QuitToMenu); break;
     case CLASSIC: open(Screen::Classic); selected_ = random_spawns ? 1 : 0; break;
     case ARCADE: random_spawns = false; push(Action::StartArcade); break;
-    case RANDOM: random_spawns = true; push(Action::StartArcade); break;
+    case RANDOM:   // the weather first
+        random_spawns = true;
+        weather_for_survival_ = false;
+        open(Screen::Weather);
+        selected_ = std::clamp(settings.run_weather, 0, WEATHER_CHOICE_COUNT - 1);
+        break;
     case BOSS: open_boss_list(false); break;
     case SURVIVAL: {
         open(Screen::Survival);
@@ -705,7 +714,17 @@ void Frontend::activate(const Item& it, int dir) {
         locked_notice_ = !any;
         break;
     }
-    case SURVIVAL_ENTRY: survival_choice = it.index; push(Action::StartSurvival); break;
+    case SURVIVAL_ENTRY:   // the weather first
+        survival_choice = it.index;
+        weather_for_survival_ = true;
+        open(Screen::Weather);
+        selected_ = std::clamp(settings.run_weather, 0, WEATHER_CHOICE_COUNT - 1);
+        break;
+    case WEATHER_ENTRY:   // kept for next time
+        settings.run_weather = it.index;
+        push(Action::SettingsChanged);
+        push(weather_for_survival_ ? Action::StartSurvival : Action::StartArcade);
+        break;
     case BOSS_ENTRY: boss_choice = it.index; push(Action::StartBoss); break;
     case PREPARE: push(Action::PrepareBosses); break;
     case RETRY: push(Action::StartBoss); break;
@@ -763,6 +782,15 @@ void Frontend::back() {
     case Screen::Records: open(Screen::Main); selected_ = 2; break;   // onto Records
     case Screen::Survival: open(Screen::Play); selected_ = 2; break;   // onto Survival
     case Screen::Classic: open(Screen::Play); selected_ = 0; break;    // onto Classic arcade
+    case Screen::Weather:   // onto the arena, or RANDOM SPAWNS
+        if (weather_for_survival_) {
+            open(Screen::Survival);
+            selected_ = survival_choice;
+        } else {
+            open(Screen::Classic);
+            selected_ = 1;
+        }
+        break;
     case Screen::Pause: push(Action::Resume); break;
     case Screen::Main: selected_ = 3; dirty_ = true; break;   // onto Quit
     case Screen::GunTest: {   // onto its row in CONTROLS
@@ -1703,6 +1731,7 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         }
         const wchar_t* sub = screen_ == Screen::Play ? L"SELECT MODE" : screen_ == Screen::Survival ? L"SELECT ARENA"
                              : screen_ == Screen::Classic ? L"CLASSIC ARCADE"
+                             : screen_ == Screen::Weather ? L"WEATHER"
                              : boss ? L"SELECT BOSS" : nullptr;
         if (sub) {
             text(MONO, U(24), sub, tx, y0, talign, {0xF0C070, 0xE0A050});

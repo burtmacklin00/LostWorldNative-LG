@@ -35,6 +35,13 @@ public:
     std::string device_name() const { return device_name_; }
     // The device has ray queries and acceleration structures (ray traced effects)
     bool ray_query() const { return ray_query_; }
+    // What else the GPU offers, asked before creating the device (the renderer
+    // adapts instead of failing): arrays of textures indexed per polygon
+    // (descriptor indexing: the texture pack and the 2D replacements) and
+    // anisotropic samplers
+    bool descriptor_indexing() const { return descriptor_indexing_; }
+    bool anisotropy() const { return anisotropy_; }
+    const VkPhysicalDeviceLimits& limits() const { return limits_; }
     HWND hwnd() const { return hwnd_; }
     void toggle_fullscreen();
     bool fullscreen() const { return fullscreen_; }
@@ -61,6 +68,11 @@ public:
     VkQueue queue() const { return queue_; }
     VkCommandPool pool() const { return pool_; }
     VkFormat swap_format() const { return format_; }
+    // Compiled pipelines kept between runs (save/pipeline_cache.bin): every
+    // vkCreateGraphicsPipelines goes through it. save_pipeline_cache() writes
+    // the file if it grew (after start-up and from shutdown())
+    VkPipelineCache pipeline_cache() const { return pipeline_cache_; }
+    void save_pipeline_cache();
     uint32_t find_memory(uint32_t type_bits, VkMemoryPropertyFlags flags) const;
     // Runs one-off commands (initial uploads) and waits
     void run_once(const std::function<void(VkCommandBuffer)>& fn);
@@ -135,7 +147,11 @@ private:
     LastFrame last_;
     bool present_wait_ = false;
     VkPresentModeKHR present_mode_ = VK_PRESENT_MODE_MAX_ENUM_KHR;   // of the swapchain (printed when it changes)
-    bool ray_query_ = false;
+    bool ray_query_ = false, descriptor_indexing_ = false, anisotropy_ = false;
+    bool khr_dynamic_rendering_ = false;   // a Vulkan 1.2 driver: dynamic rendering through the extension
+    VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
+    size_t pipeline_cache_saved_ = 0;   // bytes of the file as last loaded or written
+    VkPhysicalDeviceLimits limits_{};
     uint64_t present_id_ = 0, swapchain_first_id_ = 1;   // the first id presented to the current swapchain
     std::shared_mutex swapchain_mutex_;   // wait_present() against the swapchain being replaced
     VkBuffer capture_buffer_ = VK_NULL_HANDLE;

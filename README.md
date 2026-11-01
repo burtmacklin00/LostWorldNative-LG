@@ -87,7 +87,9 @@ versions of the game will not work.
 
 ## Install
 
-You need Windows 10/11 (64-bit), a Vulkan GPU, [Python 3](https://www.python.org/downloads/)
+You need Windows 10/11 (64-bit), a GPU with a Vulkan 1.3 driver, or a 1.2 one
+that offers `VK_KHR_dynamic_rendering` (most cards and integrated graphics from 2016 on,
+with current drivers; the console's first `[vulkan]` line says what yours offers), [Python 3](https://www.python.org/downloads/)
 and [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
 with the *Desktop development with C++* workload.
 
@@ -134,11 +136,6 @@ gun and then player 2's there to keep them as those players' guns from then on.
 Want your own crosshair? Drop a `crosshair.png` (with transparency) next to `LostWorld.exe`, and
 `crosshair_p2.png` for player 2 if you want a different one. It is centred on the gun, and its size
 is in pixels of a 1080p screen (it scales with the window).
-
-The menus come with their own background and logo (`res/menu/`). You can swap them for files of your
-own in `third_party/menu/` (not in the repository): `background.png` (or `.jpg`) behind the menus;
-`logo.png`, the title over the background (transparent PNG); `music.mp3` looped in the menus
-(**Options > Audio > Menu music**); and `sega.png`, SEGA's logo for the credit at the bottom left.
 
 ## More
 

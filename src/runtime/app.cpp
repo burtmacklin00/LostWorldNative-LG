@@ -15,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <map>
@@ -34,6 +33,7 @@
 #include "ppc_rt.h"
 #include "raw_mice.h"
 #include "rom_zip.h"
+#include "settings_bridge.h"
 #include "runtime.h"
 #include "stats.h"
 #include "random_spawns.h"
@@ -44,6 +44,7 @@
 #include "weather.h"
 #include "../audio/sound_board.h"
 #include "../common/paths.h"
+#include "../common/worker.h"
 #include "../ui/achievement_toast.h"
 #include "../ui/crosshair_file.h"
 #include "../ui/frontend.h"
@@ -112,106 +113,15 @@ static void dump_scene(const R3DScene& scene, const uint32_t* back, const uint32
     fclose(f);
 }
 
-// Menu WIDESCREEN 4:3, 16:9, 21:9. Ultrawide monitors are 2.37 (2560x1080) to
-// 2.39 (3440x1440), wider than 21/9 = 2.33, so 21:9 allows up to 2.4
-static const float MAX_ASPECT[3] = {4.0f / 3.0f, 16.0f / 9.0f, 2.4f};
-static int aspect_level(float max_aspect) { return max_aspect < 1.5f ? 0 : max_aspect < 2.0f ? 1 : 2; }
-static const float BLOOM_STRENGTH[4] = {0.0f, 0.6f, 1.0f, 1.6f};   // menu levels OFF, LOW, MEDIUM, HIGH
+static const float WEATHER_SOUND_LEVEL[4] = {0.0f, 0.5f, 1.0f, 1.6f};   // WEATHER SOUND: OFF, LOW, MEDIUM, HIGH
 
-// The menu's settings as the options the game runs with: from save/settings.ini
-// at the start (the command line then has the last word) and from the menu
-// while the game runs. The anti-aliasing is only read at the start
-static void options_from_settings(const FrontendSettings& s, Options& o) {
-    o.volume = float(s.volume);
-    o.speakers = s.speakers;
-    o.cubic_samples = s.cubic_samples;
-    o.rear_boost = s.rear_boost;
-    o.dlaa = s.aa == 1;
-    if (s.aa == 2) o.msaa = 1;
-    o.supersample = s.scale / 100.0f;
-    o.half_rate = s.half_rate;
-    o.frame_cap = s.frame_cap;
-    o.vsync = s.vsync;
-    if (s.aspect != aspect_level(o.max_aspect)) o.max_aspect = MAX_ASPECT[s.aspect];   // --aspect 2.6 stays as 21:9
-    o.haze = s.haze ? 1.0f : 0.0f;
-    o.bloom = BLOOM_STRENGTH[s.bloom];
-    o.ao = s.ao ? 1.0f : 0.0f;
-    o.sky_procedural = s.sky;
-    o.sun = s.sun;
-    o.shadows = s.shadows;
-    o.ray_tracing = s.ray_tracing;
-    o.shafts = s.shafts;
-    o.soft = s.soft;
-    o.lightning = s.lightning;
-    o.rain = s.rain;
-    o.random_weather = s.random_weather;
-    o.hdr = s.hdr;
-    o.rim = s.rim;
-    o.relief = s.relief;
-    o.sharpen = s.sharpen;
-    o.modern_torch = s.torch;
-    o.classic_text = !s.hd_text;
-    o.subtitles = s.subtitles;
-    o.show_crosshair = s.crosshair;
-    o.custom_crosshair = s.crosshair_style == 1;
-    o.crosshair_hide = s.crosshair_hide;
-    o.free_play = s.free_play;
-    o.trigger_start = s.trigger_start;
-    o.all_arenas = s.all_arenas;
-    o.ammo = s.ammo;
-    o.menu_effects = s.menu_effects;
-    o.interp = s.smooth;
-    o.several_mice = s.second_mouse;
-    o.saturation = s.saturation / 100.0f;
-    o.gamma = s.gamma / 100.0f;
-}
-
-// And back: what the menu shows at the start, the file's settings with the
-// command line's options over them
-static void settings_from_options(const Options& o, FrontendSettings& s) {
-    s.volume = std::clamp(int(o.volume + 0.5f), 0, 10);
-    s.speakers = std::clamp(o.speakers, 0, 2);
-    s.cubic_samples = o.cubic_samples;
-    s.rear_boost = std::clamp(o.rear_boost / 3 * 3, -6, 12);
-    s.aa = o.dlaa ? 1 : o.msaa <= 1 ? 2 : 0;
-    s.scale = FrontendSettings::SCALES[0];   // the nearest step at or below
-    for (int sc : FrontendSettings::SCALES)
-        if (sc <= int(o.supersample * 100 + 0.5f)) s.scale = sc;
-    s.half_rate = o.half_rate;
-    s.frame_cap = o.frame_cap;
-    s.vsync = o.vsync;
-    s.aspect = aspect_level(o.max_aspect);   // --aspect 2.6 shows as 21:9 and is kept until changed
-    s.haze = o.haze > 0;
-    s.bloom = o.bloom <= 0 ? 0 : o.bloom < 0.8f ? 1 : o.bloom < 1.3f ? 2 : 3;
-    s.ao = o.ao > 0;
-    s.sky = o.sky_procedural;
-    s.sun = o.sun;
-    s.shadows = o.shadows;
-    s.ray_tracing = o.ray_tracing;
-    s.shafts = o.shafts;
-    s.soft = o.soft;
-    s.lightning = o.lightning;
-    s.rain = o.rain;
-    s.random_weather = o.random_weather;
-    s.hdr = o.hdr;
-    s.rim = o.rim;
-    s.relief = o.relief;
-    s.sharpen = o.sharpen;
-    s.torch = o.modern_torch;
-    s.hd_text = !o.classic_text;
-    s.subtitles = o.subtitles;
-    s.crosshair = o.show_crosshair;
-    s.crosshair_style = o.custom_crosshair ? 1 : 0;
-    s.crosshair_hide = o.crosshair_hide;
-    s.free_play = o.free_play;
-    s.trigger_start = o.trigger_start;
-    s.all_arenas = o.all_arenas;
-    s.ammo = o.ammo;
-    s.menu_effects = o.menu_effects;
-    s.smooth = o.interp;
-    s.second_mouse = o.several_mice;
-    s.saturation = std::clamp(int(o.saturation * 100 + 0.5f), 0, 200);
-    s.gamma = std::clamp(int(o.gamma * 100 + 0.5f), 50, 150);
+// The sound options (at the start and from the menu)
+static void apply_sound_options(const Options& o) {
+    g_sound.set_volume(o.volume);
+    Scsp::set_cubic(o.cubic_samples);
+    g_sound.set_rear_boost(o.rear_boost);
+    g_sound.weather().set_level(WEATHER_SOUND_LEVEL[std::clamp(o.weather_sound, 0, 3)]);
+    g_audio.set_speakers(AudioStream::Speakers(o.speakers));
 }
 
 // Keyboard and mouse (only while the window is active):
@@ -742,9 +652,9 @@ static std::string full_path(const std::string& path) {
 }
 
 // display.ini beside LostWorld.exe: an optional bezel. The 4x3 and 16x9
-// folders hold one each; "Display - 4x3.bat" and "Display - 16x9.bat" copy
-// them in, and set Settings > WIDESCREEN in save\settings.ini. An Aspect line
-// here wins over that setting; command-line options win over both.
+// folders hold one each; "2 - Display - 4x3.exe" and "2 - Display - 16x9.exe"
+// copy them in, and set Settings > WIDESCREEN in save\settings.ini. An Aspect
+// line here wins over that setting; command-line options win over both.
 //   [Display]
 //   Aspect = 4:3          (optional: 4:3 the arcade picture, 16:9, 21:9)
 //   Bezel = bezel.png     (drawn over the screen; its transparent hole shows the game;
@@ -787,7 +697,6 @@ static void load_bezel(R3DRenderer& renderer) {
     }
     printf("[video] no bezel: %s\n", g_bezel_path.c_str());
 }
-
 
 // The zip the ROM came from (empty when it came from a data folder): the boss
 // state makers are started on the same ROM
@@ -892,6 +801,1736 @@ static bool load_game_rom(std::vector<uint8_t>& sound_program, std::vector<uint8
     return false;
 }
 
+// The 2D layers of one vblank as the renderer takes them (App::compose_2d)
+struct Layers2D {
+    uint64_t frame = ~0ull;   // the vblank
+    std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);   // its layer memory
+    std::vector<uint32_t> back = std::vector<uint32_t>(BACK_W * SCREEN_H),
+                          front = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          text_cells = std::vector<uint32_t>(TextHD::ROW_TEXELS * TextHD::ROWS),
+                          sky_coords = std::vector<uint32_t>(TileGen::SKY_COORDS_W * TileGen::SKY_COORDS_H);
+    std::vector<RgbaImage> overlays, sky_pictures;   // new pictures for the GPU slots
+    bool hud_band = false;
+    float overlay_brightness = 1;
+    std::vector<int32_t> back_rows = std::vector<int32_t>(SCREEN_H * 3);   // layer and scroll per row (TileGen)
+    uint64_t shift_from = ~0ull, shift_to = ~0ull;   // this 2D frame and the one composed before it
+};
+// A game frame made ready for the screen ahead of time: its 3D scene and
+// the 2D layers of its vblank (App::prepare_frames)
+struct Prepared {
+    std::shared_ptr<const R3DFrameState> state;
+    R3DScene scene;
+    Layers2D layers;
+    uint64_t serial = 0;
+    double ready_at = 0;   // when it was ready
+    double period = 1.0 / 57.524;   // since the frame built before it (where its vertices come from)
+};
+// The 2D layers of a vblank as the game left them (App::snaps)
+struct Snapshot2D {
+    uint64_t frame = ~0ull;
+    std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);
+    std::array<uint64_t, TILEGEN_PAGES> serial;   // g_video_page_serial of each page copied
+    Snapshot2D() { serial.fill(~0ull); }
+};
+// New pictures for the GPU slots of a prepared frame (App::ready_pictures)
+struct NewPictures {
+    uint64_t serial = 0;
+    std::vector<RgbaImage> replacements, overlays, sky;
+};
+
+// The window: the game runs on its own thread at real speed; this thread draws
+// the latest image at the monitor's refresh rate (vsync). main() hands over
+// to App::init, App::run and App::shutdown; what was its state is here
+struct App {
+    FrontendSettings ini;   // save/settings.ini (main)
+    bool survival_cli = false;   // --survival STAGE:ZONE
+    int cli_stage = 0, cli_zone = 0;
+
+    VkPresenter presenter;
+    // --replay on a folder (recorded with LW_FILM): its snapshots one after
+    // another, each captured to out/film_out, so effects that depend on the
+    // camera motion can be compared frame by frame
+    std::vector<std::string> film;
+    size_t film_pos = 0;
+    R3DRenderer renderer;
+    R3DSceneBuilder builder;
+    TexturePack pack;
+    // 2D replacements: the foreground (GPU slots 1-27) and the layers below the
+    // 3D image (28-55; the backdrops of SkyPack use 56-63)
+    Pack2D pack2d, pack2d_back;
+    SkyPack sky;   // sky and other backdrops below the 3D image
+    // Interpolation of the back layers (the sky, renderer's SkyMotion): the
+    // layer and scroll of each row of the 2D frame composed, and the vblanks
+    // of the last two 2D frames composed (the sky goes on with the camera
+    // while the 3D goes between the 3D frames of those same vblanks)
+    std::vector<int32_t> back_rows = std::vector<int32_t>(SCREEN_H * 3);
+    uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
+    TextHD text;   // menus, captions and score drawn from vector fonts
+    std::atomic<bool> capture_2d{false};   // F12 / --shot: the next 2D composition is saved
+    bool f12_was_down = false, f9_was_down = false;
+    R3DScene own_scene;   // built on this thread (no interpolation)
+    const R3DScene* scene = &own_scene;
+    Layers2D own_layers;   // composed on this thread (no 3D, or no interpolation)
+    const Layers2D* layers_shown = &own_layers;
+    std::shared_ptr<Prepared> built_prep, layers_prep;   // the prepared frames in use (scene, 2D layers)
+    std::shared_ptr<const R3DFrameState> built;
+    double frame_period = 1.0 / 57.524;   // between the frame built and the one before
+    // Interpolation timing: the last frame the game published, the time
+    // between its last two frames and how late after its vblank a frame gets
+    // here (the game's CPU time plus this loop's wait for it; follows the
+    // latest frames, easing down slowly)
+    std::shared_ptr<const R3DFrameState> seen;
+    double next_period = 1.0 / 57.524, lateness = 0.004, lateness_rose = 0, lateness_spike = -100;
+    DisplayClock display_clock;
+
+    std::array<Snapshot2D, 4> snaps;   // the 2D layers of the last vblanks (snaps_mutex)
+    size_t newest_snap = 0;
+    std::mutex snaps_mutex;
+    // Scratch layers of the 2D composition (compose_2d)
+    std::vector<uint32_t> front_raw = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          front_raw_top = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          back_raw = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          back_raw_top = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          back_under = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
+                          front_under = std::vector<uint32_t>(SCREEN_W * SCREEN_H);
+    std::vector<uint16_t> tex_rows;
+    uint64_t shown = ~0ull, presents = 0;
+    double scene_total = 0;   // seconds of 2D composition and scene building since the last title
+    ULONGLONG last_title = 0;
+
+    // PC front end: main menu at launch, pause menu on Esc
+    Frontend frontend;
+    // The menus are being driven with a gamepad: no mouse pointer until the mouse moves
+    bool pad_in_menu = false;
+    UiOverlay ui;
+    std::vector<uint32_t> ui_pixels;
+    float haze_strength = 1, ao_strength = 1;   // of --haze and --ao, for the options menu
+
+    // Boss mode: each fight starts from a game state in save/boss, made the
+    // first time by LostWorld.exe --make-boss-state N in the background (in
+    // a job object, so they stop with the game)
+    std::vector<HANDLE> boss_makers = std::vector<HANDLE>(BOSS_COUNT, nullptr);
+    HANDLE boss_job = nullptr;
+    int boss_pending = -1;     // picked: loads once the boot screens are skipped
+    bool boss_loading = false; // asked the game thread for it
+    int boss_fight = -1;       // the fight on
+    double boss_over_at = 0;   // when its stage ended or the game was over
+    bool boss_p2_played = false;   // player 2 joined this fight
+    double boss_p2_idle_at = 0;    // since when player 2 has not been playing (CONTINUE screen)
+
+    // Survival mode screens (loading, start, wave counter, results)
+    SurvivalUi survival_ui;
+    UiOverlay survival_layer;
+    std::vector<uint32_t> survival_pixels;
+    bool survival_shown = false;
+    bool confirm_was_down = true;
+    // A run starts from the arcade game at its attract (the home state: kept
+    // the first time, put back the next ones), fast-forwarded and muted
+    // behind the loading screen; Esc on the results goes back to the menu
+    bool survival_cli_pending = false;   // waits for the boot screens
+    bool survival_wait_home = false;
+    uint64_t survival_audio_at = 0;   // audio frames out when the loading began (it stays silent)
+    SurvivalMode survival_last = SurvivalMode::Off;
+
+    // Achievement notices, over the game and under the menus
+    AchievementToast toast;
+    UiOverlay toast_layer;
+    std::vector<uint32_t> toast_pixels;
+    bool toast_shown = false;
+    MenuMusic music;   // over the menus' backdrop, when there is a music file
+    double music_time = 0;
+
+    // Preparation thread: while interpolating, each new game frame is made
+    // ready as soon as the game finishes it, its 3D scene and its 2D layers
+    // side by side, so this thread only draws and keeps up with every
+    // refresh (the two took ~14 ms here, more than a refresh at 120 Hz, and
+    // the images went out unevenly). The interpolation delay follows when
+    // the frames are ready (lateness), so it includes this work
+    std::mutex prep_mutex;    // one composition and one scene build at a time
+    std::mutex ready_mutex;   // ready_frames and ready_pictures
+    // The last frames made ready, oldest first: the picture runs behind the
+    // game by the frames' lateness, so after a slow frame several can be
+    // waiting, and each is taken in turn (its vertices move from the frame
+    // before it, so skipping one would stretch that motion over two)
+    std::deque<std::shared_ptr<Prepared>> ready_frames;
+    // New pictures for the GPU slots, in order: handed over when their frame
+    // (or a later one) is taken, also those of frames never taken
+    std::deque<NewPictures> ready_pictures;
+    std::atomic<bool> prep_on{false}, prep_stop{false};
+    std::atomic<uint64_t> prep_us{0}, prep_frames{0};   // its work, read once a second
+    std::thread prep_thread;
+    Worker layers_worker;   // composes the 2D layers while prep_thread builds the 3D scene
+    // LW_FRAMELOG: a thread notes when each present reaches the screen
+    std::atomic<uint64_t> presented_id{0};
+    std::thread shown_waiter;
+
+    // At most this many images wait for the screen (VK_KHR_present_wait): the
+    // picture goes out that many refreshes after it is drawn (~17 ms at
+    // 120 Hz) instead of after a full swapchain (~32 ms). When refreshes are
+    // missed twice within 2 s (the GPU busier than usual), one more for 10 s.
+    // Debugging aid: LW_QUEUE=N (0 = the whole swapchain)
+    int queue_depth = 2;
+    int queue_extra = 0;
+    double went_out = 0, last_miss = -100;
+    bool repeat_image = false;   // HALF FRAME RATE: this refresh shows the last image again
+    // VSYNC: OFF still draws no more images than the monitor's refreshes:
+    // without a limit the GPU draws thousands a second for nothing and the
+    // game thread falls behind (uneven game frames). Measured with
+    // LW_FRAMELOG on an RTX 5070 Ti at 120 Hz: ~1700 images a second
+    double next_image = 0;
+    HANDLE image_timer = nullptr;
+
+    bool init(int argc, char** argv, bool first_start);   // false: could not start
+    void run();                                            // until the window closes
+    [[noreturn]] void shutdown();
+    // Both threads stop when the loop ends (and with the App, however it ends)
+    void stop_threads();
+    ~App() { stop_threads(); }
+
+    void poll_snapshots();
+    void take_snapshot(uint64_t up_to, Layers2D& out);
+    void survival_to_menu();
+    void close_menu();
+    void start_maker(int i);
+    void start_survival(int stage, int zone);
+    void survival_go_on(const SurvivalView& sv);
+    void compose_2d(Layers2D& out);
+    void apply_2d(const Layers2D& l);
+    void give_pictures(uint64_t serial);
+    // run(), one refresh after another
+    void wait_for_refresh();
+    void update_survival();
+    void update_toast();
+    void handle_menu_actions();
+    // The video options the menu changes, to the renderer and the presenter:
+    // at the start (was = nullptr; the 3D resolution, MSAA, anisotropic
+    // filtering and vsync were given to init) and after a change in the menu
+    void apply_video_options(const Options* was);
+    void update_boss_mode();
+    void update_menus();
+    void read_inputs();
+    bool present_frame(double loop_from);
+    void update_title();
+    void prepare_frames();   // the preparation thread
+    void note_presents();    // the LW_FRAMELOG thread
+};
+
+// Copies the game's newest 2D layers into the ring if they are new; the
+// caller holds snaps_mutex
+void App::poll_snapshots() {
+    std::lock_guard<std::mutex> lock(g_video_mutex);
+    if (g_video_frame != snaps[newest_snap].frame && !g_boot_skip) {
+        newest_snap = (newest_snap + 1) % snaps.size();
+        Snapshot2D& s = snaps[newest_snap];
+        s.frame = g_video_frame;
+        for (uint32_t p = 0; p < TILEGEN_PAGES; p++)   // (the pages copied again since this one was filled)
+            if (s.serial[p] != g_video_page_serial[p]) {
+                memcpy(&s.vram[p << 16], &g_video_vram[p << 16], 0x10000);
+                s.serial[p] = g_video_page_serial[p];
+            }
+    }
+}
+
+// Copies the newest 2D layers at or before that vblank into `out` (its
+// frame stays ~0 if there are none); takes snaps_mutex
+void App::take_snapshot(uint64_t up_to, Layers2D& out) {
+    std::lock_guard<std::mutex> lock(snaps_mutex);
+    poll_snapshots();
+    const Snapshot2D* pick = nullptr;
+    for (const Snapshot2D& s : snaps)
+        if (s.frame != ~0ull && s.frame <= up_to && (!pick || s.frame > pick->frame)) pick = &s;
+    out.frame = pick ? pick->frame : ~0ull;
+    if (pick) memcpy(out.vram.data(), pick->vram.data(), TILEGEN_SIZE);
+}
+
+// Survival results: Esc goes back to the main menu, and the arcade game as
+// it was comes back when the menu closes
+void App::survival_to_menu() {
+    survival_end();
+    game_state_load_home();
+    frontend.open(Frontend::Screen::Main);
+    g_menu_open = g_hold = true;
+}
+
+void App::close_menu() {
+    frontend.open(Frontend::Screen::None);
+    ui.hide();
+    g_menu_open = g_hold = false;
+    g_block_buttons = true;
+}
+
+// Starts LostWorld.exe --make-boss-state for boss i (see boss_job)
+void App::start_maker(int i) {
+    const std::wstring exe = exe_path_w();
+    const std::string& rom = g_rom_zip.empty() ? g_data_dir : g_rom_zip;
+    std::wstring cmd = L"\"" + exe + L"\" --make-boss-state " + std::to_wstring(i + 1) +
+                       (g_rom_zip.empty() ? L" --data \"" : L" --rom \"") + std::wstring(rom.begin(), rom.end()) +
+                       L"\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW | CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi)) {
+        frontend.boss_status[i] = Frontend::BOSS_FAILED;
+        return;
+    }
+    if (boss_job) AssignProcessToJobObject(boss_job, pi.hProcess);
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    boss_makers[i] = pi.hProcess;
+    frontend.boss_status[i] = Frontend::BOSS_PREPARING;
+    printf("[boss] preparing %ls\n", BOSSES[i].name);
+}
+
+// A survival run at that arena, from the home state (see survival_wait_home)
+void App::start_survival(int stage, int zone) {
+    if (game_state_has_home()) game_state_load_home();
+    else game_state_keep_home();
+    survival_wait_home = true;
+    survival_audio_at = g_sound.frames_out();
+    survival_begin(stage, zone);
+    g_boot_skip = g_fast_idle = true;
+    g_sound.set_dsp_enabled(false);
+    g_sound.set_muted(true);
+    if (g_opt.menu) close_menu();
+    else g_hold = false;
+}
+
+// A shot on the start screen begins the hunt; on the results, a new one
+// from the very start (the arena's first spot and encounter), as from the menu
+void App::survival_go_on(const SurvivalView& sv) {
+    if (sv.mode == SurvivalMode::Results) {
+        start_survival(sv.stage, sv.zone);
+        return;
+    }
+    survival_confirm();
+    g_hold = false;
+}
+
+// Composes the 2D layers of a vblank (out.frame, its layer memory in
+// out.vram) for the renderer. One composition at a time (prep_mutex): the
+// 2D packs and the back layers' scroll keep state between them
+void App::compose_2d(Layers2D& out) {
+    const TextHD* hd_text = g_opt.classic_text ? nullptr : &text;
+    if (!hd_text) std::fill(out.text_cells.begin(), out.text_cells.end(), 0u);
+    bool capture = capture_2d.exchange(false);
+    if (capture) sky.capture();   // F12 also saves the backdrops, for textures/sky
+    bool sky_on = sky.active();
+    // Raw layers for recognising the 2D replacements (and for F12)
+    bool raw_front = !pack2d.empty() || capture || g_opt.capture_popups, raw_back = !pack2d_back.empty() || capture;
+    TileGen::compose(out.vram.data(),
+                     {.back = out.back.data(),
+                      .front = out.front.data(),
+                      .front_raw = raw_front ? front_raw.data() : nullptr,
+                      .front_raw_top = raw_front ? front_raw_top.data() : nullptr,
+                      .front_under = raw_front ? front_under.data() : nullptr,
+                      .back_raw = raw_back ? back_raw.data() : nullptr,
+                      .back_raw_top = raw_back ? back_raw_top.data() : nullptr,
+                      .back_under = raw_back ? back_under.data() : nullptr,
+                      .text_cells = out.text_cells.data(),
+                      .sky_coords = sky_on ? out.sky_coords.data() : nullptr,
+                      .back_rows = back_rows.data()},
+                     hd_text, sky_on ? &sky : nullptr);
+    // Survival is for one player: the game's own "Push 2P Start" in
+    // player 2's corner (fn_0002F338 draws it at cells 41..60, rows
+    // 43..46) is left out, so nothing invites a player who can't join
+    if (survival_shown && survival_view().mode != SurvivalMode::Off) {
+        constexpr int X0 = 312, Y0 = 336;   // cells 39.. and 42.. (a margin around the prompt)
+        // (the raw layers too: a 2D replacement picture is found from them)
+        for (uint32_t* layer : {out.front.data(), raw_front ? front_raw.data() : nullptr,
+                                raw_front ? front_raw_top.data() : nullptr, raw_front ? front_under.data() : nullptr})
+            if (layer)
+                for (int y = Y0; y < SCREEN_H; y++) std::fill(layer + y * SCREEN_W + X0, layer + y * SCREEN_W + SCREEN_W, 0u);
+        for (int cy = Y0 / 8; cy < TextHD::CELLS_Y; cy++)
+            for (int cx = X0 / 8; cx < TextHD::CELLS_X; cx++)
+                std::fill_n(&out.text_cells[(cy * TextHD::CELLS_X + cx) * TextHD::CELL_TEXELS], TextHD::CELL_TEXELS, 0u);
+    }
+    // The layer and scroll of each row of the back layers, for drawing
+    // them in between game frames (renderer.set_sky_rows)
+    {
+        out.back_rows = back_rows;
+        // Debugging aid: LW_SKYLOG=path writes the back layers' scroll of each 2D
+        // frame and the world camera of each 3D frame (tools/sky_log.py)
+        if (g_sky_log) {
+            std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+            fprintf(g_sky_log, "2d %llu", (unsigned long long)out.frame);
+            for (int y = 0; y < SCREEN_H; y += 8)
+                fprintf(g_sky_log, " %d,%d,%d", back_rows[3 * y], back_rows[3 * y + 1], back_rows[3 * y + 2]);
+            fprintf(g_sky_log, "\n");
+        }
+        out.shift_from = back_rows_frame;
+        out.shift_to = back_rows_frame = out.frame;
+    }
+    out.sky_pictures = sky.take_new_images();
+    // --capture-popups: a capture whenever the band under the scores
+    // (where a shot's ECHO, HIT... shows) holds more than a number, once
+    // per new picture there, for making their 2D replacements
+    if (g_opt.capture_popups && !capture) {
+        static uint64_t last_hash = 0;
+        static double last_at = 0;
+        static int captures = 0;
+        int lit = 0;
+        uint64_t h = 1469598103934665603ull;
+        for (int y = 58; y < hud_split::POPUP_ROWS; y++)   // (below the scores' second line)
+            for (int x = 0; x < SCREEN_W; x++) {
+                uint32_t p = front_raw_top[y * SCREEN_W + x];
+                if (p >> 24) lit++, h = (h ^ (uint64_t(y * SCREEN_W + x) << 32 ^ p)) * 1099511628211ull;
+            }
+        if (lit > 120 && h != last_hash && captures < 80 && now_seconds() - last_at > 0.25) {
+            last_hash = h, last_at = now_seconds(), captures++;
+            capture = true;
+        }
+    }
+    if (capture) {   // F12 or --shot: capture for tools/make_2d_replacement.py
+        CreateDirectoryA("out/2d", nullptr);
+        std::string path = "out/2d/capture_" + std::to_string(out.frame);
+        Pack2D::save_capture(front_raw.data(), path);
+        Pack2D::save_capture(front_raw_top.data(), path + "_layer_a");   // only the texts' layers
+        Pack2D::save_capture(back_raw.data(), path + "_back");          // the layers below the 3D image
+        Pack2D::save_capture(back_raw_top.data(), path + "_back_layer_a");
+        printf("2D layer saved to %s.png\n", path.c_str());
+    }
+    // The top band only moves to the screen edges when it looks like a
+    // HUD (empty in the middle), not when it is part of a picture.
+    // Measured before the 2D replacements clear what they cover (the
+    // boss name plate in the middle stays a reason to keep it)
+    int middle = 0;
+    for (int y = 0; y < 36; y++)
+        for (int x = 160; x < 336; x++)
+            middle += (out.front[y * SCREEN_W + x] >> 24) != 0 ||
+                      out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
+    out.hud_band = middle * 20 < 36 * 176;
+    // Widescreen: each player's prompts (RELOAD, lives, CONTINUE) go to the
+    // middle of that player's half of the wide picture (hud_split.h); the
+    // rows that move are handed to the shader in sky_coords' last row
+    // (TileGen::SPLIT_ROW). Measured before the 2D
+    // replacements too, so a replaced RELOAD moves with its place
+    {
+        uint32_t* split_rows = &out.sky_coords[size_t(TileGen::SPLIT_ROW) * TileGen::SKY_COORDS_W];
+        bool wide = !g_opt.hud_centre && g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
+        if (wide && (g_inputs.p[0].playing || g_inputs.p[1].playing))
+            hud_split::rows_2d(
+                [&](int x, int y) {
+                    return (out.front[y * SCREEN_W + x] >> 24) != 0 ||
+                           out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
+                },
+                split_rows);
+        else
+            std::fill(split_rows, split_rows + SCREEN_H, 0u);
+    }
+    int offset[3];
+    TileGen::front_offset(out.vram.data(), offset);
+    // Survival's start screen: the game stands still on its first frame
+    // in the arena, where the foreground can still hold the screen the
+    // home state was kept at (from the menu, the boot's FBI warning)
+    SurvivalMode surv_mode = survival_shown ? survival_view().mode : SurvivalMode::Off;
+    if (surv_mode == SurvivalMode::Loading || surv_mode == SurvivalMode::Ready) {
+        std::fill(out.front.begin(), out.front.end(), 0u);
+        std::fill(out.text_cells.begin(), out.text_cells.end(), 0u);
+    } else if (!pack2d.empty())
+        pack2d.apply(out.front.data(), SCREEN_W, front_raw.data(), front_raw_top.data(), out.text_cells.data(),
+                     false, front_under.data(), out.back.data() + BACK_MARGIN, BACK_W);
+    if (!pack2d_back.empty())
+        pack2d_back.apply(out.back.data() + BACK_MARGIN, BACK_W, back_raw.data(), back_raw_top.data(),
+                          out.text_cells.data(), true, back_under.data());
+    out.overlay_brightness = float(offset[0] + offset[1] + offset[2]) / (3 * 255.0f);
+    out.overlays = pack2d.take_new_images();
+    for (auto& img : pack2d_back.take_new_images()) out.overlays.push_back(std::move(img));
+}
+
+// Hands composed 2D layers to the renderer (their new pictures go separately)
+void App::apply_2d(const Layers2D& l) {
+    renderer.set_sky_coords(l.sky_coords.data());
+    renderer.set_sky_rows(l.frame, l.back_rows.data());
+    renderer.set_hud_band(l.hud_band);
+    renderer.set_overlay_brightness(l.overlay_brightness);
+    renderer.set_text_cells(l.text_cells.data());
+    renderer.set_layers(l.back.data(), l.front.data());
+    shift_from = l.shift_from;
+    shift_to = l.shift_to;
+    shown = l.frame;
+    layers_shown = &l;
+}
+
+// Hands the new pictures of the frames up to that one to the renderer
+void App::give_pictures(uint64_t serial) {
+    std::vector<NewPictures> due;
+    {
+        std::lock_guard<std::mutex> lock(ready_mutex);
+        while (!ready_pictures.empty() && ready_pictures.front().serial <= serial) {
+            due.push_back(std::move(ready_pictures.front()));
+            ready_pictures.pop_front();
+        }
+    }
+    for (NewPictures& n : due) {
+        if (!n.replacements.empty()) renderer.add_replacements(n.replacements);
+        if (!n.overlays.empty()) renderer.add_overlays(n.overlays);
+        if (!n.sky.empty()) renderer.add_sky_pictures(n.sky);
+    }
+}
+
+// The preparation thread (see ready_frames)
+void App::prepare_frames() {
+    std::vector<std::shared_ptr<Prepared>> pool;   // reused once nobody else holds them
+    std::shared_ptr<const R3DFrameState> done;
+    uint64_t serial = 0;
+    while (!prep_stop) {
+        std::shared_ptr<const R3DFrameState> state;
+        {
+            std::unique_lock<std::mutex> lock(g_r3d_mutex);
+            g_r3d_cv.wait_for(lock, std::chrono::milliseconds(20),
+                              [&] { return prep_stop || (prep_on && g_r3d_latest != done); });
+            state = g_r3d_latest;
+        }
+        if (!prep_on) done.reset();
+        if (prep_stop || !prep_on || !state || state == done) continue;
+        double before = done ? done->time : 0;
+        done = state;
+        std::shared_ptr<Prepared> p;
+        for (auto& q : pool)
+            if (q.use_count() == 1) {
+                p = q;
+                break;
+            }
+        if (!p) pool.push_back(p = std::make_shared<Prepared>());
+        p->state = state;
+        p->serial = ++serial;
+        p->period = before > 0 ? std::clamp(state->time - before, 1.0 / 240, 0.1) : 1.0 / 57.524;
+        NewPictures pictures;
+        pictures.serial = p->serial;
+        {
+            std::lock_guard<std::mutex> lock(prep_mutex);
+            take_snapshot(state->vblank, p->layers);   // the 2D layers of the frame's vblank
+            bool layers = p->layers.frame != ~0ull;
+            if (layers) layers_worker.run([&] { compose_2d(p->layers); });
+            double from = now_seconds();
+            builder.build(*state, p->scene);
+            double built_at = now_seconds();
+            pictures.replacements = pack.take_new_images();
+            if (layers) layers_worker.wait();
+            double took = now_seconds() - from;
+            prep_us += uint64_t(took * 1e6);
+            prep_frames++;
+            frame_log("R %llu %.6f %.3f %.3f\n", (unsigned long long)state->frame, now_seconds(),
+                      (built_at - from) * 1000, took * 1000);
+            pictures.overlays.swap(p->layers.overlays);
+            pictures.sky.swap(p->layers.sky_pictures);
+            p->layers.overlays.clear();
+            p->layers.sky_pictures.clear();
+        }
+        std::lock_guard<std::mutex> lock(ready_mutex);
+        ready_pictures.push_back(std::move(pictures));
+        p->ready_at = now_seconds();
+        if (prep_on) {
+            ready_frames.push_back(p);
+            if (ready_frames.size() > 8) ready_frames.pop_front();
+        }
+    }
+}
+
+void App::note_presents() {
+    uint64_t next = 1;
+    while (!prep_stop) {
+        if (next > presented_id) {
+            Sleep(1);
+            continue;
+        }
+        if (presenter.wait_present(next, 100'000'000))
+            frame_log("S %llu %.6f\n", (unsigned long long)next, now_seconds());
+        next++;
+    }
+}
+
+void App::stop_threads() {
+    prep_stop = true;
+    g_r3d_cv.notify_all();
+    if (prep_thread.joinable()) prep_thread.join();
+    if (shown_waiter.joinable()) shown_waiter.join();
+}
+
+bool App::init(int argc, char** argv, bool first_start) {
+    presenter.set_vsync(g_opt.vsync);
+    if (!presenter.init("Lost World Native", int(SCREEN_H * 2 * std::max(g_opt.max_aspect, 4.0f / 3.0f)), SCREEN_H * 2,
+                        g_opt.dlaa)) {
+        fprintf(stderr, "Could not start Vulkan; try --headless\n");
+        return false;
+    }
+    printf("GPU: %s\n", presenter.device_name().c_str());
+    if (g_opt.gamepads) g_pads.init();   // off by default: guns (or the mouse) only, a cabinet's controllers ignored
+    timeBeginPeriod(1);
+    QueryPerformanceFrequency(&g_qpf);
+    QueryPerformanceCounter(&g_start_time);
+    g_realtime = !getenv("LW_FAST");   // debugging aid: a window at full speed
+    DWORD replay_attr = g_opt.replay.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesA(g_opt.replay.c_str());
+    if (replay_attr != INVALID_FILE_ATTRIBUTES && (replay_attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA((g_opt.replay + "/*.bin").c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do film.push_back(g_opt.replay + "/" + fd.cFileName);
+            while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+        std::sort(film.begin(), film.end());
+        if (film.empty()) {
+            fprintf(stderr, "No snapshots in %s\n", g_opt.replay.c_str());
+            return false;
+        }
+        g_opt.replay = film[0];
+        CreateDirectoryA("out/film_out", nullptr);
+    }
+    if (!g_opt.replay.empty()) {   // --replay: a frozen debug snapshot, the game does not run
+        if (!load_snapshot(g_opt.replay.c_str())) {
+            fprintf(stderr, "Could not read the snapshot %s\n", g_opt.replay.c_str());
+            return false;
+        }
+        printf("Snapshot %s (frame %llu)\n", g_opt.replay.c_str(), (unsigned long long)g_video_frame);
+    } else {
+        // Records and achievements: real games only, never the scripted or cheated test runs
+        if ((g_opt.menu || survival_enabled()) && g_auto.events.empty() && !getenv("LW_SURV_GOD") &&
+            !getenv("LW_SURV_LIFE"))
+            stats_init();
+        g_audio.start();
+        g_hold = g_opt.menu && !survival_cli;   // the main menu comes first
+        g_boot_skip = g_fast_idle = !g_opt.show_boot;
+        g_sound.set_dsp_enabled(!g_boot_skip);
+        g_sound.set_muted(g_boot_skip);
+        CreateThread(nullptr, 512u << 20, game_thread, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    }
+
+    // (not in test runs, nor over graphics options given on the command line)
+    for (int i = 1; i < argc && first_start; i++)
+        for (const char* o : {"--scale", "--half-rate", "--rt", "--no-rt", "--ao", "--no-ao", "--no-shadows", "--no-shafts",
+                              "--no-soft", "--sky", "--no-relief", "--bloom", "--no-bloom", "--msaa", "--aa", "--aniso",
+                              "--pixel2d"})
+            if (strcmp(argv[i], o) == 0) first_start = false;
+    if (first_start && g_opt.menu) {
+        int q = suggest_quality(presenter);
+        static const char* const NAMES[4] = {"LOW", "MEDIUM", "HIGH", "ULTRA"};
+        printf("[video] first start: quality %s for this graphics card (options menu, DISPLAY)\n", NAMES[q]);
+        ini.set_quality(q);
+        quality_options(ini, g_opt);   // what QUALITY sets, now from the level picked
+    }
+    if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa)) {
+        fprintf(stderr, "Could not start the 3D renderer on %s (see the [vulkan] line above)\n",
+                presenter.device_name().c_str());
+        return false;
+    }
+    renderer.set_hud_edges(!g_opt.hud_centre);
+    if (g_opt.haze > 0) printf("[video] distance haze on (strength %.2f)\n", g_opt.haze);
+    if (g_opt.dlaa && !renderer.dlaa_active()) printf("[video] DLAA not available: using MSAA\n");
+    if (renderer.dlaa_active())
+        printf("[video] antialiasing NVIDIA DLAA, anisotropic filtering %dx%s\n", g_opt.aniso,
+               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
+    else
+        printf("[video] antialiasing MSAA %dx, anisotropic filtering %dx%s\n", renderer.msaa_samples(), g_opt.aniso,
+               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
+    if (g_opt.light_gain != 1.0f) {
+        renderer.set_light_gain(g_opt.light_gain);
+        printf("[video] light x%.2f on the sun and the ambient light\n", g_opt.light_gain);
+    }
+    builder.set_remove_letterbox(!g_opt.letterbox);
+    builder.set_hud_edges(!g_opt.hud_centre);
+    // The players' prompts move only during play, like the 2D ones (hud_split.h)
+    builder.set_split_prompts([] { return g_inputs.p[0].playing || g_inputs.p[1].playing; });
+    pack.init("textures", g_opt.dump_textures ? "out/textures" : "");
+    pack.set_max_slots(renderer.replacement_slots());   // as many as this GPU's descriptor limits allow
+    builder.set_texture_pack(&pack, &g_texture_ram);
+    pack2d.init("textures/2d", 1, 27);
+    pack2d_back.init("textures/2d_back", 28, SkyPack::FIRST_SLOT - 1);
+    sky.init("textures/sky", g_opt.dump_textures ? "out/sky" : "");
+    haze_strength = g_opt.haze > 0 ? g_opt.haze : 1;
+    ao_strength = g_opt.ao > 0 ? g_opt.ao : 1;
+    apply_video_options(nullptr);   // the menu's video options (and the sky's picture)
+    load_bezel(renderer);
+    if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
+    load_crosshairs(renderer);
+    builder.set_vrom(g_vrom.data(), g_vrom.size());
+    last_title = GetTickCount64();
+    frontend.gamepad_options = g_opt.gamepads;   // gamepads off: no gamepad settings or hints
+    raw_mice::init(presenter.hwnd());   // a second mouse can be player 2's gun
+    if (g_opt.several_mice) raw_mice::set_saved(ini.gun_p1, ini.gun_p2);   // the guns picked in GUN TEST
+    presenter.raw_input = raw_mice::on_input;
+    if (g_opt.menu) {
+        if (!frontend.init("third_party/fonts")) printf("[menu] fonts missing: using the Windows ones\n");
+        if (!ui.init(presenter)) g_opt.menu = false;
+    }
+    presenter.save_pipeline_cache();   // what start-up compiled, kept even if the run ends without shutdown()
+    if (g_opt.menu) {
+        FrontendSettings& s = frontend.settings;
+        s = ini;   // the window, the menu music, the gamepad and the guns picked: as the file has them
+        settings_from_options(g_opt, s);
+        frontend.aa_at_launch = s.aa;
+        frontend.rt_available = renderer.ray_tracing_available();
+        if (s.fullscreen && !presenter.fullscreen()) presenter.toggle_fullscreen();
+        if (!survival_cli) {   // survival mode goes straight into the game
+            frontend.open(Frontend::Screen::Main);
+            g_menu_open = true;
+            // No LightgunHID.ini (or an empty one): LIGHT GUN SETUP first
+            if (raw_mice::gun_file_needs_setup()) frontend.start_gun_setup(true);
+        }
+        presenter.input_hook = [this](UINT msg, WPARAM wp, LPARAM lp) -> bool {
+            int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+            if (!frontend.active()) {   // in the game: Esc pauses
+                if (msg == WM_KEYDOWN && wp == VK_ESCAPE && survival_view().mode == SurvivalMode::Results) {
+                    survival_to_menu();
+                    return true;
+                }
+                if (msg == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_TAB)) {   // Tab as in MAME (Esc can quit, via the launcher)
+                    frontend.open(Frontend::Screen::Pause);
+                    g_menu_open = g_hold = true;
+                    return true;
+                }
+                return false;
+            }
+            // Player 2's gun does not drive the menus (raw_mice marks its events),
+            // so the two guns never fight over the pointer
+            bool pointer = msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN;
+            if (pointer && (g_menu_gun || raw_mice::from_player2())) return true;   // the gun's own input does it
+            if (msg == WM_MOUSEMOVE) g_menu_ptr = {x, y};
+            else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
+            switch (msg) {
+            case WM_KEYDOWN:
+                // Tab closes the pause menu it opened (not on its own repeat)
+                if (wp == VK_TAB && frontend.screen() == Frontend::Screen::Pause) {
+                    if (!(lp & (1 << 30))) frontend.key(VK_ESCAPE);
+                    return true;
+                }
+                return frontend.key(int(wp));
+            case WM_MOUSEMOVE: {
+                // Windows also sends it when nothing moved (a window or the
+                // pointer changing): those neither bring the pointer back nor
+                // take the highlight from the pad's choice
+                static int last_x = INT_MIN, last_y = INT_MIN;
+                bool moved = x != last_x || y != last_y;
+                last_x = x, last_y = y;
+                if (!moved) return true;
+                pad_in_menu = false;
+                frontend.mouse_move(x, y);
+                return true;
+            }
+            case WM_LBUTTONDOWN: frontend.click(x, y); return true;
+            case WM_RBUTTONDOWN:   // right button: back (not in GUN TEST, where it is a gun reloading)
+                if (!frontend.gun_test_open()) frontend.key(VK_ESCAPE);
+                return true;
+            case WM_MOUSEWHEEL: {
+                POINT p{x, y};   // screen coordinates for this one
+                ScreenToClient(presenter.hwnd(), &p);
+                frontend.wheel(p.x, p.y, GET_WHEEL_DELTA_WPARAM(wp));
+                return true;
+            }
+            }
+            return false;
+        };
+    }
+    boss_job = CreateJobObjectW(nullptr, nullptr);
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{};
+        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (boss_job) SetInformationJobObject(boss_job, JobObjectExtendedLimitInformation, &li, sizeof(li));
+    }
+    frontend.boss_status.assign(BOSS_COUNT, Frontend::BOSS_MISSING);
+    for (int i = 0; i < BOSS_COUNT; i++)
+        if (game_state_valid(boss_state_path(i))) frontend.boss_status[i] = Frontend::BOSS_READY;
+    // Debugging aid: LW_BOSS=N starts the fight with boss N (1-4) right away
+    if (const char* b = getenv("LW_BOSS")) {
+        int i = atoi(b) - 1;
+        if (i >= 0 && i < BOSS_COUNT && frontend.boss_status[i] == Frontend::BOSS_READY) boss_pending = i;
+    }
+    // Survival mode screens (loading, start, wave counter, results)
+    survival_shown = (survival_cli || g_opt.menu) && survival_ui.init("third_party/fonts") &&
+                     survival_layer.init(presenter);
+    survival_cli_pending = survival_cli;
+    // Achievement notices, over the game and under the menus
+    toast_shown = toast.init("third_party/fonts") && toast_layer.init(presenter);
+    toast.set_volume(g_opt.volume);
+    if (g_opt.menu && !g_opt.headless) music.open();
+    music_time = now_seconds();
+    prep_thread = std::thread([this] { prepare_frames(); });
+    if (g_frame_log && presenter.can_wait_present()) shown_waiter = std::thread([this] { note_presents(); });
+    queue_depth = getenv("LW_QUEUE") ? atoi(getenv("LW_QUEUE")) : 2;
+    image_timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    return true;
+}
+
+void App::run() {
+    for (;;) {
+        wait_for_refresh();   // before the inputs are read
+        if (!presenter.pump()) break;
+        double loop_from = now_seconds();
+        update_survival();
+        update_toast();
+        if (g_opt.menu) {
+            handle_menu_actions();
+            update_boss_mode();
+            update_menus();
+        }
+        read_inputs();
+        if (!present_frame(loop_from)) break;   // --shot taken, or the end of a --replay film
+    }
+}
+
+// The present queue and, with VSYNC off, the wait for the next refresh
+void App::wait_for_refresh() {
+    int depth = queue_depth ? queue_depth + queue_extra : 0;
+    double out = presenter.limit_queue(depth, 50'000'000);
+    if (out > 0 && went_out > 0 && out - went_out > 1.5 * display_clock.period) {
+        if (out - last_miss < 2 && !queue_extra) {
+            queue_extra = 1;
+            printf("[video] refreshes missed: %d images queued for a while\n", depth + 1);
+        }
+        last_miss = out;
+    }
+    if (queue_extra && out - last_miss > 10) {
+        queue_extra = 0;
+        out = 0;   // the next wait skips a refresh: not a miss
+    }
+    went_out = out;
+    if (!g_opt.vsync) {   // the next image a refresh after the last (from now after a slow one)
+        double period = display_clock.period, now = now_seconds();
+        if (now - next_image > period) next_image = now;
+        if (image_timer && next_image - now > 0.001) {   // to ~0.5 ms before, then a spin
+            LARGE_INTEGER due;
+            due.QuadPart = -LONGLONG((next_image - now - 0.0005) * 1e7);
+            if (SetWaitableTimer(image_timer, &due, 0, nullptr, nullptr, FALSE))
+                WaitForSingleObject(image_timer, 100);
+        } else if (!image_timer) {
+            while (next_image - now > 0.002) Sleep(1), now = now_seconds();
+        }
+        while (now_seconds() < next_image) YieldProcessor();
+        next_image += period;
+    }
+    // FRAME CAP: at most frame_cap pictures a second; the waiting is done
+    // here, before the picture is prepared (the game keeps its own pace)
+    if (g_opt.frame_cap > 0 && film.empty() && g_opt.replay.empty() && !g_opt.shot_frame) {
+        static double next_picture = 0;
+        double period = 1.0 / g_opt.frame_cap, now = now_seconds();
+        if (next_picture - now > period) next_picture = now;   // the cap changed, or a pause
+        while (now < next_picture) {
+            double left = next_picture - now;
+            if (left > 0.002) Sleep(DWORD((left - 0.0015) * 1000));   // timeBeginPeriod(1): ~1 ms steps
+            else SwitchToThread();
+            now = now_seconds();
+        }
+        next_picture = now - next_picture < period ? next_picture + period : now + period;
+    }
+}
+
+// Survival: the start from the command line, the home state, its screens
+void App::update_survival() {
+    if (survival_cli_pending && !g_boot_skip) {   // at the SEGA logo: the home state is the game from here
+        survival_cli_pending = false;
+        start_survival(cli_stage, cli_zone);
+    }
+    if (survival_wait_home && game_state_result() != 0) {
+        survival_wait_home = false;
+        survival_ungate();
+    }
+    if (survival_shown) {
+        SurvivalView sv = survival_view();
+        if (survival_last == SurvivalMode::Loading && sv.mode != SurvivalMode::Loading)
+            printf("[survival] audio during the loading: %llu samples\n",
+                   (unsigned long long)(g_sound.frames_out() - survival_audio_at));
+        if (survival_last == SurvivalMode::Loading && sv.mode == SurvivalMode::Off && g_opt.menu && !g_menu_open)
+            survival_to_menu();   // the game never got to the arena: not left running behind the loading screen
+        survival_last = sv.mode;
+        if (survival_cli_pending) {   // the boot screens: already the loading screen
+            sv.mode = SurvivalMode::Loading;
+            sv.stage = cli_stage, sv.zone = cli_zone;
+        }
+        // A shot (or Enter / Space) on the start and results screens
+        HWND hw = presenter.hwnd();
+        bool fg = GetForegroundWindow() == hw;
+        bool down = fg && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (GetAsyncKeyState(VK_RETURN) & 0x8000) ||
+                           (GetAsyncKeyState(VK_SPACE) & 0x8000));
+        for (int i = 0; i < Gamepads::MAX; i++) down |= fg && g_pads.pad(i).fire;
+        // (the results only after a moment: the player is still shooting when the hunt ends)
+        bool waiting = sv.mode == SurvivalMode::Ready ||
+                       (sv.mode == SurvivalMode::Results && now_seconds() - sv.results_at > SURVIVAL_RESULTS_DELAY);
+        // Where the game screen is in the window: for the BONUS target
+        RECT rc;
+        GetClientRect(hw, &rc);
+        ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
+        SurvivalLayout surv_lay{lay.scale, lay.ox, lay.oy, lay.game_x0};
+        if (waiting && down && !confirm_was_down && !frontend.active()) {
+            survival_go_on(sv);
+            g_block_buttons = true;   // the click does not fire in the game
+        }
+        confirm_was_down = down;
+        // Debugging aid: LW_SURV_SHOTS=1 captures each screen of the mode
+        // (out/survival_<mode>.bmp) and then shoots by itself
+        static const bool surv_shots = getenv("LW_SURV_SHOTS") != nullptr;
+        static SurvivalMode shot_mode = SurvivalMode::Off;
+        static double shot_since = 0;
+        if (surv_shots) {
+            if (sv.mode != shot_mode) shot_mode = sv.mode, shot_since = now_seconds();
+            double t = now_seconds() - shot_since;
+            if (t > 1.5 && t < 1.6 && shot_mode != SurvivalMode::Off) {
+                shot_since -= 1;   // once
+                presenter.capture_next("out/survival_" + std::to_string(int(shot_mode)) + ".bmp");
+            }
+            if (t > 3 && waiting) {   // LW_SURV_SHOTS=2: the results go back to the menu
+                if (sv.mode == SurvivalMode::Results && getenv("LW_SURV_SHOTS")[0] == '2' && g_opt.menu) {
+                    survival_to_menu();
+                    shot_mode = SurvivalMode::Off;
+                } else {
+                    survival_go_on(sv);
+                }
+            }
+        }
+        if (survival_ui.draw(rc.right, rc.bottom, sv, now_seconds(), survival_pixels, surv_lay))
+            survival_layer.set_image(survival_pixels.data(), rc.right, rc.bottom);
+    }
+}
+
+// Achievement notices
+void App::update_toast() {
+    if (!toast_shown) return;
+    for (int i : stats_take_new_achievements())
+        toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
+    for (int i : survival_take_unlocked())
+        toast.push_rising(L"ARENA UNLOCKED  \u00B7  SURVIVAL!", SURVIVAL_ZONES[i].name,
+                          L"Play it from PLAY > SURVIVAL");
+    RECT rc;
+    GetClientRect(presenter.hwnd(), &rc);
+    if (toast.draw(rc.right, rc.bottom, now_seconds(), toast_pixels))
+        toast_layer.set_image(toast_pixels.data(), rc.right, rc.bottom);
+}
+
+// What was picked in the menus
+void App::apply_video_options(const Options* was) {
+    const Options& o = g_opt;
+    if (was) {
+        renderer.set_supersample(o.supersample);
+        renderer.set_msaa(o.msaa);
+        renderer.set_aniso(o.aniso);
+        presenter.set_vsync(o.vsync);
+    }
+    renderer.set_smooth_2d(!o.pixel_2d);
+    if (!was || o.max_aspect != was->max_aspect) renderer.set_max_aspect(o.max_aspect);
+    renderer.set_distance_haze(o.haze > 0 ? haze_strength : 0);   // at the strength of the start (--haze)
+    renderer.set_bloom(o.bloom);
+    renderer.set_picture(o.saturation, o.gamma);
+    renderer.set_ambient_occlusion(o.ao > 0 ? ao_strength : 0);   // and --ao
+    renderer.set_sun(o.sun);
+    renderer.set_shadows(o.shadows ? 1.0f : 0.0f);
+    renderer.set_ray_tracing(o.ray_tracing);
+    renderer.set_light_shafts(o.shafts ? 1.0f : 0.0f);
+    renderer.set_soft_particles(o.soft);
+    renderer.set_lightning(o.lightning);
+    renderer.set_rain(o.rain);
+    renderer.set_hdr(o.hdr);
+    renderer.set_rim_light(o.rim);
+    renderer.set_relief(o.relief);
+    renderer.set_sharpen(o.sharpen ? 0.5f : 0.0f);
+    renderer.set_modern_torch(o.modern_torch);
+    if (!was || o.sky_procedural != was->sky_procedural) {
+        {
+            std::lock_guard<std::mutex> lock(prep_mutex);   // not while composing
+            sky.set_procedural(o.sky_procedural);
+        }
+        renderer.set_night_sky(o.sky_procedural);
+    }
+}
+
+void App::handle_menu_actions() {
+    for (Frontend::Action a : frontend.take_actions()) {
+        FrontendSettings& s = frontend.settings;
+        switch (a) {
+        case Frontend::Action::StartArcade:   // the game at the SEGA logo is the home state QUIT TO MAIN MENU puts back
+            if (!g_boot_skip) game_state_keep_home();
+            random_spawns_set(frontend.random_spawns);   // CLASSIC > ARCADE or RANDOM SPAWNS
+            if (frontend.random_spawns) weather_choose(frontend.run_weather());
+            [[fallthrough]];
+        case Frontend::Action::Resume:
+            boss_pending = -1;
+            close_menu();
+            break;
+        case Frontend::Action::StartSurvival: {
+            const SurvivalZone& z = SURVIVAL_ZONES[frontend.survival_choice];
+            boss_pending = -1;
+            random_spawns_set(false);
+            weather_choose(frontend.run_weather());
+            if (boss_fight >= 0 || frontend.boss_mode) {   // from boss mode: back to the arcade first
+                boss_fight = -1;
+                frontend.boss_mode = false;
+            }
+            start_survival(z.stage, z.zone);
+            break;
+        }
+        case Frontend::Action::StartBoss:
+            random_spawns_set(false);
+            if (frontend.boss_status[frontend.boss_choice] == Frontend::BOSS_READY) boss_pending = frontend.boss_choice;
+            break;
+        case Frontend::Action::PrepareBosses:
+            for (int i = 0; i < BOSS_COUNT; i++)
+                if (frontend.boss_status[i] == Frontend::BOSS_FAILED) frontend.boss_status[i] = Frontend::BOSS_MISSING;
+            break;
+        case Frontend::Action::LeaveBossMode:   // the arcade game as it was comes back when the menu closes
+            boss_pending = -1;
+            game_state_load_home();
+            boss_fight = -1;
+            frontend.boss_mode = false;
+            frontend.open(Frontend::Screen::Main);
+            break;
+        case Frontend::Action::QuitToMenu:   // from the pause menu of any mode
+            boss_pending = -1;
+            if (survival_view().mode != SurvivalMode::Off) {
+                survival_to_menu();
+                break;
+            }
+            boss_fight = -1;
+            frontend.boss_mode = false;
+            game_state_load_home();
+            frontend.open(Frontend::Screen::Main);
+            break;
+        case Frontend::Action::Quit: presenter.close(); break;
+        case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
+        case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
+        case Frontend::Action::GunsPicked: {   // LIGHT GUN SETUP: LightgunHID.ini
+            std::wstring id[2] = {raw_mice::usb_id(frontend.picked_gun[0]), raw_mice::usb_id(frontend.picked_gun[1])};
+            if (frontend.picked_none) raw_mice::write_gun_file(L"", L"", true);
+            else if (!id[0].empty() && id[0] != id[1]) raw_mice::write_gun_file(id[0], id[1], false);
+            else   // (two guns with the same ids, or none: GUN TEST's choice by device, in settings.ini)
+                printf("[mouse] the guns picked have no USB ids of their own: kept by device in settings.ini\n");
+            raw_mice::reload_gun_file();
+            frontend.guns_pinned = raw_mice::guns_pinned();
+            break;
+        }
+        case Frontend::Action::SettingsChanged: {
+            const Options was = g_opt;
+            options_from_settings(s, g_opt);
+            apply_sound_options(g_opt);
+            toast.set_volume(g_opt.volume);
+            apply_video_options(&was);
+            if (g_opt.sky_procedural != was.sky_procedural || g_opt.classic_text != was.classic_text)
+                shown = ~0ull;   // compose the 2D layer again even while the game stands still
+            if (g_opt.custom_crosshair != was.custom_crosshair) load_crosshairs(renderer);
+            if (g_opt.interp != was.interp) {
+                renderer.set_interpolation(1.0f);   // the latest game frame as it is
+                renderer.set_back_shift(0.0f, false);
+            }
+            if (!g_opt.several_mice) raw_mice::reset();
+            else raw_mice::set_saved(s.gun_p1, s.gun_p2);
+            g_subtitles = g_opt.subtitles;
+            g_pad_settings = {s.pad_speed, s.gyro, s.gyro_speed, s.vibration, s.aim_assist};
+            s.save("save/settings.ini");
+            break;
+        }
+        default: break;
+        }
+    }
+}
+
+// Boss mode: the state makers, the fight picked, the end of the fight
+void App::update_boss_mode() {
+    for (int i = 0; i < BOSS_COUNT; i++) {
+        if (boss_makers[i] && WaitForSingleObject(boss_makers[i], 0) == WAIT_OBJECT_0) {
+            CloseHandle(boss_makers[i]);
+            boss_makers[i] = nullptr;
+            bool ok = game_state_valid(boss_state_path(i));
+            frontend.boss_status[i] = ok ? Frontend::BOSS_READY : Frontend::BOSS_FAILED;
+            printf("[boss] %ls: %s\n", BOSSES[i].name, ok ? "ready" : "could not be prepared");
+            frontend.invalidate();
+        }
+    }
+    // Missing states are made from the launch on (once the boot is
+    // over and the EEPROM file exists, see --make-boss-state), one at
+    // a time so the game keeps its speed; all at once while the list
+    // of bosses is open
+    bool can_make = !g_boot_skip && GetFileAttributesA("save/eeprom.bin") != INVALID_FILE_ATTRIBUTES;
+    for (int i = 0; can_make && i < BOSS_COUNT; i++) {
+        bool busy = std::any_of(boss_makers.begin(), boss_makers.end(), [](HANDLE h) { return h != nullptr; });
+        if (frontend.boss_status[i] == Frontend::BOSS_MISSING &&
+            (!busy || frontend.screen() == Frontend::Screen::Boss)) {
+            start_maker(i);
+            frontend.invalidate();
+        }
+    }
+    if (boss_pending >= 0 && !g_boot_skip) {
+        if (game_state_load(boss_state_path(boss_pending), true)) {
+            boss_loading = true;
+            boss_fight = boss_pending;
+            boss_over_at = 0;
+            boss_p2_played = false;
+            boss_p2_idle_at = 0;
+            frontend.boss_mode = true;
+            close_menu();
+        } else {
+            frontend.boss_status[boss_pending] = Frontend::BOSS_MISSING;   // made again
+            frontend.invalidate();
+        }
+        boss_pending = -1;
+    }
+    if (boss_loading) outputs::quiet(3);   // no feedback until the fight is on
+    if (boss_loading && game_state_result() != 0) {
+        boss_loading = false;
+        if (game_state_result() > 0) stats_boss_begin(boss_fight);
+        if (game_state_result() < 0) {
+            printf("[boss] could not start the fight\n");
+            boss_fight = -1;
+            frontend.boss_mode = false;
+            frontend.open_boss_list(true);
+            g_menu_open = g_hold = true;
+        }
+    }
+    // The fight is over once its stage ends (the boss is down) or the
+    // game is (no credits left): a moment later, the main menu, with
+    // the arcade game as it was waiting behind it
+    if (boss_fight >= 0 && !boss_loading && !frontend.active()) {
+        // Player states (docs/game_ram.md): 1 / 2 playing, 0 CONTINUE,
+        // 3 once the continue has run out. Player 2 can join the fight;
+        // then it goes on while player 2 plays, and the CONTINUE screen
+        // gets its time (12 s) after player 2's last life
+        uint8_t p1 = rd8(0x1A3791), p2 = rd8(0x1A37A1);
+        bool p2_playing = p2 == 1 || p2 == 2;
+        double t_now = now_seconds();
+        if (p2_playing) boss_p2_played = true, boss_p2_idle_at = 0;
+        else if (boss_p2_idle_at == 0) boss_p2_idle_at = t_now;
+        bool p2_done = !boss_p2_played || p2 == 3 || t_now - boss_p2_idle_at > 12;
+        bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || (p1 == 3 && !p2_playing && p2_done);
+        if (!over) boss_over_at = 0;
+        else if (boss_over_at == 0) {
+            boss_over_at = now_seconds();
+            stats_boss_end(rd8(0x1A623C) != BOSSES[boss_fight].stage_index);   // the stage ended: the boss is down
+        }
+        else if (now_seconds() - boss_over_at > 3) {
+            boss_fight = -1;
+            frontend.boss_mode = false;
+            game_state_load_home();
+            frontend.open(Frontend::Screen::Main);
+            g_menu_open = g_hold = true;
+        }
+    }
+}
+
+// The menus: the window mode, their debugging aids, the records, GUN TEST, the
+// music, the pointer and the menu picture
+void App::update_menus() {
+    if (frontend.settings.fullscreen != presenter.fullscreen()) {   // also F11 / Alt+Enter
+        frontend.settings.fullscreen = presenter.fullscreen();
+        frontend.settings.save("save/settings.ini");
+        frontend.invalidate();
+    }
+    // Debugging aid: LW_MENU_KEYS="40,13,27" presses those keys (one
+    // every 10 presents; Esc in the game pauses; "cX/Y" clicks at window
+    // pixel X,Y), then saves out/menu.bmp and quits
+    static const char* menu_keys = getenv("LW_MENU_KEYS");
+    static int menu_presents = 0;
+    if (menu_keys && ++menu_presents % 10 == 0) {
+        if (*menu_keys == 'c') {
+            int cx = 0, cy = 0, len = 0;
+            sscanf(menu_keys, "c%d/%d%n", &cx, &cy, &len);
+            menu_keys += len;
+            if (*menu_keys == ',') menu_keys++;
+            frontend.click(cx, cy);
+        } else if (*menu_keys) {
+            char* end = nullptr;
+            int vk = int(strtol(menu_keys, &end, 10));
+            menu_keys = *end == ',' ? end + 1 : end;
+            if (frontend.active()) frontend.key(vk);
+            else if (vk == VK_ESCAPE) {
+                frontend.open(Frontend::Screen::Pause);
+                g_menu_open = g_hold = true;
+            }
+        } else if (menu_presents % 30 == 0) {
+            presenter.capture_next("out/menu.bmp");
+            menu_keys = nullptr;
+            presenter.close();
+        }
+    }
+    static Frontend::Screen menu_was = Frontend::Screen::None;
+    if ((frontend.screen() == Frontend::Screen::Records || frontend.screen() == Frontend::Screen::Main) &&
+        frontend.screen() != menu_was) {   // the records page, and the main menu's achievements and best score
+        frontend.records = stats_view();   // the game stands still while the menu is open
+        frontend.invalidate();
+    }
+    // GUN TEST: what every mouse and gun does, and a press from one of
+    // them while the players' guns are being picked
+    static std::map<std::string, unsigned> gun_presses;
+    if (frontend.gun_test_open()) {
+        ULONGLONG now = GetTickCount64();
+        frontend.guns_pinned = raw_mice::guns_pinned();
+        std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
+        std::vector<Frontend::GunView> view;
+        int hidden = 0;
+        for (size_t i = 0; i < devs.size(); i++) {
+            const raw_mice::Device& d = devs[i];
+            auto known = gun_presses.find(d.path);
+            bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
+            gun_presses[d.path] = d.presses;
+            if (fired && frontend.picking_guns()) {
+                frontend.guns = {{d.path, d.name}};
+                frontend.gun_fired(0);
+            }
+            if (!d.last_input) {   // nothing from it yet: the pointer side of a keyboard, say, unless it moves
+                hidden++;
+                continue;
+            }
+            Frontend::GunView g{d.path, d.name, d.absolute, d.last_input && now - d.last_input < 1000, d.has_pos,
+                                int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
+            view.push_back(g);
+        }
+        auto same = [](const Frontend::GunView& a, const Frontend::GunView& b) {
+            return a.path == b.path && a.absolute == b.absolute && a.active == b.active && a.has_pos == b.has_pos &&
+                   a.x == b.x && a.y == b.y && a.trigger == b.trigger && a.reload == b.reload && a.player == b.player;
+        };
+        bool changed = view.size() != frontend.guns.size() || hidden != frontend.quiet_mice;
+        for (size_t i = 0; !changed && i < view.size(); i++) changed = !same(view[i], frontend.guns[i]);
+        if (changed) {   // every refresh while a mark moves: only the marks are drawn again
+            frontend.guns = view;
+            frontend.quiet_mice = hidden;
+            frontend.invalidate();
+        }
+    } else {
+        gun_presses.clear();
+    }
+    menu_was = frontend.screen();
+    {
+        double t = now_seconds();
+        music.update(frontend.active() && !frontend.over_game() && frontend.settings.menu_music,
+                     frontend.settings.volume, t - music_time);
+        music_time = t;
+    }
+    if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
+    // The menu pointer is player 1's crosshair, drawn over the menus
+    // instead of the Windows arrow. Player 2's gun is left out: if it
+    // moved the (hidden) Windows pointer, it goes back to player 1's spot.
+    // GUN TEST draws every gun's own mark instead
+    raw_mice::block_player2(frontend.active() && !frontend.gun_test_open());
+    presenter.set_cursor_visible(false);
+    g_menu_gun = false;
+    if (frontend.active()) {
+        HWND hwnd = presenter.hwnd();
+        // Player 1's gun known: the pointer follows it, straight from
+        // its own input at every refresh, and its buttons click
+        raw_mice::MenuGun mg = raw_mice::menu_gun(hwnd);
+        if (mg.known && GetForegroundWindow() == hwnd) {
+            g_menu_gun = true;
+            if (mg.pos.x != g_menu_ptr.x || mg.pos.y != g_menu_ptr.y) {
+                g_menu_ptr = mg.pos;
+                pad_in_menu = false;
+                frontend.mouse_move(mg.pos.x, mg.pos.y);
+            }
+            for (int i = 0; i < mg.left_presses && frontend.active(); i++) frontend.click(g_menu_ptr.x, g_menu_ptr.y);
+            for (int i = 0; i < mg.right_presses && frontend.active(); i++) frontend.key(VK_ESCAPE);
+        }
+        if (g_menu_ptr.x < 0) {
+            POINT p;
+            GetCursorPos(&p);
+            ScreenToClient(hwnd, &p);
+            g_menu_ptr = p;
+        }
+        if (raw_mice::take_p2_moved() && !g_menu_gun && GetForegroundWindow() == hwnd) {
+            POINT p = g_menu_ptr;
+            ClientToScreen(hwnd, &p);
+            SetCursorPos(p.x, p.y);
+        }
+    }
+    ui.set_cursor(frontend.active() && !pad_in_menu && !frontend.gun_test_open(), float(g_menu_ptr.x), float(g_menu_ptr.y));
+    static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
+    if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
+        frontend.pad_prompts = pad_in_menu || menu_pad;
+        frontend.invalidate();
+    }
+    if (frontend.active()) {
+        RECT rc;
+        GetClientRect(presenter.hwnd(), &rc);
+        double t0 = now_seconds();
+        if (frontend.draw(rc.right, rc.bottom, ui_pixels)) {
+            int y0, y1;
+            if (frontend.partial_rows(y0, y1)) ui.update_rows(ui_pixels.data(), rc.right, rc.bottom, y0, y1);
+            else ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
+            double ms = (now_seconds() - t0) * 1000;
+            if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
+            static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
+            if (menu_shot) bmp_save(menu_shot, rc.right, rc.bottom, ui_pixels.data());
+        }
+    }
+}
+
+// The guns, the keyboard, the gamepads, F12 / F9 and the crosshairs
+void App::read_inputs() {
+    update_aim_reach(presenter.hwnd());
+    poll_keyboard_mouse(presenter.hwnd());
+    {   // survival results: the reload button goes back to the main menu
+        static bool reload_was = false;
+        bool pressed = g_p1_reload_button && !reload_was;
+        reload_was = g_p1_reload_button;
+        if (pressed && !frontend.active() && survival_view().mode == SurvivalMode::Results) {
+            survival_to_menu();
+            g_block_buttons = true;   // the press does not reach the game
+        }
+    }
+    bool pad_pause = poll_gamepads(presenter.hwnd());
+    if (g_pads.changed()) {   // the CONTROLS tab names the pads
+        std::wstring names;
+        bool gyro = false;
+        for (int i = 0; i < Gamepads::MAX; i++) {
+            const PadState& pad = g_pads.pad(i);
+            if (!pad.connected) continue;
+            names += (names.empty() ? L"" : L", ") + std::wstring(pad.name.begin(), pad.name.end());
+            gyro |= pad.has_gyro;
+        }
+        frontend.gamepads = names;
+        frontend.gyro_pad = gyro;
+        frontend.invalidate();
+    }
+    for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
+        static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'R'};
+        bool resume = frontend.screen() == Frontend::Screen::Pause;
+        if (frontend.active()) {
+            frontend.key(k == PadKey::Start ? (resume ? VK_ESCAPE : VK_RETURN) : VK[int(k)]);
+            pad_in_menu = true;
+        }
+    }
+    if (pad_pause && g_opt.menu && !frontend.active()) {
+        frontend.open(Frontend::Screen::Pause);
+        pad_in_menu = true;
+        g_menu_open = g_hold = true;
+    }
+    free_play::set(g_opt.free_play);
+    survival_set_all_open(g_opt.all_arenas);
+    cheats_set_ammo(g_opt.ammo);
+    ui.set_effects(g_opt.menu_effects);
+    join_update();
+    bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
+    if (f12 && !f12_was_down) capture_2d = true;
+    f12_was_down = f12;
+    bool f9 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F9) & 0x8000);
+    // --snap-every N: the same snapshot every N seconds while someone
+    // plays (not in the menus), 60 at most, for reports without a keyboard
+    bool auto_snap = false;
+    if (g_opt.snap_every > 0 && !frontend.active() && (g_inputs.p[0].playing || g_inputs.p[1].playing)) {
+        static double last_snap = now_seconds();
+        static int snaps = 0;
+        if (snaps < 60 && now_seconds() - last_snap >= g_opt.snap_every) {
+            last_snap = now_seconds();
+            snaps++;
+            auto_snap = true;
+        }
+    }
+    if (((f9 && !f9_was_down) || auto_snap) && built) {   // debug snapshot of the scene on screen
+        CreateDirectoryA("out/snap", nullptr);
+        std::string base = "out/snap/snap_" + std::to_string(built->frame);
+        save_snapshot((base + ".bin").c_str(), *built, layers_shown->vram);
+        dump_scene(*scene, layers_shown->back.data(), layers_shown->front.data(), (base + ".txt").c_str());
+        presenter.capture_next(base + ".bmp");
+        printf("Snapshot saved to %s.bin\n", base.c_str());
+    }
+    f9_was_down = f9;
+    if (g_opt.shot_frame && shown != ~0ull && shown + 1 >= g_opt.shot_frame) capture_2d = true;
+    // In widescreen the crosshair follows the gun over the whole picture,
+    // side bands too (a shot there still reloads); only the very edge,
+    // where a light gun parks an off-screen shot, stays without one. In
+    // 4:3 it stops at the picture's edge
+    float side_band = 0;
+    {
+        RECT rc;
+        GetClientRect(presenter.hwnd(), &rc);
+        side_band = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect).game_x0 / SCREEN_W;
+    }
+    for (int p = 0; p < 2; p++) {   // player 2's only while that gun is in use
+        PlayerAim aim = player_aim(p);
+        bool used = (p == 0 || g_inputs.p[1].playing) && !crosshair_idle(p, aim);
+        const float EDGE = 0.004f;
+        bool wide = g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
+        float x = aim.x, y = aim.y;
+        bool on_picture;
+        if (wide) {
+            on_picture = side_band > 0 ? x > -side_band + EDGE && x < 1 + side_band - EDGE && y >= 0 && y <= 1 : aim.inside;
+        } else {
+            // 4:3 (with a bezel): aimed past the picture, the crosshair stops
+            // at its edge (a shot there still reloads, as on the cabinet)
+            x = std::clamp(x, -side_band, 1 + side_band);
+            y = std::clamp(y, 0.0f, 1.0f);
+            on_picture = true;
+        }
+        renderer.set_crosshair(p, g_opt.show_crosshair && used && on_picture && !g_opt.fixed_aim, x, y);
+    }
+}
+
+// Picks the 3D frame and 2D layers to show, draws them and presents the image;
+// false when the loop ends (--shot taken, end of a --replay film)
+bool App::present_frame(double loop_from) {
+    // The 3D frame to draw. While interpolating, the picture shows the game
+    // as it was at `shown_time`: a frame period plus the frames' lateness
+    // before this image's moment on screen, so the next frame is always
+    // here before it is needed and the motion stays even; a new frame is
+    // taken once the picture reaches the one built. Otherwise at once.
+    // While interpolating the frames come from the preparation thread
+    // (their lateness includes its work), otherwise straight from the game
+    bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame;
+    if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
+        prep_on = interpolating;
+        std::lock_guard<std::mutex> lock(ready_mutex);
+        ready_frames.clear();
+    }
+    double display = display_clock.tick(presenter.hwnd());
+    // HALF FRAME RATE: above 100 Hz every other refresh shows the image
+    // before again (only the crosshairs move), half the work of the GPU
+    // (with vsync: without it the images are not tied to refreshes)
+    bool half = g_opt.half_rate && g_opt.vsync && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
+                film.empty();
+    repeat_image = half && !repeat_image;
+    if (repeat_image) {
+        presenter.frame([&](VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
+            renderer.record_repeat(cmd, view, extent);
+            if (survival_shown) survival_layer.record(cmd, view, extent);
+            ui.record(cmd, view, extent);
+            if (toast_shown) toast_layer.record(cmd, view, extent);
+        });
+        presents++;
+        return true;
+    }
+    std::shared_ptr<const R3DFrameState> latest;
+    std::shared_ptr<Prepared> newest;   // the newest frame made ready
+    std::deque<std::shared_ptr<Prepared>> waiting;   // those after the one built (made after the switch)
+    if (interpolating) {
+        std::lock_guard<std::mutex> lock(ready_mutex);
+        while (!ready_frames.empty() && built && ready_frames.front()->state->frame <= built->frame)
+            ready_frames.pop_front();
+        waiting = ready_frames;
+    } else {
+        std::lock_guard<std::mutex> lock(g_r3d_mutex);
+        latest = g_r3d_latest;
+    }
+    if (!waiting.empty()) newest = waiting.back(), latest = newest->state;
+    if (latest && latest != seen) {
+        if (seen) next_period = std::clamp(latest->time - seen->time, 1.0 / 240, 0.1);
+        // How long after its vblank the frame was ready to take, plus how
+        // far ahead of now this image's moment is: from the preparation
+        // thread, when it finished; from the game, when this loop saw it
+        double late = newest ? newest->ready_at - latest->time + (display - display_clock.last) : display - latest->time;
+        // It rises at once with 1.5 ms to spare, so that later frames by a
+        // little do not each step the motion back; a frame much later
+        // than the rest (a one-off slow 2D composition) only raises it if
+        // another follows 0.25-3 s later: alone it costs one hitch, while
+        // raising it would add that delay for a long while. After 5 s
+        // without rising it eases down, by 1% of its excess per frame
+        // (at least 1.7 ms per second): the motion runs up to ~2% faster
+        late = std::clamp(late, 0.0, 0.05);
+        if (late > lateness) {
+            // (the frames right after a slow one are late too: the same hitch)
+            bool spike = false;
+            if (late > lateness + 0.004) {
+                double since = display - lateness_spike;
+                if (since > 3) lateness_spike = display;
+                spike = since > 3 || since < 0.25;
+            }
+            if (!spike) {
+                lateness = late + 0.0015;
+                lateness_rose = display;
+            }
+        } else if (display - lateness_rose > 5) {
+            lateness = std::max(lateness - std::max(0.00003, 0.01 * (lateness - late)), late);
+        }
+        seen = latest;
+    }
+    double shown_time = display - lateness - next_period - 0.0005;
+    bool take = latest && latest != built && (!interpolating || !built || shown_time >= built->time);
+    // The frame to take: the first one waiting that reaches the picture's
+    // moment (the newest if none does)
+    std::shared_ptr<Prepared> ready;
+    if (take && newest) {
+        for (auto& w : waiting)
+            if (w->state->time >= shown_time) {
+                ready = w;
+                break;
+            }
+        if (!ready) ready = newest;
+        latest = ready->state;
+    }
+    // The 2D layers of each vblank are kept in a few copies: while the 3D
+    // frames are interpolated, those of the 3D frame drawn are shown (the
+    // picture runs behind the game; the preparation thread composes them
+    // with it), unless the game stopped drawing 3D; otherwise the newest
+    uint64_t newest_2d;
+    {
+        std::lock_guard<std::mutex> lock(snaps_mutex);
+        poll_snapshots();
+        newest_2d = snaps[newest_snap].frame;
+    }
+    // (on a refresh with no new frame, the one built: the 2D layers must
+    // not run ahead of it in the meantime)
+    const R3DFrameState* game_newest = newest ? newest->state.get() : latest ? latest.get() : built.get();
+    bool follow = interpolating && game_newest && newest_2d != ~0ull && newest_2d <= game_newest->vblank + 4;
+    double scene_from = now_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
+    const uint64_t shown_before = shown;
+    // (shown = ~0: composed again here, as after a change of settings in the pause menu)
+    uint64_t compose_up_to = !follow ? (newest_2d != shown ? newest_2d : ~0ull)
+                                     : shown == ~0ull && built ? built->vblank : ~0ull;
+    if (compose_up_to != ~0ull) take_snapshot(compose_up_to, own_layers);
+    if (compose_up_to != ~0ull && own_layers.frame != ~0ull) {
+        std::lock_guard<std::mutex> lock(prep_mutex);
+        compose_2d(own_layers);
+        if (!own_layers.sky_pictures.empty()) renderer.add_sky_pictures(own_layers.sky_pictures);
+        if (!own_layers.overlays.empty()) renderer.add_overlays(own_layers.overlays);
+        own_layers.sky_pictures.clear();
+        own_layers.overlays.clear();
+        apply_2d(own_layers);
+        layers_prep.reset();
+        scene_seconds += now_seconds() - scene_from;
+    }
+    if (take) {
+        if (ready) frame_period = ready->period;   // its vertices move from the frame built before it
+        else if (built) frame_period = std::clamp(latest->time - built->time, 1.0 / 240, 0.1);
+        built_from = built ? built->vblank : ~0ull;
+        scene_from = now_seconds();
+        if (ready) {   // made ready by the preparation thread, with the 2D layers of its vblank
+            give_pictures(ready->serial);
+            built_prep = ready;
+            scene = &ready->scene;
+            // (a frame number going back a long way is the game restarted from a saved state)
+            const Layers2D& l = ready->layers;
+            if (follow && l.frame != ~0ull && (shown == ~0ull || l.frame > shown || shown - l.frame > 8)) {
+                apply_2d(l);
+                layers_prep = ready;
+            }
+        } else {
+            std::lock_guard<std::mutex> lock(prep_mutex);
+            builder.build(*latest, own_scene);
+            auto images = pack.take_new_images();
+            if (!images.empty()) renderer.add_replacements(images);
+            built_prep.reset();
+            scene = &own_scene;
+        }
+        scene_seconds += now_seconds() - scene_from;
+        g_select_aim = select_dot_on_screen(*scene);
+        built = latest;
+        // The weather (weather.h): --weather in any game, or the one picked
+        // (or rolled) for RANDOM SPAWNS and survival
+        int weather = g_opt.weather;
+        if (weather == WEATHER_NONE && (random_spawns_playing() || survival_enabled()))
+            weather = weather_rolled();
+        renderer.set_weather(R3DWeather::preset(weather));
+        renderer.set_scene(scene);
+        // Its sound (audio/weather_sound.h): the rain we add, and thunder after each strike
+        {
+            static int strikes_heard = 0;
+            g_sound.weather().set_rain(renderer.own_rain());
+            if (renderer.strikes() != strikes_heard) {
+                strikes_heard = renderer.strikes();
+                g_sound.weather().strike(renderer.last_strike());
+            }
+        }
+        if (g_sky_log) {
+            std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+            fprintf(g_sky_log, "3d %llu", (unsigned long long)latest->vblank);
+            for (const R3DViewport& v : scene->viewports)
+                if (v.world) {
+                    fprintf(g_sky_log, " axes");
+                    for (float f : v.world_axes) fprintf(g_sky_log, " %.5f", f);
+                    fprintf(g_sky_log, " cam %.3f %.3f %.3f proj %.5f %.5f %.5f %.5f vp %.1f %.1f %.1f %.1f",
+                            v.camera[0], v.camera[1], v.camera[2], v.proj[0], v.proj[5], v.proj[8], v.proj[9],
+                            v.x, v.y, v.w, v.h);
+                    break;
+                }
+            fprintf(g_sky_log, "\n");
+        }
+        // Debugging aid: LW_SPOTLOG=path writes the world viewport's spotlight every game frame
+        static FILE* spot_log = getenv("LW_SPOTLOG") ? fopen(getenv("LW_SPOTLOG"), "w") : nullptr;
+        if (spot_log) {
+            int worlds = 0;
+            for (const R3DViewport& v : scene->viewports)
+                if (v.world) {
+                    worlds++;
+                    fprintf(spot_log,
+                            "%llu vp%d col %.0f%.0f%.0f c %.4f %.4f r %.4f %.4f start %.3f ext %.2f sun %.3f amb %.3f "
+                            "fog %.5f/%.3f scroll %.3f far %.1f black %d night %.2f "
+                            "light %.3f %.3f %.3f world %.3f %.3f %.3f\n",
+                            (unsigned long long)built->frame, worlds, v.spot_color[0], v.spot_color[1], v.spot_color[2],
+                            v.spot_center[0], v.spot_center[1], v.spot_radius[0], v.spot_radius[1], v.spot_start,
+                            v.spot_extent, v.sun_intensity, v.ambient, v.fog_density, v.fog_ambient, v.scroll_fog,
+                            v.scenery_far, int(renderer.back_black()), renderer.night_level(), v.sun[0], v.sun[1], v.sun[2],
+                            v.world_axes[0] * v.sun[0] + v.world_axes[1] * v.sun[1] + v.world_axes[2] * v.sun[2],
+                            v.world_axes[3] * v.sun[0] + v.world_axes[4] * v.sun[1] + v.world_axes[5] * v.sun[2],
+                            v.world_axes[6] * v.sun[0] + v.world_axes[7] * v.sun[1] + v.world_axes[8] * v.sun[2]);
+                }
+            if (!worlds) fprintf(spot_log, "%llu no world\n", (unsigned long long)built->frame);
+            fflush(spot_log);
+        }
+        // Debugging aid: LW_FILM=first,count records that many game frames
+        // as snapshots in out/film, to replay as a sequence
+        static const char* film_rec = getenv("LW_FILM");
+        static int film_saved = 0;
+        if (film_rec && g_opt.replay.empty()) {
+            unsigned long long first = 0;
+            int count = 0, every = 1;   // optional third value: keep one frame in that many
+            sscanf(film_rec, "%llu,%d,%d", &first, &count, &every);
+            static unsigned long long film_last = 0;
+            if (built->frame >= first && film_saved < count && (!film_saved || built->frame >= film_last + every)) {
+                film_last = built->frame;
+                CreateDirectoryA("out/film", nullptr);
+                char path[64];
+                snprintf(path, sizeof(path), "out/film/f_%06llu.bin", (unsigned long long)built->frame);
+                save_snapshot(path, *built, layers_shown->vram);
+                film_saved++;
+            }
+        }
+    }
+    int y0, y1, tex_dirty_rows = 0;
+    if (g_texture_ram.take_dirty(tex_rows, y0, y1)) {
+        renderer.upload_texture_rows(tex_rows, y0, y1);
+        tex_dirty_rows = y1 - y0;
+    }
+
+    bool shot = g_opt.shot_frame && shown != ~0ull && shown >= g_opt.shot_frame;   // --shot N: screenshot and exit
+    // A replayed scene is captured after a second on screen, once temporal
+    // anti-aliasing (DLAA) has settled
+    static uint64_t replay_presents = 0;
+    if (shot && !g_opt.replay.empty() && replay_presents++ < 60) shot = false;
+    // Debugging aid: LW_SHOTS=N[,FROM[,TO]] saves one game frame in N as out/shots/<frame>.bmp
+    static int shots_every = 0;
+    static unsigned long long shots_from = 0, shots_to = ~0ull;
+    static bool shots_parsed = false;
+    if (!shots_parsed) {
+        shots_parsed = true;
+        if (const char* e = getenv("LW_SHOTS")) sscanf(e, "%d,%llu,%llu", &shots_every, &shots_from, &shots_to);
+    }
+    static uint64_t last_shot = 0;
+    if (shots_every > 0 && shown != ~0ull && shown >= shots_from && shown <= shots_to &&
+        shown >= last_shot + shots_every) {
+        last_shot = shown;
+        CreateDirectoryA("out/shots", nullptr);
+        char path[64];
+        snprintf(path, sizeof(path), "out/shots/%06llu.bmp", (unsigned long long)shown);
+        presenter.capture_next(path);
+    }
+    if (shot) {
+        presenter.capture_next("out/capture.bmp");
+        g_texture_ram.dump("out/texture_ram.bin");
+        dump_scene(*scene, layers_shown->back.data(), layers_shown->front.data(), "out/scene.txt");
+        if (built && g_opt.replay.empty()) {
+            CreateDirectoryA("out/snap", nullptr);
+            save_snapshot("out/snap/shot.bin", *built, layers_shown->vram);
+        }
+    }
+    // The game makes ~57 frames per second; in between, the 3D scene is
+    // drawn part way from the previous frame to the one built, at shown_time
+    // on the game's own evenly spaced timeline
+    static const char* fixed_interp = getenv("LW_INTERP");   // debugging aid: fixed position, e.g. 0.5
+    if ((interpolating || fixed_interp) && built) {
+        double now = now_seconds();
+        double t = std::clamp((shown_time - built->time) / frame_period + 1.0, 0.0, 1.0);
+        if (fixed_interp) t = std::clamp(atof(fixed_interp), 0.0, 1.0);
+        renderer.set_interpolation(float(t));
+        // The back layers move with the 3D when their 2D frames are those
+        // of the two 3D frames it goes between. The 2D layers of a vblank
+        // are what the game wrote in the frame before it: their sky
+        // scroll is that of the previous 3D frame's camera, so the sky
+        // goes on from it with the camera's turn in this frame, as far
+        // as the 3D has gone towards the frame built (set_back_shift,
+        // sky_motion.h)
+        bool paired = shift_to == built->vblank && shift_from == built_from;
+        renderer.set_back_shift(paired ? float(t * double(shift_to - shift_from)) : 0.0f, paired);
+        if (g_sky_log) {
+            std::lock_guard<std::mutex> lock(g_sky_log_mutex);
+            SkyMotion::Row mx = renderer.sky_motion().row(40, 0), my = renderer.sky_motion().row(40, 1);
+            fprintf(g_sky_log, "p %llu %llu %llu %llu %.3f %d %d %.3f %.3f %d %.3f %.3f\n",
+                    (unsigned long long)built->vblank, (unsigned long long)built_from, (unsigned long long)shift_from,
+                    (unsigned long long)shift_to, t, int(paired), int(mx.known), mx.offset, mx.velocity, int(my.known),
+                    my.offset, my.velocity);
+        }
+        if (g_pacing_log) pacing_sample(now, display, built->time - frame_period * (1 - t), *built);
+    }
+    static int film_presents = 0;
+    if (!film.empty() && ++film_presents == 3) {
+        char path[64];
+        snprintf(path, sizeof(path), "out/film_out/%04zu.bmp", film_pos);
+        presenter.capture_next(path);
+    }
+    presenter.frame([&](VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
+        renderer.record(cmd, view, extent);
+        if (survival_shown) survival_layer.record(cmd, view, extent);
+        ui.record(cmd, view, extent);
+        if (toast_shown) toast_layer.record(cmd, view, extent);   // over the menus too: their backdrop is opaque
+    });
+    if (g_frame_log) {
+        const VkPresenter::LastFrame& f = presenter.last_frame();
+        double t = interpolating && built ? std::clamp((shown_time - built->time) / frame_period + 1.0, 0.0, 1.0) : 1;
+        frame_log("P %llu %.6f %.6f %.6f %.4f %llu %llu %.6f %d %d %.3f %d %.3f %.3f %.3f %.3f %.3f %.6f\n",
+                  (unsigned long long)f.present_id, loop_from, display, shown_time, t,
+                  (unsigned long long)(built ? built->frame : 0), (unsigned long long)(latest ? latest->frame : 0),
+                  latest ? latest->time : 0.0, int(take), int(shown != shown_before), scene_seconds * 1000,
+                  tex_dirty_rows, f.fence * 1000, f.acquire * 1000, f.record * 1000, f.present * 1000,
+                  (now_seconds() - loop_from) * 1000, lateness);
+        if (f.present_id) presented_id = f.present_id;
+    }
+    if (!film.empty() && film_presents >= 4) {   // next snapshot of the sequence
+        film_presents = 0;
+        if (++film_pos >= film.size() || !load_snapshot(film[film_pos].c_str())) return false;
+    }
+    if (shot) {
+        printf("Capture saved to out/capture.bmp (frame %llu, %zu polygons, %zu of %zu vertices moving)\n",
+               (unsigned long long)shown, scene->polygons, scene->moving, scene->vertices.size());
+        return false;
+    }
+    presents++;
+    scene_total += scene_seconds;
+    update_title();
+    return true;
+}
+
+// Once a second: the window title (and every 5 s the log) with where the time goes
+void App::update_title() {
+    ULONGLONG now = GetTickCount64();
+    if (now - last_title >= 1000) {
+        // Where the time goes, in ms per frame: the game thread (CPU, without
+        // its waits), the preparation thread (per game frame), this thread's
+        // scene work and command recording, and the time blocked on the GPU
+        // and the display (vsync)
+        VkPresenter::Timing t = presenter.take_timing();
+        uint64_t game_us = g_game_busy_us.exchange(0), game_n = g_game_frames.exchange(0);
+        double per = t.frames ? 1000.0 / t.frames : 0;   // seconds summed over the presents -> ms per present
+        double game_ms = game_n ? double(game_us) / 1000.0 / double(game_n) : 0;
+        double scene_ms = presents ? scene_total * 1000.0 / double(presents) : 0;
+        uint64_t prep_total = prep_us.exchange(0), prep_n = prep_frames.exchange(0);
+        double prep_ms = prep_n ? double(prep_total) / 1000.0 / double(prep_n) : 0;
+        char title[256];
+        snprintf(title, sizeof(title),
+                 "Lost World Native - %llu Hz display - frame %llu - %zu polygons | ms/frame: game %.1f, "
+                 "prep %.1f, scene %.1f, render %.1f, GPU %.1f",
+                 (unsigned long long)(presents * 1000 / (now - last_title)), (unsigned long long)shown,
+                 scene->polygons, game_ms, prep_ms, scene_ms, t.record * per, (t.gpu_wait + t.present) * per);
+        SetWindowTextA(presenter.hwnd(), title);
+        static ULONGLONG last_log = now;
+        if (now - last_log >= 5000) {   // the same, in the log, every 5 s
+            last_log = now;
+            printf("[timing] frame %llu  %zu polygons  ms/frame: game %.2f  prep %.2f  scene %.2f  render %.2f  "
+                   "GPU wait %.2f  present %.2f  (%llu Hz display)\n",
+                   (unsigned long long)shown, scene->polygons, game_ms, prep_ms, scene_ms, t.record * per,
+                   t.gpu_wait * per, t.present * per, (unsigned long long)(presents * 1000 / (now - last_title)));
+            fflush(stdout);
+        }
+        presents = 0;
+        scene_total = 0;
+        last_title = now;
+    }
+}
+
+// Orderly exit: park the game thread, stop the audio, then the video
+void App::shutdown() {
+    stop_threads();
+    g_quit = true;
+    if (g_opt.replay.empty())
+        for (int i = 0; i < 100 && !g_parked; i++) Sleep(10);   // a frame takes ~17 ms; 1 s is plenty
+    music.close();
+    g_audio.stop();
+    outputs::stop();   // mame_stop: Hook of the Reaper lets go of the guns
+    stats_save();
+    fflush(stdout);
+    ui.shutdown();
+    if (survival_shown) survival_layer.shutdown();
+    if (toast_shown) toast_layer.shutdown();
+    toast.shutdown();
+    frontend.shutdown();
+    survival_ui.shutdown();
+    renderer.shutdown();
+    presenter.shutdown();
+    g_pads.shutdown();
+    ExitProcess(0);
+}
+
 int main(int argc, char** argv) {
     // A Windows program, not a console one: no black console window behind the
     // game (from Explorer, LaunchBox or a script). Started from a command
@@ -985,10 +2624,8 @@ int main(int argc, char** argv) {
             g_sound.init(std::move(program), std::move(samples), g_opt.headless ? nullptr : &g_audio);
         if (g_boss_maker >= 0) g_sound.set_dsp_enabled(false);   // the effects only matter when heard
         if (!g_opt.wav_path.empty()) g_sound.dump_wav(g_opt.wav_path.c_str());
-        g_sound.set_volume(g_opt.volume);
-        Scsp::set_cubic(g_opt.cubic_samples);
-        g_sound.set_rear_boost(g_opt.rear_boost);
-        g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers));
+        g_sound.weather().load("res/sound");
+        apply_sound_options(g_opt);
     }
     g_ram = static_cast<uint8_t*>(calloc(RAM_SIZE + 8, 1));
     CreateDirectoryA("save", nullptr);
@@ -1013,1620 +2650,12 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Window: the game runs on its own thread at real speed; this thread draws
-    // the latest image at the monitor's refresh rate (vsync)
-    VkPresenter presenter;
-    presenter.set_vsync(g_opt.vsync);
-    if (!presenter.init("Lost World Native", int(SCREEN_H * 2 * std::max(g_opt.max_aspect, 4.0f / 3.0f)), SCREEN_H * 2,
-                        g_opt.dlaa)) {
-        fprintf(stderr, "Could not start Vulkan; try --headless\n");
-        return 1;
-    }
-    printf("GPU: %s\n", presenter.device_name().c_str());
-    if (g_opt.gamepads) g_pads.init();   // off by default: guns (or the mouse) only, a cabinet's controllers ignored
-    timeBeginPeriod(1);
-    QueryPerformanceFrequency(&g_qpf);
-    QueryPerformanceCounter(&g_start_time);
-    g_realtime = !getenv("LW_FAST");   // debugging aid: a window at full speed
-    // --replay on a folder (recorded with LW_FILM): its snapshots one after
-    // another, each captured to out/film_out, so effects that depend on the
-    // camera motion can be compared frame by frame
-    std::vector<std::string> film;
-    size_t film_pos = 0;
-    DWORD replay_attr = g_opt.replay.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesA(g_opt.replay.c_str());
-    if (replay_attr != INVALID_FILE_ATTRIBUTES && (replay_attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        WIN32_FIND_DATAA fd;
-        HANDLE h = FindFirstFileA((g_opt.replay + "/*.bin").c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do film.push_back(g_opt.replay + "/" + fd.cFileName);
-            while (FindNextFileA(h, &fd));
-            FindClose(h);
-        }
-        std::sort(film.begin(), film.end());
-        if (film.empty()) {
-            fprintf(stderr, "No snapshots in %s\n", g_opt.replay.c_str());
-            return 1;
-        }
-        g_opt.replay = film[0];
-        CreateDirectoryA("out/film_out", nullptr);
-    }
-    if (!g_opt.replay.empty()) {   // --replay: a frozen debug snapshot, the game does not run
-        if (!load_snapshot(g_opt.replay.c_str())) {
-            fprintf(stderr, "Could not read the snapshot %s\n", g_opt.replay.c_str());
-            return 1;
-        }
-        printf("Snapshot %s (frame %llu)\n", g_opt.replay.c_str(), (unsigned long long)g_video_frame);
-    } else {
-        // Records and achievements: real games only, never the scripted or cheated test runs
-        if ((g_opt.menu || survival_enabled()) && g_auto.events.empty() && !getenv("LW_SURV_GOD") &&
-            !getenv("LW_SURV_LIFE"))
-            stats_init();
-        g_audio.start();
-        g_hold = g_opt.menu && !survival_cli;   // the main menu comes first
-        g_boot_skip = g_fast_idle = !g_opt.show_boot;
-        g_sound.set_dsp_enabled(!g_boot_skip);
-        g_sound.set_muted(g_boot_skip);
-        CreateThread(nullptr, 512u << 20, game_thread, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
-    }
-
-    // (not in test runs, nor over graphics options given on the command line)
-    for (int i = 1; i < argc && first_start; i++)
-        for (const char* o : {"--scale", "--half-rate", "--rt", "--no-rt", "--ao", "--no-ao", "--no-shadows", "--no-shafts",
-                              "--no-soft", "--sky", "--no-relief", "--bloom", "--no-bloom"})
-            if (strcmp(argv[i], o) == 0) first_start = false;
-    if (first_start && g_opt.menu) {
-        int q = suggest_quality(presenter);
-        static const char* const NAMES[4] = {"LOW", "MEDIUM", "HIGH", "ULTRA"};
-        printf("[video] first start: quality %s for this graphics card (options menu, DISPLAY)\n", NAMES[q]);
-        ini.set_quality(q);
-        // What QUALITY sets (FrontendSettings::set_quality), now from the level picked
-        g_opt.supersample = ini.scale / 100.0f;
-        g_opt.half_rate = ini.half_rate;
-        g_opt.ray_tracing = ini.ray_tracing;
-        g_opt.ao = ini.ao ? 1.0f : 0.0f;
-        g_opt.shadows = ini.shadows;
-        g_opt.shafts = ini.shafts;
-        g_opt.soft = ini.soft;
-        g_opt.sky_procedural = ini.sky;
-        g_opt.relief = ini.relief;
-        g_opt.bloom = BLOOM_STRENGTH[ini.bloom];
-    }
-    R3DRenderer renderer;
-    if (!renderer.init(presenter, g_opt.supersample, g_opt.msaa, g_opt.aniso, g_opt.dlaa)) {
-        fprintf(stderr, "Could not start the 3D renderer on %s (see the [vulkan] line above)\n",
-                presenter.device_name().c_str());
-        return 1;
-    }
-    renderer.set_max_aspect(g_opt.max_aspect);
-    load_bezel(renderer);
-    renderer.set_smooth_2d(!g_opt.pixel_2d);
-    renderer.set_hud_edges(!g_opt.hud_centre);
-    renderer.set_distance_haze(g_opt.haze);
-    renderer.set_bloom(g_opt.bloom);
-    renderer.set_picture(g_opt.saturation, g_opt.gamma);
-    renderer.set_ambient_occlusion(g_opt.ao);
-    renderer.set_sun(g_opt.sun);
-    renderer.set_night_sky(g_opt.sky_procedural);
-    renderer.set_shadows(g_opt.shadows ? 1.0f : 0.0f);
-    renderer.set_ray_tracing(g_opt.ray_tracing);
-    renderer.set_light_shafts(g_opt.shafts ? 1.0f : 0.0f);
-    renderer.set_soft_particles(g_opt.soft);
-    renderer.set_lightning(g_opt.lightning);
-    renderer.set_rain(g_opt.rain);
-    renderer.set_hdr(g_opt.hdr);
-    renderer.set_rim_light(g_opt.rim);
-    renderer.set_relief(g_opt.relief);
-    renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
-    renderer.set_modern_torch(g_opt.modern_torch);
-    if (g_opt.haze > 0) printf("[video] distance haze on (strength %.2f)\n", g_opt.haze);
-    if (g_opt.dlaa && !renderer.dlaa_active()) printf("[video] DLAA not available: using MSAA\n");
-    if (renderer.dlaa_active())
-        printf("[video] antialiasing NVIDIA DLAA, anisotropic filtering %dx%s\n", g_opt.aniso,
-               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
-    else
-        printf("[video] antialiasing MSAA %dx, anisotropic filtering %dx%s\n", renderer.msaa_samples(), g_opt.aniso,
-               g_opt.aniso > 0 ? " with mipmaps" : " (no mipmaps)");
-    if (g_opt.light_gain != 1.0f) {
-        renderer.set_light_gain(g_opt.light_gain);
-        printf("[video] light x%.2f on the sun and the ambient light\n", g_opt.light_gain);
-    }
-    R3DSceneBuilder builder;
-    builder.set_remove_letterbox(!g_opt.letterbox);
-    builder.set_hud_edges(!g_opt.hud_centre);
-    // The players' prompts move only during play, like the 2D ones (hud_split.h)
-    builder.set_split_prompts([] { return g_inputs.p[0].playing || g_inputs.p[1].playing; });
-    TexturePack pack;
-    pack.init("textures", g_opt.dump_textures ? "out/textures" : "");
-    builder.set_texture_pack(&pack, &g_texture_ram);
-    // 2D replacements: the foreground (GPU slots 1-27) and the layers below the
-    // 3D image (28-55; the backdrops of SkyPack use 56-63)
-    Pack2D pack2d, pack2d_back;
-    pack2d.init("textures/2d", 1, 27);
-    pack2d_back.init("textures/2d_back", 28, SkyPack::FIRST_SLOT - 1);
-    SkyPack sky;   // sky and other backdrops below the 3D image
-    sky.init("textures/sky", g_opt.dump_textures ? "out/sky" : "");
-    sky.set_procedural(g_opt.sky_procedural);
-    // Interpolation of the back layers (the sky, renderer's SkyMotion): the
-    // layer and scroll of each row of the 2D frame composed, and the vblanks
-    // of the last two 2D frames composed (the sky goes on with the camera
-    // while the 3D goes between the 3D frames of those same vblanks)
-    std::vector<int32_t> back_rows(SCREEN_H * 3);
-    uint64_t back_rows_frame = ~0ull, shift_from = ~0ull, shift_to = ~0ull, built_from = ~0ull;
-    TextHD text;   // menus, captions and score drawn from vector fonts
-    if ((g_opt.menu || !g_opt.classic_text) && text.init("textures/text")) renderer.set_text_atlas(text);
-    load_crosshairs(renderer);
-    std::atomic<bool> capture_2d{false};   // F12 / --shot: the next 2D composition is saved
-    bool f12_was_down = false, f9_was_down = false;
-    builder.set_vrom(g_vrom.data(), g_vrom.size());
-    // The 2D layers of one vblank as the renderer takes them (compose_2d below)
-    struct Layers2D {
-        uint64_t frame = ~0ull;   // the vblank
-        std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);   // its layer memory
-        std::vector<uint32_t> back = std::vector<uint32_t>(BACK_W * SCREEN_H),
-                              front = std::vector<uint32_t>(SCREEN_W * SCREEN_H),
-                              text_cells = std::vector<uint32_t>(TextHD::ROW_TEXELS * TextHD::ROWS),
-                              sky_coords = std::vector<uint32_t>(TileGen::SKY_COORDS_W * TileGen::SKY_COORDS_H);
-        std::vector<RgbaImage> overlays, sky_pictures;   // new pictures for the GPU slots
-        bool hud_band = false;
-        float overlay_brightness = 1;
-        std::vector<int32_t> back_rows = std::vector<int32_t>(SCREEN_H * 3);   // layer and scroll per row (TileGen)
-        uint64_t shift_from = ~0ull, shift_to = ~0ull;   // this 2D frame and the one composed before it
-    };
-    // A game frame made ready for the screen ahead of time: its 3D scene and
-    // the 2D layers of its vblank (the preparation thread, below)
-    struct Prepared {
-        std::shared_ptr<const R3DFrameState> state;
-        R3DScene scene;
-        Layers2D layers;
-        uint64_t serial = 0;
-        double ready_at = 0;   // when it was ready
-        double period = 1.0 / 57.524;   // since the frame built before it (where its vertices come from)
-    };
-    R3DScene own_scene;   // built on this thread (no interpolation)
-    const R3DScene* scene = &own_scene;
-    Layers2D own_layers;   // composed on this thread (no 3D, or no interpolation)
-    const Layers2D* layers_shown = &own_layers;
-    std::shared_ptr<Prepared> built_prep, layers_prep;   // the prepared frames in use (scene, 2D layers)
-    std::shared_ptr<const R3DFrameState> built;
-    double frame_period = 1.0 / 57.524;   // between the frame built and the one before
-    // Interpolation timing: the last frame the game published, the time
-    // between its last two frames and how late after its vblank a frame gets
-    // here (the game's CPU time plus this loop's wait for it; follows the
-    // latest frames, easing down slowly)
-    std::shared_ptr<const R3DFrameState> seen;
-    double next_period = 1.0 / 57.524, lateness = 0.004, lateness_rose = 0, lateness_spike = -100;
-    DisplayClock display_clock;
-
-    struct Snapshot2D {
-        uint64_t frame = ~0ull;
-        std::vector<uint8_t> vram = std::vector<uint8_t>(TILEGEN_SIZE);
-        std::array<uint64_t, TILEGEN_PAGES> serial;   // g_video_page_serial of each page copied
-        Snapshot2D() { serial.fill(~0ull); }
-    };
-    std::array<Snapshot2D, 4> snaps;   // the 2D layers of the last vblanks (snaps_mutex)
-    size_t newest_snap = 0;
-    std::mutex snaps_mutex;
-    // Copies the game's newest 2D layers into the ring if they are new; the
-    // caller holds snaps_mutex
-    auto poll_snapshots = [&] {
-        std::lock_guard<std::mutex> lock(g_video_mutex);
-        if (g_video_frame != snaps[newest_snap].frame && !g_boot_skip) {
-            newest_snap = (newest_snap + 1) % snaps.size();
-            Snapshot2D& s = snaps[newest_snap];
-            s.frame = g_video_frame;
-            for (uint32_t p = 0; p < TILEGEN_PAGES; p++)   // (the pages copied again since this one was filled)
-                if (s.serial[p] != g_video_page_serial[p]) {
-                    memcpy(&s.vram[p << 16], &g_video_vram[p << 16], 0x10000);
-                    s.serial[p] = g_video_page_serial[p];
-                }
-        }
-    };
-    // Copies the newest 2D layers at or before that vblank into `out` (its
-    // frame stays ~0 if there are none); takes snaps_mutex
-    auto take_snapshot = [&](uint64_t up_to, Layers2D& out) {
-        std::lock_guard<std::mutex> lock(snaps_mutex);
-        poll_snapshots();
-        const Snapshot2D* pick = nullptr;
-        for (const Snapshot2D& s : snaps)
-            if (s.frame != ~0ull && s.frame <= up_to && (!pick || s.frame > pick->frame)) pick = &s;
-        out.frame = pick ? pick->frame : ~0ull;
-        if (pick) memcpy(out.vram.data(), pick->vram.data(), TILEGEN_SIZE);
-    };
-    // Scratch layers of the 2D composition (compose_2d)
-    std::vector<uint32_t> front_raw(SCREEN_W * SCREEN_H), front_raw_top(SCREEN_W * SCREEN_H),
-        back_raw(SCREEN_W * SCREEN_H), back_raw_top(SCREEN_W * SCREEN_H), back_under(SCREEN_W * SCREEN_H),
-        front_under(SCREEN_W * SCREEN_H);
-    std::vector<uint16_t> tex_rows;
-    uint64_t shown = ~0ull, presents = 0;
-    double scene_total = 0;   // seconds of 2D composition and scene building since the last title
-    ULONGLONG last_title = GetTickCount64();
-
-    // PC front end: main menu at launch, pause menu on Esc
-    Frontend frontend;
-    frontend.gamepad_options = g_opt.gamepads;   // gamepads off: no gamepad settings or hints
-    // The menus are being driven with a gamepad: no mouse pointer until the mouse moves
-    bool pad_in_menu = false;
-    raw_mice::init(presenter.hwnd());   // a second mouse can be player 2's gun
-    if (g_opt.several_mice) raw_mice::set_saved(ini.gun_p1, ini.gun_p2);   // the guns picked in GUN TEST
-    presenter.raw_input = raw_mice::on_input;
-    UiOverlay ui;
-    std::vector<uint32_t> ui_pixels;
-    float haze_strength = g_opt.haze > 0 ? g_opt.haze : 1;
-    float ao_strength = g_opt.ao > 0 ? g_opt.ao : 1;
-    if (g_opt.menu) {
-        if (!frontend.init("third_party/fonts")) printf("[menu] fonts missing: using the Windows ones\n");
-        if (!ui.init(presenter)) g_opt.menu = false;
-    }
-    // Survival results: player 1's reload button (or Esc without the
-    // launcher) goes back to the main menu, and the arcade game as it was
-    // comes back when the menu closes
-    auto survival_to_menu = [&] {
-        survival_end();
-        game_state_load_home();
-        frontend.open(Frontend::Screen::Main);
-        g_menu_open = g_hold = true;
-    };
-    if (g_opt.menu) {
-        FrontendSettings& s = frontend.settings;
-        s = ini;   // the window, the menu music, the gamepad and the guns picked: as the file has them
-        settings_from_options(g_opt, s);
-        frontend.aa_at_launch = s.aa;
-        frontend.rt_available = renderer.ray_tracing_available();
-        if (s.fullscreen && !presenter.fullscreen()) presenter.toggle_fullscreen();
-        if (!survival_cli) {   // survival mode goes straight into the game
-            frontend.open(Frontend::Screen::Main);
-            g_menu_open = true;
-            // No LightgunHID.ini (or an empty one): LIGHT GUN SETUP first
-            if (raw_mice::gun_file_needs_setup()) frontend.start_gun_setup(true);
-        }
-        presenter.input_hook = [&](UINT msg, WPARAM wp, LPARAM lp) -> bool {
-            int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
-            if (!frontend.active()) {   // in the game: Esc pauses
-                if (msg == WM_KEYDOWN && wp == VK_ESCAPE && survival_view().mode == SurvivalMode::Results) {
-                    survival_to_menu();
-                    return true;
-                }
-                if (msg == WM_KEYDOWN && (wp == VK_ESCAPE || wp == VK_TAB)) {   // Tab as in MAME (Esc can quit, via the launcher)
-                    frontend.open(Frontend::Screen::Pause);
-                    g_menu_open = g_hold = true;
-                    return true;
-                }
-                return false;
-            }
-            // Player 2's gun does not drive the menus (raw_mice marks its events),
-            // so the two guns never fight over the pointer
-            bool pointer = msg == WM_MOUSEMOVE || msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN;
-            if (pointer && (g_menu_gun || raw_mice::from_player2())) return true;   // the gun's own input does it
-            if (msg == WM_MOUSEMOVE) g_menu_ptr = {x, y};
-            else if (pointer && g_menu_ptr.x >= 0) x = g_menu_ptr.x, y = g_menu_ptr.y;   // where the crosshair is
-            switch (msg) {
-            case WM_KEYDOWN:
-                // Tab closes the pause menu it opened (not on its own repeat)
-                if (wp == VK_TAB && frontend.screen() == Frontend::Screen::Pause) {
-                    if (!(lp & (1 << 30))) frontend.key(VK_ESCAPE);
-                    return true;
-                }
-                return frontend.key(int(wp));
-            case WM_MOUSEMOVE: {
-                // Windows also sends it when nothing moved (a window or the
-                // pointer changing): those neither bring the pointer back nor
-                // take the highlight from the pad's choice
-                static int last_x = INT_MIN, last_y = INT_MIN;
-                bool moved = x != last_x || y != last_y;
-                last_x = x, last_y = y;
-                if (!moved) return true;
-                pad_in_menu = false;
-                frontend.mouse_move(x, y);
-                return true;
-            }
-            case WM_LBUTTONDOWN: frontend.click(x, y); return true;
-            case WM_RBUTTONDOWN:   // right button: back (not in GUN TEST, where it is a gun reloading)
-                if (!frontend.gun_test_open()) frontend.key(VK_ESCAPE);
-                return true;
-            case WM_MOUSEWHEEL: {
-                POINT p{x, y};   // screen coordinates for this one
-                ScreenToClient(presenter.hwnd(), &p);
-                frontend.wheel(p.x, p.y, GET_WHEEL_DELTA_WPARAM(wp));
-                return true;
-            }
-            }
-            return false;
-        };
-    }
-    auto close_menu = [&] {
-        frontend.open(Frontend::Screen::None);
-        ui.hide();
-        g_menu_open = g_hold = false;
-        g_block_buttons = true;
-    };
-
-    // Boss mode: each fight starts from a game state in save/boss, made the
-    // first time by LostWorld.exe --make-boss-state N in the background (in
-    // a job object, so they stop with the game)
-    std::vector<HANDLE> boss_makers(BOSS_COUNT, nullptr);
-    HANDLE boss_job = CreateJobObjectW(nullptr, nullptr);
-    {
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{};
-        li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        if (boss_job) SetInformationJobObject(boss_job, JobObjectExtendedLimitInformation, &li, sizeof(li));
-    }
-    frontend.boss_status.assign(BOSS_COUNT, Frontend::BOSS_MISSING);
-    for (int i = 0; i < BOSS_COUNT; i++)
-        if (game_state_valid(boss_state_path(i))) frontend.boss_status[i] = Frontend::BOSS_READY;
-    auto start_maker = [&](int i) {
-        const std::wstring exe = exe_path_w();
-        const std::string& rom = g_rom_zip.empty() ? g_data_dir : g_rom_zip;
-        std::wstring cmd = L"\"" + exe + L"\" --make-boss-state " + std::to_wstring(i + 1) +
-                           (g_rom_zip.empty() ? L" --data \"" : L" --rom \"") + std::wstring(rom.begin(), rom.end()) +
-                           L"\"";
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE,
-                            CREATE_NO_WINDOW | CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi)) {
-            frontend.boss_status[i] = Frontend::BOSS_FAILED;
-            return;
-        }
-        if (boss_job) AssignProcessToJobObject(boss_job, pi.hProcess);
-        ResumeThread(pi.hThread);
-        CloseHandle(pi.hThread);
-        boss_makers[i] = pi.hProcess;
-        frontend.boss_status[i] = Frontend::BOSS_PREPARING;
-        printf("[boss] preparing %ls\n", BOSSES[i].name);
-    };
-    int boss_pending = -1;     // picked: loads once the boot screens are skipped
-    bool boss_loading = false; // asked the game thread for it
-    int boss_fight = -1;       // the fight on
-    double boss_over_at = 0;   // when its stage ended or the game was over
-    bool boss_p2_played = false;   // player 2 joined this fight
-    double boss_p2_idle_at = 0;    // since when player 2 has not been playing (CONTINUE screen)
-    // Debugging aid: LW_BOSS=N starts the fight with boss N (1-4) right away
-    if (const char* b = getenv("LW_BOSS")) {
-        int i = atoi(b) - 1;
-        if (i >= 0 && i < BOSS_COUNT && frontend.boss_status[i] == Frontend::BOSS_READY) boss_pending = i;
-    }
-
-    // Survival mode screens (loading, start, wave counter, results)
-    SurvivalUi survival_ui;
-    UiOverlay survival_layer;
-    std::vector<uint32_t> survival_pixels;
-    bool survival_shown = (survival_cli || g_opt.menu) && survival_ui.init("third_party/fonts") &&
-                          survival_layer.init(presenter);
-    bool confirm_was_down = true;
-    // A run starts from the arcade game at its attract (the home state: kept
-    // the first time, put back the next ones), fast-forwarded and muted
-    // behind the loading screen; Esc on the results goes back to the menu
-    bool survival_cli_pending = survival_cli;   // waits for the boot screens
-    bool survival_wait_home = false;
-    uint64_t survival_audio_at = 0;   // audio frames out when the loading began (it stays silent)
-    SurvivalMode survival_last = SurvivalMode::Off;
-    auto start_survival = [&](int stage, int zone) {
-        if (game_state_has_home()) game_state_load_home();
-        else game_state_keep_home();
-        survival_wait_home = true;
-        survival_audio_at = g_sound.frames_out();
-        survival_begin(stage, zone);
-        g_boot_skip = g_fast_idle = true;
-        g_sound.set_dsp_enabled(false);
-        g_sound.set_muted(true);
-        if (g_opt.menu) close_menu();
-        else g_hold = false;
-    };
-
-    // A shot on the start screen begins the hunt; on the results, a new one
-    // from the very start (the arena's first spot and encounter), as from the menu
-    auto survival_go_on = [&](const SurvivalView& sv) {
-        if (sv.mode == SurvivalMode::Results) {
-            start_survival(sv.stage, sv.zone);
-            return;
-        }
-        survival_confirm();
-        g_hold = false;
-    };
-
-    // Achievement notices, over the game and under the menus
-    AchievementToast toast;
-    UiOverlay toast_layer;
-    std::vector<uint32_t> toast_pixels;
-    bool toast_shown = toast.init("third_party/fonts") && toast_layer.init(presenter);
-    toast.set_volume(g_opt.volume);
-    MenuMusic music;   // over the menus' backdrop, when there is a music file
-    if (g_opt.menu && !g_opt.headless) music.open();
-    double music_time = now_seconds();
-
-    // Composes the 2D layers of a vblank (out.frame, its layer memory in
-    // out.vram) for the renderer. One composition at a time (prep_mutex): the
-    // 2D packs and the back layers' scroll keep state between them
-    auto compose_2d = [&](Layers2D& out) {
-        const TextHD* hd_text = g_opt.classic_text ? nullptr : &text;
-        if (!hd_text) std::fill(out.text_cells.begin(), out.text_cells.end(), 0u);
-        bool capture = capture_2d.exchange(false);
-        if (capture) sky.capture();   // F12 also saves the backdrops, for textures/sky
-        bool sky_on = sky.active();
-        // Raw layers for recognising the 2D replacements (and for F12)
-        bool raw_front = !pack2d.empty() || capture || g_opt.capture_popups, raw_back = !pack2d_back.empty() || capture;
-        TileGen::compose(out.vram.data(),
-                         {.back = out.back.data(),
-                          .front = out.front.data(),
-                          .front_raw = raw_front ? front_raw.data() : nullptr,
-                          .front_raw_top = raw_front ? front_raw_top.data() : nullptr,
-                          .front_under = raw_front ? front_under.data() : nullptr,
-                          .back_raw = raw_back ? back_raw.data() : nullptr,
-                          .back_raw_top = raw_back ? back_raw_top.data() : nullptr,
-                          .back_under = raw_back ? back_under.data() : nullptr,
-                          .text_cells = out.text_cells.data(),
-                          .sky_coords = sky_on ? out.sky_coords.data() : nullptr,
-                          .back_rows = back_rows.data()},
-                         hd_text, sky_on ? &sky : nullptr);
-        // Survival is for one player: the game's own "Push 2P Start" in
-        // player 2's corner (fn_0002F338 draws it at cells 41..60, rows
-        // 43..46) is left out, so nothing invites a player who can't join
-        if (survival_shown && survival_view().mode != SurvivalMode::Off) {
-            constexpr int X0 = 312, Y0 = 336;   // cells 39.. and 42.. (a margin around the prompt)
-            // (the raw layers too: a 2D replacement picture is found from them)
-            for (uint32_t* layer : {out.front.data(), raw_front ? front_raw.data() : nullptr,
-                                    raw_front ? front_raw_top.data() : nullptr, raw_front ? front_under.data() : nullptr})
-                if (layer)
-                    for (int y = Y0; y < SCREEN_H; y++) std::fill(layer + y * SCREEN_W + X0, layer + y * SCREEN_W + SCREEN_W, 0u);
-            for (int cy = Y0 / 8; cy < TextHD::CELLS_Y; cy++)
-                for (int cx = X0 / 8; cx < TextHD::CELLS_X; cx++)
-                    std::fill_n(&out.text_cells[(cy * TextHD::CELLS_X + cx) * TextHD::CELL_TEXELS], TextHD::CELL_TEXELS, 0u);
-        }
-        // The layer and scroll of each row of the back layers, for drawing
-        // them in between game frames (renderer.set_sky_rows)
-        {
-            out.back_rows = back_rows;
-            // Debugging aid: LW_SKYLOG=path writes the back layers' scroll of each 2D
-            // frame and the world camera of each 3D frame (tools/sky_log.py)
-            if (g_sky_log) {
-                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
-                fprintf(g_sky_log, "2d %llu", (unsigned long long)out.frame);
-                for (int y = 0; y < SCREEN_H; y += 8)
-                    fprintf(g_sky_log, " %d,%d,%d", back_rows[3 * y], back_rows[3 * y + 1], back_rows[3 * y + 2]);
-                fprintf(g_sky_log, "\n");
-            }
-            out.shift_from = back_rows_frame;
-            out.shift_to = back_rows_frame = out.frame;
-        }
-        out.sky_pictures = sky.take_new_images();
-        // --capture-popups: a capture whenever the band under the scores
-        // (where a shot's ECHO, HIT... shows) holds more than a number, once
-        // per new picture there, for making their 2D replacements
-        if (g_opt.capture_popups && !capture) {
-            static uint64_t last_hash = 0;
-            static double last_at = 0;
-            static int captures = 0;
-            int lit = 0;
-            uint64_t h = 1469598103934665603ull;
-            for (int y = 58; y < hud_split::POPUP_ROWS; y++)   // (below the scores' second line)
-                for (int x = 0; x < SCREEN_W; x++) {
-                    uint32_t p = front_raw_top[y * SCREEN_W + x];
-                    if (p >> 24) lit++, h = (h ^ (uint64_t(y * SCREEN_W + x) << 32 ^ p)) * 1099511628211ull;
-                }
-            if (lit > 120 && h != last_hash && captures < 80 && now_seconds() - last_at > 0.25) {
-                last_hash = h, last_at = now_seconds(), captures++;
-                capture = true;
-            }
-        }
-        if (capture) {   // F12 or --shot: capture for tools/make_2d_replacement.py
-            CreateDirectoryA("out/2d", nullptr);
-            std::string path = "out/2d/capture_" + std::to_string(out.frame);
-            Pack2D::save_capture(front_raw.data(), path);
-            Pack2D::save_capture(front_raw_top.data(), path + "_layer_a");   // only the texts' layers
-            Pack2D::save_capture(back_raw.data(), path + "_back");          // the layers below the 3D image
-            Pack2D::save_capture(back_raw_top.data(), path + "_back_layer_a");
-            printf("2D layer saved to %s.png\n", path.c_str());
-        }
-        // The top band only moves to the screen edges when it looks like a
-        // HUD (empty in the middle), not when it is part of a picture.
-        // Measured before the 2D replacements clear what they cover (the
-        // boss name plate in the middle stays a reason to keep it)
-        int middle = 0;
-        for (int y = 0; y < 36; y++)
-            for (int x = 160; x < 336; x++)
-                middle += (out.front[y * SCREEN_W + x] >> 24) != 0 ||
-                          out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
-        out.hud_band = middle * 20 < 36 * 176;
-        // Widescreen: each player's prompts (RELOAD, lives, CONTINUE) go to the
-        // middle of that player's half of the wide picture (hud_split.h); the
-        // rows that move are handed to the shader in sky_coords' last row
-        // (TileGen::SPLIT_ROW). Measured before the 2D
-        // replacements too, so a replaced RELOAD moves with its place
-        {
-            uint32_t* split_rows = &out.sky_coords[size_t(TileGen::SPLIT_ROW) * TileGen::SKY_COORDS_W];
-            bool wide = !g_opt.hud_centre && g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
-            if (wide && (g_inputs.p[0].playing || g_inputs.p[1].playing))
-                hud_split::rows_2d(
-                    [&](int x, int y) {
-                        return (out.front[y * SCREEN_W + x] >> 24) != 0 ||
-                               out.text_cells[((y / 8) * TextHD::CELLS_X + x / 8) * TextHD::CELL_TEXELS] != 0;
-                    },
-                    split_rows);
-            else
-                std::fill(split_rows, split_rows + SCREEN_H, 0u);
-        }
-        int offset[3];
-        TileGen::front_offset(out.vram.data(), offset);
-        // Survival's start screen: the game stands still on its first frame
-        // in the arena, where the foreground can still hold the screen the
-        // home state was kept at (from the menu, the boot's FBI warning)
-        SurvivalMode surv_mode = survival_shown ? survival_view().mode : SurvivalMode::Off;
-        if (surv_mode == SurvivalMode::Loading || surv_mode == SurvivalMode::Ready) {
-            std::fill(out.front.begin(), out.front.end(), 0u);
-            std::fill(out.text_cells.begin(), out.text_cells.end(), 0u);
-        } else if (!pack2d.empty())
-            pack2d.apply(out.front.data(), SCREEN_W, front_raw.data(), front_raw_top.data(), out.text_cells.data(),
-                         false, front_under.data(), out.back.data() + BACK_MARGIN, BACK_W);
-        if (!pack2d_back.empty())
-            pack2d_back.apply(out.back.data() + BACK_MARGIN, BACK_W, back_raw.data(), back_raw_top.data(),
-                              out.text_cells.data(), true, back_under.data());
-        out.overlay_brightness = float(offset[0] + offset[1] + offset[2]) / (3 * 255.0f);
-        out.overlays = pack2d.take_new_images();
-        for (auto& img : pack2d_back.take_new_images()) out.overlays.push_back(std::move(img));
-    };
-    // Hands composed 2D layers to the renderer (their new pictures go separately)
-    auto apply_2d = [&](const Layers2D& l) {
-        renderer.set_sky_coords(l.sky_coords.data());
-        renderer.set_sky_rows(l.frame, l.back_rows.data());
-        renderer.set_hud_band(l.hud_band);
-        renderer.set_overlay_brightness(l.overlay_brightness);
-        renderer.set_text_cells(l.text_cells.data());
-        renderer.set_layers(l.back.data(), l.front.data());
-        shift_from = l.shift_from;
-        shift_to = l.shift_to;
-        shown = l.frame;
-        layers_shown = &l;
-    };
-
-    // Preparation thread: while interpolating, each new game frame is made
-    // ready as soon as the game finishes it, its 3D scene and its 2D layers
-    // side by side, so this thread only draws and keeps up with every
-    // refresh (the two took ~14 ms here, more than a refresh at 120 Hz, and
-    // the images went out unevenly). The interpolation delay follows when
-    // the frames are ready (lateness), so it includes this work
-    std::mutex prep_mutex;    // one composition and one scene build at a time
-    std::mutex ready_mutex;   // ready_frames and ready_pictures
-    // The last frames made ready, oldest first: the picture runs behind the
-    // game by the frames' lateness, so after a slow frame several can be
-    // waiting, and each is taken in turn (its vertices move from the frame
-    // before it, so skipping one would stretch that motion over two)
-    std::deque<std::shared_ptr<Prepared>> ready_frames;
-    // New pictures for the GPU slots, in order: handed over when their frame
-    // (or a later one) is taken, also those of frames never taken
-    struct NewPictures {
-        uint64_t serial = 0;
-        std::vector<RgbaImage> replacements, overlays, sky;
-    };
-    std::deque<NewPictures> ready_pictures;
-    auto give_pictures = [&](uint64_t serial) {
-        std::vector<NewPictures> due;
-        {
-            std::lock_guard<std::mutex> lock(ready_mutex);
-            while (!ready_pictures.empty() && ready_pictures.front().serial <= serial) {
-                due.push_back(std::move(ready_pictures.front()));
-                ready_pictures.pop_front();
-            }
-        }
-        for (NewPictures& n : due) {
-            if (!n.replacements.empty()) renderer.add_replacements(n.replacements);
-            if (!n.overlays.empty()) renderer.add_overlays(n.overlays);
-            if (!n.sky.empty()) renderer.add_sky_pictures(n.sky);
-        }
-    };
-    std::atomic<bool> prep_on{false}, prep_stop{false};
-    std::atomic<uint64_t> prep_us{0}, prep_frames{0};   // its work, read once a second
-    std::thread prep_thread([&] {
-        std::vector<std::shared_ptr<Prepared>> pool;   // reused once nobody else holds them
-        std::shared_ptr<const R3DFrameState> done;
-        uint64_t serial = 0;
-        while (!prep_stop) {
-            std::shared_ptr<const R3DFrameState> state;
-            {
-                std::unique_lock<std::mutex> lock(g_r3d_mutex);
-                g_r3d_cv.wait_for(lock, std::chrono::milliseconds(20),
-                                  [&] { return prep_stop || (prep_on && g_r3d_latest != done); });
-                state = g_r3d_latest;
-            }
-            if (!prep_on) done.reset();
-            if (prep_stop || !prep_on || !state || state == done) continue;
-            double before = done ? done->time : 0;
-            done = state;
-            std::shared_ptr<Prepared> p;
-            for (auto& q : pool)
-                if (q.use_count() == 1) {
-                    p = q;
-                    break;
-                }
-            if (!p) pool.push_back(p = std::make_shared<Prepared>());
-            p->state = state;
-            p->serial = ++serial;
-            p->period = before > 0 ? std::clamp(state->time - before, 1.0 / 240, 0.1) : 1.0 / 57.524;
-            NewPictures pictures;
-            pictures.serial = p->serial;
-            {
-                std::lock_guard<std::mutex> lock(prep_mutex);
-                take_snapshot(state->vblank, p->layers);   // the 2D layers of the frame's vblank
-                std::future<void> layers;
-                if (p->layers.frame != ~0ull)
-                    layers = std::async(std::launch::async, [&] { compose_2d(p->layers); });
-                double from = now_seconds();
-                builder.build(*state, p->scene);
-                double built_at = now_seconds();
-                pictures.replacements = pack.take_new_images();
-                if (layers.valid()) layers.get();
-                double took = now_seconds() - from;
-                prep_us += uint64_t(took * 1e6);
-                prep_frames++;
-                frame_log("R %llu %.6f %.3f %.3f\n", (unsigned long long)state->frame, now_seconds(),
-                          (built_at - from) * 1000, took * 1000);
-                pictures.overlays.swap(p->layers.overlays);
-                pictures.sky.swap(p->layers.sky_pictures);
-                p->layers.overlays.clear();
-                p->layers.sky_pictures.clear();
-            }
-            std::lock_guard<std::mutex> lock(ready_mutex);
-            ready_pictures.push_back(std::move(pictures));
-            p->ready_at = now_seconds();
-            if (prep_on) {
-                ready_frames.push_back(p);
-                if (ready_frames.size() > 8) ready_frames.pop_front();
-            }
-        }
-    });
-    // LW_FRAMELOG: a thread notes when each present reaches the screen
-    std::atomic<uint64_t> presented_id{0};
-    std::thread shown_waiter;
-    if (g_frame_log && presenter.can_wait_present())
-        shown_waiter = std::thread([&] {
-            uint64_t next = 1;
-            while (!prep_stop) {
-                if (next > presented_id) {
-                    Sleep(1);
-                    continue;
-                }
-                if (presenter.wait_present(next, 100'000'000))
-                    frame_log("S %llu %.6f\n", (unsigned long long)next, now_seconds());
-                next++;
-            }
-        });
-    // Both threads stop when the loop ends (and with this scope, however it ends)
-    struct StopThreads {
-        std::atomic<bool>& stop;
-        std::thread &a, &b;
-        void operator()() {
-            stop = true;
-            g_r3d_cv.notify_all();
-            if (a.joinable()) a.join();
-            if (b.joinable()) b.join();
-        }
-        ~StopThreads() { (*this)(); }
-    } stop_threads{prep_stop, prep_thread, shown_waiter};
-
-    // At most this many images wait for the screen (VK_KHR_present_wait): the
-    // picture goes out that many refreshes after it is drawn (~17 ms at
-    // 120 Hz) instead of after a full swapchain (~32 ms). When refreshes are
-    // missed twice within 2 s (the GPU busier than usual), one more for 10 s.
-    // Debugging aid: LW_QUEUE=N (0 = the whole swapchain)
-    const int queue_depth = getenv("LW_QUEUE") ? atoi(getenv("LW_QUEUE")) : 2;
-    int queue_extra = 0;
-    double went_out = 0, last_miss = -100;
-    bool repeat_image = false;   // HALF FRAME RATE: this refresh shows the last image again
-    // VSYNC: OFF still draws no more images than the monitor's refreshes:
-    // without a limit the GPU draws thousands a second for nothing and the
-    // game thread falls behind (uneven game frames). Measured with
-    // LW_FRAMELOG on an RTX 5070 Ti at 120 Hz: ~1700 images a second
-    double next_image = 0;
-    HANDLE image_timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-    for (;;) {
-        {   // before the inputs are read
-            int depth = queue_depth ? queue_depth + queue_extra : 0;
-            double out = presenter.limit_queue(depth, 50'000'000);
-            if (out > 0 && went_out > 0 && out - went_out > 1.5 * display_clock.period) {
-                if (out - last_miss < 2 && !queue_extra) {
-                    queue_extra = 1;
-                    printf("[video] refreshes missed: %d images queued for a while\n", depth + 1);
-                }
-                last_miss = out;
-            }
-            if (queue_extra && out - last_miss > 10) {
-                queue_extra = 0;
-                out = 0;   // the next wait skips a refresh: not a miss
-            }
-            went_out = out;
-        }
-        if (!g_opt.vsync) {   // the next image a refresh after the last (from now after a slow one)
-            double period = display_clock.period, now = now_seconds();
-            if (now - next_image > period) next_image = now;
-            if (image_timer && next_image - now > 0.001) {   // to ~0.5 ms before, then a spin
-                LARGE_INTEGER due;
-                due.QuadPart = -LONGLONG((next_image - now - 0.0005) * 1e7);
-                if (SetWaitableTimer(image_timer, &due, 0, nullptr, nullptr, FALSE))
-                    WaitForSingleObject(image_timer, 100);
-            } else if (!image_timer) {
-                while (next_image - now > 0.002) Sleep(1), now = now_seconds();
-            }
-            while (now_seconds() < next_image) YieldProcessor();
-            next_image += period;
-        }
-        if (!presenter.pump()) break;
-        double loop_from = now_seconds();
-        if (survival_cli_pending && !g_boot_skip) {   // at the SEGA logo: the home state is the game from here
-            survival_cli_pending = false;
-            start_survival(cli_stage, cli_zone);
-        }
-        if (survival_wait_home && game_state_result() != 0) {
-            survival_wait_home = false;
-            survival_ungate();
-        }
-        if (survival_shown) {
-            SurvivalView sv = survival_view();
-            if (survival_last == SurvivalMode::Loading && sv.mode != SurvivalMode::Loading)
-                printf("[survival] audio during the loading: %llu samples\n",
-                       (unsigned long long)(g_sound.frames_out() - survival_audio_at));
-            if (survival_last == SurvivalMode::Loading && sv.mode == SurvivalMode::Off && g_opt.menu && !g_menu_open)
-                survival_to_menu();   // the game never got to the arena: not left running behind the loading screen
-            survival_last = sv.mode;
-            if (survival_cli_pending) {   // the boot screens: already the loading screen
-                sv.mode = SurvivalMode::Loading;
-                sv.stage = cli_stage, sv.zone = cli_zone;
-            }
-            // A shot (or Enter / Space) on the start and results screens
-            HWND hw = presenter.hwnd();
-            bool fg = GetForegroundWindow() == hw;
-            bool down = fg && ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) || (GetAsyncKeyState(VK_RETURN) & 0x8000) ||
-                               (GetAsyncKeyState(VK_SPACE) & 0x8000));
-            for (int i = 0; i < Gamepads::MAX; i++) down |= fg && g_pads.pad(i).fire;
-            // (the results only after a moment: the player is still shooting when the hunt ends)
-            bool waiting = sv.mode == SurvivalMode::Ready ||
-                           (sv.mode == SurvivalMode::Results && now_seconds() - sv.results_at > SURVIVAL_RESULTS_DELAY);
-            // Where the game screen is in the window: for the BONUS target
-            RECT rc;
-            GetClientRect(hw, &rc);
-            ScreenLayout lay = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect);
-            SurvivalLayout surv_lay{lay.scale, lay.ox, lay.oy, lay.game_x0};
-            if (waiting && down && !confirm_was_down && !frontend.active()) {
-                survival_go_on(sv);
-                g_block_buttons = true;   // the click does not fire in the game
-            }
-            confirm_was_down = down;
-            // Debugging aid: LW_SURV_SHOTS=1 captures each screen of the mode
-            // (out/survival_<mode>.bmp) and then shoots by itself
-            static const bool surv_shots = getenv("LW_SURV_SHOTS") != nullptr;
-            static SurvivalMode shot_mode = SurvivalMode::Off;
-            static double shot_since = 0;
-            if (surv_shots) {
-                if (sv.mode != shot_mode) shot_mode = sv.mode, shot_since = now_seconds();
-                double t = now_seconds() - shot_since;
-                if (t > 1.5 && t < 1.6 && shot_mode != SurvivalMode::Off) {
-                    shot_since -= 1;   // once
-                    presenter.capture_next("out/survival_" + std::to_string(int(shot_mode)) + ".bmp");
-                }
-                if (t > 3 && waiting) {   // LW_SURV_SHOTS=2: the results go back to the menu
-                    if (sv.mode == SurvivalMode::Results && getenv("LW_SURV_SHOTS")[0] == '2' && g_opt.menu) {
-                        survival_to_menu();
-                        shot_mode = SurvivalMode::Off;
-                    } else {
-                        survival_go_on(sv);
-                    }
-                }
-            }
-            if (survival_ui.draw(rc.right, rc.bottom, sv, now_seconds(), survival_pixels, surv_lay))
-                survival_layer.set_image(survival_pixels.data(), rc.right, rc.bottom);
-        }
-        if (toast_shown) {
-            for (int i : stats_take_new_achievements())
-                toast.push(achievement_table()[size_t(i)].name, achievement_table()[size_t(i)].text);
-            for (int i : survival_take_unlocked())
-                toast.push_rising(L"ARENA UNLOCKED  \u00B7  SURVIVAL!", SURVIVAL_ZONES[i].name,
-                                  L"Play it from PLAY > SURVIVAL");
-            RECT rc;
-            GetClientRect(presenter.hwnd(), &rc);
-            if (toast.draw(rc.right, rc.bottom, now_seconds(), toast_pixels))
-                toast_layer.set_image(toast_pixels.data(), rc.right, rc.bottom);
-        }
-        if (g_opt.menu) {
-            for (Frontend::Action a : frontend.take_actions()) {
-                FrontendSettings& s = frontend.settings;
-                switch (a) {
-                case Frontend::Action::StartArcade:   // the game at the SEGA logo is the home state QUIT TO MAIN MENU puts back
-                    if (!g_boot_skip) game_state_keep_home();
-                    random_spawns_set(frontend.random_spawns);   // CLASSIC > ARCADE or RANDOM SPAWNS
-                    [[fallthrough]];
-                case Frontend::Action::Resume:
-                    boss_pending = -1;
-                    close_menu();
-                    break;
-                case Frontend::Action::StartSurvival: {
-                    const SurvivalZone& z = SURVIVAL_ZONES[frontend.survival_choice];
-                    boss_pending = -1;
-                    random_spawns_set(false);
-                    if (boss_fight >= 0 || frontend.boss_mode) {   // from boss mode: back to the arcade first
-                        boss_fight = -1;
-                        frontend.boss_mode = false;
-                    }
-                    start_survival(z.stage, z.zone);
-                    break;
-                }
-                case Frontend::Action::StartBoss:
-                    random_spawns_set(false);
-                    if (frontend.boss_status[frontend.boss_choice] == Frontend::BOSS_READY) boss_pending = frontend.boss_choice;
-                    break;
-                case Frontend::Action::PrepareBosses:
-                    for (int i = 0; i < BOSS_COUNT; i++)
-                        if (frontend.boss_status[i] == Frontend::BOSS_FAILED) frontend.boss_status[i] = Frontend::BOSS_MISSING;
-                    break;
-                case Frontend::Action::LeaveBossMode:   // the arcade game as it was comes back when the menu closes
-                    boss_pending = -1;
-                    game_state_load_home();
-                    boss_fight = -1;
-                    frontend.boss_mode = false;
-                    frontend.open(Frontend::Screen::Main);
-                    break;
-                case Frontend::Action::QuitToMenu:   // from the pause menu of any mode
-                    boss_pending = -1;
-                    if (survival_view().mode != SurvivalMode::Off) {
-                        survival_to_menu();
-                        break;
-                    }
-                    boss_fight = -1;
-                    frontend.boss_mode = false;
-                    game_state_load_home();
-                    frontend.open(Frontend::Screen::Main);
-                    break;
-                case Frontend::Action::Quit: presenter.close(); break;
-                case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
-                case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
-                case Frontend::Action::GunsPicked: {   // LIGHT GUN SETUP: LightgunHID.ini
-                    std::wstring id[2] = {raw_mice::usb_id(frontend.picked_gun[0]), raw_mice::usb_id(frontend.picked_gun[1])};
-                    if (frontend.picked_none) raw_mice::write_gun_file(L"", L"", true);
-                    else if (!id[0].empty() && id[0] != id[1]) raw_mice::write_gun_file(id[0], id[1], false);
-                    else   // (two guns with the same ids, or none: GUN TEST's choice by device, in settings.ini)
-                        printf("[mouse] the guns picked have no USB ids of their own: kept by device in settings.ini\n");
-                    raw_mice::reload_gun_file();
-                    frontend.guns_pinned = raw_mice::guns_pinned();
-                    break;
-                }
-                case Frontend::Action::SettingsChanged: {
-                    const Options was = g_opt;
-                    options_from_settings(s, g_opt);
-                    g_sound.set_volume(g_opt.volume);
-                    toast.set_volume(g_opt.volume);
-                    Scsp::set_cubic(g_opt.cubic_samples);
-                    g_sound.set_rear_boost(g_opt.rear_boost);
-                    g_audio.set_speakers(AudioStream::Speakers(g_opt.speakers));
-                    renderer.set_supersample(g_opt.supersample);
-                    presenter.set_vsync(g_opt.vsync);
-                    if (g_opt.max_aspect != was.max_aspect) renderer.set_max_aspect(g_opt.max_aspect);
-                    renderer.set_distance_haze(s.haze ? haze_strength : 0);   // at the strength of the start (--haze)
-                    renderer.set_bloom(g_opt.bloom);
-                    renderer.set_ambient_occlusion(s.ao ? ao_strength : 0);
-                    renderer.set_sun(g_opt.sun);
-                    renderer.set_shadows(g_opt.shadows ? 1.0f : 0.0f);
-                    renderer.set_ray_tracing(g_opt.ray_tracing);
-                    renderer.set_light_shafts(g_opt.shafts ? 1.0f : 0.0f);
-                    renderer.set_soft_particles(g_opt.soft);
-                    renderer.set_lightning(g_opt.lightning);
-                    renderer.set_rain(g_opt.rain);
-                    renderer.set_hdr(g_opt.hdr);
-                    renderer.set_rim_light(g_opt.rim);
-                    renderer.set_relief(g_opt.relief);
-                    renderer.set_sharpen(g_opt.sharpen ? 0.5f : 0.0f);
-                    renderer.set_modern_torch(g_opt.modern_torch);
-                    if (g_opt.sky_procedural != was.sky_procedural) {
-                        {
-                            std::lock_guard<std::mutex> lock(prep_mutex);   // not while composing
-                            sky.set_procedural(g_opt.sky_procedural);
-                        }
-                        renderer.set_night_sky(g_opt.sky_procedural);
-                        shown = ~0ull;   // compose the 2D layer again even while the game stands still
-                    }
-                    if (g_opt.classic_text != was.classic_text)
-                        shown = ~0ull;   // compose the 2D layer again even while the game stands still
-                    if (g_opt.custom_crosshair != was.custom_crosshair) load_crosshairs(renderer);
-                    if (g_opt.interp != was.interp) {
-                        renderer.set_interpolation(1.0f);   // the latest game frame as it is
-                        renderer.set_back_shift(0.0f, false);
-                    }
-                    if (!g_opt.several_mice) raw_mice::reset();
-                    else raw_mice::set_saved(s.gun_p1, s.gun_p2);
-                    g_subtitles = g_opt.subtitles;
-                    renderer.set_picture(g_opt.saturation, g_opt.gamma);
-                    g_pad_settings = {s.pad_speed, s.gyro, s.gyro_speed, s.vibration, s.aim_assist};
-                    s.save("save/settings.ini");
-                    break;
-                }
-                default: break;
-                }
-            }
-            // Boss mode
-            for (int i = 0; i < BOSS_COUNT; i++) {
-                if (boss_makers[i] && WaitForSingleObject(boss_makers[i], 0) == WAIT_OBJECT_0) {
-                    CloseHandle(boss_makers[i]);
-                    boss_makers[i] = nullptr;
-                    bool ok = game_state_valid(boss_state_path(i));
-                    frontend.boss_status[i] = ok ? Frontend::BOSS_READY : Frontend::BOSS_FAILED;
-                    printf("[boss] %ls: %s\n", BOSSES[i].name, ok ? "ready" : "could not be prepared");
-                    frontend.invalidate();
-                }
-            }
-            // Missing states are made from the launch on (once the boot is
-            // over and the EEPROM file exists, see --make-boss-state), one at
-            // a time so the game keeps its speed; all at once while the list
-            // of bosses is open
-            bool can_make = !g_boot_skip && GetFileAttributesA("save/eeprom.bin") != INVALID_FILE_ATTRIBUTES;
-            for (int i = 0; can_make && i < BOSS_COUNT; i++) {
-                bool busy = std::any_of(boss_makers.begin(), boss_makers.end(), [](HANDLE h) { return h != nullptr; });
-                if (frontend.boss_status[i] == Frontend::BOSS_MISSING &&
-                    (!busy || frontend.screen() == Frontend::Screen::Boss)) {
-                    start_maker(i);
-                    frontend.invalidate();
-                }
-            }
-            if (boss_pending >= 0 && !g_boot_skip) {
-                if (game_state_load(boss_state_path(boss_pending), true)) {
-                    boss_loading = true;
-                    boss_fight = boss_pending;
-                    boss_over_at = 0;
-                    boss_p2_played = false;
-                    boss_p2_idle_at = 0;
-                    frontend.boss_mode = true;
-                    close_menu();
-                } else {
-                    frontend.boss_status[boss_pending] = Frontend::BOSS_MISSING;   // made again
-                    frontend.invalidate();
-                }
-                boss_pending = -1;
-            }
-            if (boss_loading) outputs::quiet(3);   // no feedback until the fight is on
-            if (boss_loading && game_state_result() != 0) {
-                boss_loading = false;
-                if (game_state_result() > 0) stats_boss_begin(boss_fight);
-                if (game_state_result() < 0) {
-                    printf("[boss] could not start the fight\n");
-                    boss_fight = -1;
-                    frontend.boss_mode = false;
-                    frontend.open_boss_list(true);
-                    g_menu_open = g_hold = true;
-                }
-            }
-            // The fight is over once its stage ends (the boss is down) or the
-            // game is (no credits left): a moment later, the main menu, with
-            // the arcade game as it was waiting behind it
-            if (boss_fight >= 0 && !boss_loading && !frontend.active()) {
-                // Player states (docs/game_ram.md): 1 / 2 playing, 0 CONTINUE,
-                // 3 once the continue has run out. Player 2 can join the fight;
-                // then it goes on while player 2 plays, and the CONTINUE screen
-                // gets its time (12 s) after player 2's last life
-                uint8_t p1 = rd8(0x1A3791), p2 = rd8(0x1A37A1);
-                bool p2_playing = p2 == 1 || p2 == 2;
-                double t_now = now_seconds();
-                if (p2_playing) boss_p2_played = true, boss_p2_idle_at = 0;
-                else if (boss_p2_idle_at == 0) boss_p2_idle_at = t_now;
-                bool p2_done = !boss_p2_played || p2 == 3 || t_now - boss_p2_idle_at > 12;
-                bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || (p1 == 3 && !p2_playing && p2_done);
-                if (!over) boss_over_at = 0;
-                else if (boss_over_at == 0) {
-                    boss_over_at = now_seconds();
-                    stats_boss_end(rd8(0x1A623C) != BOSSES[boss_fight].stage_index);   // the stage ended: the boss is down
-                }
-                else if (now_seconds() - boss_over_at > 3) {
-                    boss_fight = -1;
-                    frontend.boss_mode = false;
-                    game_state_load_home();
-                    frontend.open(Frontend::Screen::Main);
-                    g_menu_open = g_hold = true;
-                }
-            }
-            if (frontend.settings.fullscreen != presenter.fullscreen()) {   // also F11 / Alt+Enter
-                frontend.settings.fullscreen = presenter.fullscreen();
-                frontend.settings.save("save/settings.ini");
-                frontend.invalidate();
-            }
-            // Debugging aid: LW_MENU_KEYS="40,13,27" presses those keys (one
-            // every 10 presents; Esc in the game pauses; "cX/Y" clicks at window
-            // pixel X,Y), then saves out/menu.bmp and quits
-            static const char* menu_keys = getenv("LW_MENU_KEYS");
-            static int menu_presents = 0;
-            if (menu_keys && ++menu_presents % 10 == 0) {
-                if (*menu_keys == 'c') {
-                    int cx = 0, cy = 0, len = 0;
-                    sscanf(menu_keys, "c%d/%d%n", &cx, &cy, &len);
-                    menu_keys += len;
-                    if (*menu_keys == ',') menu_keys++;
-                    frontend.click(cx, cy);
-                } else if (*menu_keys) {
-                    char* end = nullptr;
-                    int vk = int(strtol(menu_keys, &end, 10));
-                    menu_keys = *end == ',' ? end + 1 : end;
-                    if (frontend.active()) frontend.key(vk);
-                    else if (vk == VK_ESCAPE) {
-                        frontend.open(Frontend::Screen::Pause);
-                        g_menu_open = g_hold = true;
-                    }
-                } else if (menu_presents % 30 == 0) {
-                    presenter.capture_next("out/menu.bmp");
-                    menu_keys = nullptr;
-                    presenter.close();
-                }
-            }
-            static Frontend::Screen menu_was = Frontend::Screen::None;
-            if ((frontend.screen() == Frontend::Screen::Records || frontend.screen() == Frontend::Screen::Main) &&
-                frontend.screen() != menu_was) {   // the records page, and the main menu's achievements and best score
-                frontend.records = stats_view();   // the game stands still while the menu is open
-                frontend.invalidate();
-            }
-            // GUN TEST: what every mouse and gun does, and a press from one of
-            // them while the players' guns are being picked
-            static std::map<std::string, unsigned> gun_presses;
-            if (frontend.gun_test_open()) {
-                ULONGLONG now = GetTickCount64();
-                frontend.guns_pinned = raw_mice::guns_pinned();
-                std::vector<raw_mice::Device> devs = raw_mice::devices(presenter.hwnd());
-                std::vector<Frontend::GunView> view;
-                int hidden = 0;
-                for (size_t i = 0; i < devs.size(); i++) {
-                    const raw_mice::Device& d = devs[i];
-                    auto known = gun_presses.find(d.path);
-                    bool fired = menu_was == Frontend::Screen::GunTest && known != gun_presses.end() && d.presses > known->second;
-                    gun_presses[d.path] = d.presses;
-                    if (fired && frontend.picking_guns()) {
-                        frontend.guns = {{d.path, d.name}};
-                        frontend.gun_fired(0);
-                    }
-                    if (!d.last_input) {   // nothing from it yet: the pointer side of a keyboard, say, unless it moves
-                        hidden++;
-                        continue;
-                    }
-                    Frontend::GunView g{d.path, d.name, d.absolute, d.last_input && now - d.last_input < 1000, d.has_pos,
-                                        int(d.pos.x), int(d.pos.y), d.trigger, d.reload, d.player};
-                    view.push_back(g);
-                }
-                auto same = [](const Frontend::GunView& a, const Frontend::GunView& b) {
-                    return a.path == b.path && a.absolute == b.absolute && a.active == b.active && a.has_pos == b.has_pos &&
-                           a.x == b.x && a.y == b.y && a.trigger == b.trigger && a.reload == b.reload && a.player == b.player;
-                };
-                bool changed = view.size() != frontend.guns.size() || hidden != frontend.quiet_mice;
-                for (size_t i = 0; !changed && i < view.size(); i++) changed = !same(view[i], frontend.guns[i]);
-                if (changed) {   // every refresh while a mark moves: only the marks are drawn again
-                    frontend.guns = view;
-                    frontend.quiet_mice = hidden;
-                    frontend.invalidate();
-                }
-            } else {
-                gun_presses.clear();
-            }
-            menu_was = frontend.screen();
-            {
-                double t = now_seconds();
-                music.update(frontend.active() && !frontend.over_game() && frontend.settings.menu_music,
-                             frontend.settings.volume, t - music_time);
-                music_time = t;
-            }
-            if (!frontend.active()) pad_in_menu = false;   // a menu opened later starts with the mouse
-            // The menu pointer is player 1's crosshair, drawn over the menus
-            // instead of the Windows arrow. Player 2's gun is left out: if it
-            // moved the (hidden) Windows pointer, it goes back to player 1's spot.
-            // GUN TEST draws every gun's own mark instead
-            raw_mice::block_player2(frontend.active() && !frontend.gun_test_open());
-            presenter.set_cursor_visible(false);
-            g_menu_gun = false;
-            if (frontend.active()) {
-                HWND hwnd = presenter.hwnd();
-                // Player 1's gun known: the pointer follows it, straight from
-                // its own input at every refresh, and its buttons click
-                raw_mice::MenuGun mg = raw_mice::menu_gun(hwnd);
-                if (mg.known && GetForegroundWindow() == hwnd) {
-                    g_menu_gun = true;
-                    if (mg.pos.x != g_menu_ptr.x || mg.pos.y != g_menu_ptr.y) {
-                        g_menu_ptr = mg.pos;
-                        pad_in_menu = false;
-                        frontend.mouse_move(mg.pos.x, mg.pos.y);
-                    }
-                    for (int i = 0; i < mg.left_presses && frontend.active(); i++) frontend.click(g_menu_ptr.x, g_menu_ptr.y);
-                    for (int i = 0; i < mg.right_presses && frontend.active(); i++) frontend.key(VK_ESCAPE);
-                }
-                if (g_menu_ptr.x < 0) {
-                    POINT p;
-                    GetCursorPos(&p);
-                    ScreenToClient(hwnd, &p);
-                    g_menu_ptr = p;
-                }
-                if (raw_mice::take_p2_moved() && !g_menu_gun && GetForegroundWindow() == hwnd) {
-                    POINT p = g_menu_ptr;
-                    ClientToScreen(hwnd, &p);
-                    SetCursorPos(p.x, p.y);
-                }
-            }
-            ui.set_cursor(frontend.active() && !pad_in_menu && !frontend.gun_test_open(), float(g_menu_ptr.x), float(g_menu_ptr.y));
-            static const bool menu_pad = getenv("LW_MENU_PAD") != nullptr;   // debugging aid: the gamepad's key help
-            if (frontend.pad_prompts != (pad_in_menu || menu_pad)) {   // the key help shows the gamepad's buttons or the keys
-                frontend.pad_prompts = pad_in_menu || menu_pad;
-                frontend.invalidate();
-            }
-            if (frontend.active()) {
-                RECT rc;
-                GetClientRect(presenter.hwnd(), &rc);
-                double t0 = now_seconds();
-                if (frontend.draw(rc.right, rc.bottom, ui_pixels)) {
-                    int y0, y1;
-                    if (frontend.partial_rows(y0, y1)) ui.update_rows(ui_pixels.data(), rc.right, rc.bottom, y0, y1);
-                    else ui.set_image(ui_pixels.data(), rc.right, rc.bottom);
-                    double ms = (now_seconds() - t0) * 1000;
-                    if (ms > 20) printf("[menu] slow redraw: %.0f ms\n", ms);
-                    static const char* menu_shot = getenv("LW_MENU_SHOT");   // debugging aid: the menu picture
-                    if (menu_shot) bmp_save(menu_shot, rc.right, rc.bottom, ui_pixels.data());
-                }
-            }
-        }
-        update_aim_reach(presenter.hwnd());
-        poll_keyboard_mouse(presenter.hwnd());
-        {   // survival results: the reload button goes back to the main menu
-            static bool reload_was = false;
-            bool pressed = g_p1_reload_button && !reload_was;
-            reload_was = g_p1_reload_button;
-            if (pressed && !frontend.active() && survival_view().mode == SurvivalMode::Results) {
-                survival_to_menu();
-                g_block_buttons = true;   // the press does not reach the game
-            }
-        }
-        bool pad_pause = poll_gamepads(presenter.hwnd());
-        if (g_pads.changed()) {   // the CONTROLS tab names the pads
-            std::wstring names;
-            bool gyro = false;
-            for (int i = 0; i < Gamepads::MAX; i++) {
-                const PadState& pad = g_pads.pad(i);
-                if (!pad.connected) continue;
-                names += (names.empty() ? L"" : L", ") + std::wstring(pad.name.begin(), pad.name.end());
-                gyro |= pad.has_gyro;
-            }
-            frontend.gamepads = names;
-            frontend.gyro_pad = gyro;
-            frontend.invalidate();
-        }
-        for (PadKey k : g_pads.take_keys()) {   // the menus, as keys (START resumes from the pause menu)
-            static const int VK[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_ESCAPE, 'Q', 'E', 'R'};
-            bool resume = frontend.screen() == Frontend::Screen::Pause;
-            if (frontend.active()) {
-                frontend.key(k == PadKey::Start ? (resume ? VK_ESCAPE : VK_RETURN) : VK[int(k)]);
-                pad_in_menu = true;
-            }
-        }
-        if (pad_pause && g_opt.menu && !frontend.active()) {
-            frontend.open(Frontend::Screen::Pause);
-            pad_in_menu = true;
-            g_menu_open = g_hold = true;
-        }
-        free_play::set(g_opt.free_play);
-        survival_set_all_open(g_opt.all_arenas);
-        cheats_set_ammo(g_opt.ammo);
-        ui.set_effects(g_opt.menu_effects);
-        join_update();
-        bool f12 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F12) & 0x8000);
-        if (f12 && !f12_was_down) capture_2d = true;
-        f12_was_down = f12;
-        bool f9 = GetForegroundWindow() == presenter.hwnd() && (GetAsyncKeyState(VK_F9) & 0x8000);
-        // --snap-every N: the same snapshot every N seconds while someone
-        // plays (not in the menus), 60 at most, for reports without a keyboard
-        bool auto_snap = false;
-        if (g_opt.snap_every > 0 && !frontend.active() && (g_inputs.p[0].playing || g_inputs.p[1].playing)) {
-            static double last_snap = now_seconds();
-            static int snaps = 0;
-            if (snaps < 60 && now_seconds() - last_snap >= g_opt.snap_every) {
-                last_snap = now_seconds();
-                snaps++;
-                auto_snap = true;
-            }
-        }
-        if (((f9 && !f9_was_down) || auto_snap) && built) {   // debug snapshot of the scene on screen
-            CreateDirectoryA("out/snap", nullptr);
-            std::string base = "out/snap/snap_" + std::to_string(built->frame);
-            save_snapshot((base + ".bin").c_str(), *built, layers_shown->vram);
-            dump_scene(*scene, layers_shown->back.data(), layers_shown->front.data(), (base + ".txt").c_str());
-            presenter.capture_next(base + ".bmp");
-            printf("Snapshot saved to %s.bin\n", base.c_str());
-        }
-        f9_was_down = f9;
-        if (g_opt.shot_frame && shown != ~0ull && shown + 1 >= g_opt.shot_frame) capture_2d = true;
-        // In widescreen the crosshair follows the gun over the whole picture,
-        // side bands too (a shot there still reloads); only the very edge,
-        // where a light gun parks an off-screen shot, stays without one. In
-        // 4:3 it stops at the picture's edge
-        float side_band = 0;
-        {
-            RECT rc;
-            GetClientRect(presenter.hwnd(), &rc);
-            side_band = compute_layout(float(rc.right), float(rc.bottom), g_opt.max_aspect).game_x0 / SCREEN_W;
-        }
-        for (int p = 0; p < 2; p++) {   // player 2's only while that gun is in use
-            PlayerAim aim = player_aim(p);
-            bool used = (p == 0 || g_inputs.p[1].playing) && !crosshair_idle(p, aim);
-            const float EDGE = 0.004f;
-            bool wide = g_opt.max_aspect > 4.0f / 3.0f + 0.01f;
-            float x = aim.x, y = aim.y;
-            bool on_picture;
-            if (wide) {
-                on_picture = side_band > 0 ? x > -side_band + EDGE && x < 1 + side_band - EDGE && y >= 0 && y <= 1 : aim.inside;
-            } else {
-                // 4:3 (with a bezel): aimed past the picture, the crosshair stops
-                // at its edge (a shot there still reloads, as on the cabinet)
-                x = std::clamp(x, -side_band, 1 + side_band);
-                y = std::clamp(y, 0.0f, 1.0f);
-                on_picture = true;
-            }
-            renderer.set_crosshair(p, g_opt.show_crosshair && used && on_picture && !g_opt.fixed_aim, x, y);
-        }
-        // The 3D frame to draw. While interpolating, the picture shows the game
-        // as it was at `shown_time`: a frame period plus the frames' lateness
-        // before this image's moment on screen, so the next frame is always
-        // here before it is needed and the motion stays even; a new frame is
-        // taken once the picture reaches the one built. Otherwise at once.
-        // While interpolating the frames come from the preparation thread
-        // (their lateness includes its work), otherwise straight from the game
-        bool interpolating = g_opt.interp && g_opt.replay.empty() && !g_opt.shot_frame;
-        if (interpolating != prep_on) {   // a frame it made earlier is not one to go back to
-            prep_on = interpolating;
-            std::lock_guard<std::mutex> lock(ready_mutex);
-            ready_frames.clear();
-        }
-        // FRAME CAP: at most frame_cap pictures a second; the waiting is done
-        // here, before the picture is prepared (the game keeps its own pace)
-        if (g_opt.frame_cap > 0 && film.empty() && g_opt.replay.empty() && !g_opt.shot_frame) {
-            static double next_picture = 0;
-            double period = 1.0 / g_opt.frame_cap, now = now_seconds();
-            if (next_picture - now > period) next_picture = now;   // the cap changed, or a pause
-            while (now < next_picture) {
-                double left = next_picture - now;
-                if (left > 0.002) Sleep(DWORD((left - 0.0015) * 1000));   // timeBeginPeriod(1): ~1 ms steps
-                else SwitchToThread();
-                now = now_seconds();
-            }
-            next_picture = now - next_picture < period ? next_picture + period : now + period;
-        }
-        double display = display_clock.tick(presenter.hwnd());
-        // HALF FRAME RATE: above 100 Hz every other refresh shows the image
-        // before again (only the crosshairs move), half the work of the GPU
-        // (with vsync: without it the images are not tied to refreshes)
-        bool half = g_opt.half_rate && g_opt.vsync && display_clock.period < 1.0 / 100 && g_opt.replay.empty() && !g_opt.shot_frame &&
-                    film.empty();
-        repeat_image = half && !repeat_image;
-        if (repeat_image) {
-            presenter.frame([&](VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
-                renderer.record_repeat(cmd, view, extent);
-                if (survival_shown) survival_layer.record(cmd, view, extent);
-                ui.record(cmd, view, extent);
-                if (toast_shown) toast_layer.record(cmd, view, extent);
-            });
-            presents++;
-            continue;
-        }
-        std::shared_ptr<const R3DFrameState> latest;
-        std::shared_ptr<Prepared> newest;   // the newest frame made ready
-        std::deque<std::shared_ptr<Prepared>> waiting;   // those after the one built (made after the switch)
-        if (interpolating) {
-            std::lock_guard<std::mutex> lock(ready_mutex);
-            while (!ready_frames.empty() && built && ready_frames.front()->state->frame <= built->frame)
-                ready_frames.pop_front();
-            waiting = ready_frames;
-        } else {
-            std::lock_guard<std::mutex> lock(g_r3d_mutex);
-            latest = g_r3d_latest;
-        }
-        if (!waiting.empty()) newest = waiting.back(), latest = newest->state;
-        if (latest && latest != seen) {
-            if (seen) next_period = std::clamp(latest->time - seen->time, 1.0 / 240, 0.1);
-            // How long after its vblank the frame was ready to take, plus how
-            // far ahead of now this image's moment is: from the preparation
-            // thread, when it finished; from the game, when this loop saw it
-            double late = newest ? newest->ready_at - latest->time + (display - display_clock.last) : display - latest->time;
-            // It rises at once with 1.5 ms to spare, so that later frames by a
-            // little do not each step the motion back; a frame much later
-            // than the rest (a one-off slow 2D composition) only raises it if
-            // another follows 0.25-3 s later: alone it costs one hitch, while
-            // raising it would add that delay for a long while. After 5 s
-            // without rising it eases down, by 1% of its excess per frame
-            // (at least 1.7 ms per second): the motion runs up to ~2% faster
-            late = std::clamp(late, 0.0, 0.05);
-            if (late > lateness) {
-                // (the frames right after a slow one are late too: the same hitch)
-                bool spike = false;
-                if (late > lateness + 0.004) {
-                    double since = display - lateness_spike;
-                    if (since > 3) lateness_spike = display;
-                    spike = since > 3 || since < 0.25;
-                }
-                if (!spike) {
-                    lateness = late + 0.0015;
-                    lateness_rose = display;
-                }
-            } else if (display - lateness_rose > 5) {
-                lateness = std::max(lateness - std::max(0.00003, 0.01 * (lateness - late)), late);
-            }
-            seen = latest;
-        }
-        double shown_time = display - lateness - next_period - 0.0005;
-        bool take = latest && latest != built && (!interpolating || !built || shown_time >= built->time);
-        // The frame to take: the first one waiting that reaches the picture's
-        // moment (the newest if none does)
-        std::shared_ptr<Prepared> ready;
-        if (take && newest) {
-            for (auto& w : waiting)
-                if (w->state->time >= shown_time) {
-                    ready = w;
-                    break;
-                }
-            if (!ready) ready = newest;
-            latest = ready->state;
-        }
-        // The 2D layers of each vblank are kept in a few copies: while the 3D
-        // frames are interpolated, those of the 3D frame drawn are shown (the
-        // picture runs behind the game; the preparation thread composes them
-        // with it), unless the game stopped drawing 3D; otherwise the newest
-        uint64_t newest_2d;
-        {
-            std::lock_guard<std::mutex> lock(snaps_mutex);
-            poll_snapshots();
-            newest_2d = snaps[newest_snap].frame;
-        }
-        // (on a refresh with no new frame, the one built: the 2D layers must
-        // not run ahead of it in the meantime)
-        const R3DFrameState* game_newest = newest ? newest->state.get() : latest ? latest.get() : built.get();
-        bool follow = interpolating && game_newest && newest_2d != ~0ull && newest_2d <= game_newest->vblank + 4;
-        double scene_from = now_seconds(), scene_seconds = 0;   // 2D composition and 3D scene build here (CPU)
-        const uint64_t shown_before = shown;
-        // (shown = ~0: composed again here, as after a change of settings in the pause menu)
-        uint64_t compose_up_to = !follow ? (newest_2d != shown ? newest_2d : ~0ull)
-                                         : shown == ~0ull && built ? built->vblank : ~0ull;
-        if (compose_up_to != ~0ull) take_snapshot(compose_up_to, own_layers);
-        if (compose_up_to != ~0ull && own_layers.frame != ~0ull) {
-            std::lock_guard<std::mutex> lock(prep_mutex);
-            compose_2d(own_layers);
-            if (!own_layers.sky_pictures.empty()) renderer.add_sky_pictures(own_layers.sky_pictures);
-            if (!own_layers.overlays.empty()) renderer.add_overlays(own_layers.overlays);
-            own_layers.sky_pictures.clear();
-            own_layers.overlays.clear();
-            apply_2d(own_layers);
-            layers_prep.reset();
-            scene_seconds += now_seconds() - scene_from;
-        }
-        if (take) {
-            if (ready) frame_period = ready->period;   // its vertices move from the frame built before it
-            else if (built) frame_period = std::clamp(latest->time - built->time, 1.0 / 240, 0.1);
-            built_from = built ? built->vblank : ~0ull;
-            scene_from = now_seconds();
-            if (ready) {   // made ready by the preparation thread, with the 2D layers of its vblank
-                give_pictures(ready->serial);
-                built_prep = ready;
-                scene = &ready->scene;
-                // (a frame number going back a long way is the game restarted from a saved state)
-                const Layers2D& l = ready->layers;
-                if (follow && l.frame != ~0ull && (shown == ~0ull || l.frame > shown || shown - l.frame > 8)) {
-                    apply_2d(l);
-                    layers_prep = ready;
-                }
-            } else {
-                std::lock_guard<std::mutex> lock(prep_mutex);
-                builder.build(*latest, own_scene);
-                auto images = pack.take_new_images();
-                if (!images.empty()) renderer.add_replacements(images);
-                built_prep.reset();
-                scene = &own_scene;
-            }
-            scene_seconds += now_seconds() - scene_from;
-            g_select_aim = select_dot_on_screen(*scene);
-            built = latest;
-            // The weather (weather.h): --weather in any game, or the one rolled
-            // for RANDOM SPAWNS and survival
-            int weather = g_opt.weather;
-            if (weather == WEATHER_NONE && g_opt.random_weather && (random_spawns_playing() || survival_enabled()))
-                weather = weather_rolled();
-            renderer.set_weather(R3DWeather::preset(weather));
-            renderer.set_scene(scene);
-            if (g_sky_log) {
-                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
-                fprintf(g_sky_log, "3d %llu", (unsigned long long)latest->vblank);
-                for (const R3DViewport& v : scene->viewports)
-                    if (v.world) {
-                        fprintf(g_sky_log, " axes");
-                        for (float f : v.world_axes) fprintf(g_sky_log, " %.5f", f);
-                        fprintf(g_sky_log, " cam %.3f %.3f %.3f proj %.5f %.5f %.5f %.5f vp %.1f %.1f %.1f %.1f",
-                                v.camera[0], v.camera[1], v.camera[2], v.proj[0], v.proj[5], v.proj[8], v.proj[9],
-                                v.x, v.y, v.w, v.h);
-                        break;
-                    }
-                fprintf(g_sky_log, "\n");
-            }
-            // Debugging aid: LW_SPOTLOG=path writes the world viewport's spotlight every game frame
-            static FILE* spot_log = getenv("LW_SPOTLOG") ? fopen(getenv("LW_SPOTLOG"), "w") : nullptr;
-            if (spot_log) {
-                int worlds = 0;
-                for (const R3DViewport& v : scene->viewports)
-                    if (v.world) {
-                        worlds++;
-                        fprintf(spot_log,
-                                "%llu vp%d col %.0f%.0f%.0f c %.4f %.4f r %.4f %.4f start %.3f ext %.2f sun %.3f amb %.3f "
-                                "fog %.5f/%.3f scroll %.3f far %.1f black %d night %.2f "
-                                "light %.3f %.3f %.3f world %.3f %.3f %.3f\n",
-                                (unsigned long long)built->frame, worlds, v.spot_color[0], v.spot_color[1], v.spot_color[2],
-                                v.spot_center[0], v.spot_center[1], v.spot_radius[0], v.spot_radius[1], v.spot_start,
-                                v.spot_extent, v.sun_intensity, v.ambient, v.fog_density, v.fog_ambient, v.scroll_fog,
-                                v.scenery_far, int(renderer.back_black()), renderer.night_level(), v.sun[0], v.sun[1], v.sun[2],
-                                v.world_axes[0] * v.sun[0] + v.world_axes[1] * v.sun[1] + v.world_axes[2] * v.sun[2],
-                                v.world_axes[3] * v.sun[0] + v.world_axes[4] * v.sun[1] + v.world_axes[5] * v.sun[2],
-                                v.world_axes[6] * v.sun[0] + v.world_axes[7] * v.sun[1] + v.world_axes[8] * v.sun[2]);
-                    }
-                if (!worlds) fprintf(spot_log, "%llu no world\n", (unsigned long long)built->frame);
-                fflush(spot_log);
-            }
-            // Debugging aid: LW_FILM=first,count records that many game frames
-            // as snapshots in out/film, to replay as a sequence
-            static const char* film_rec = getenv("LW_FILM");
-            static int film_saved = 0;
-            if (film_rec && g_opt.replay.empty()) {
-                unsigned long long first = 0;
-                int count = 0, every = 1;   // optional third value: keep one frame in that many
-                sscanf(film_rec, "%llu,%d,%d", &first, &count, &every);
-                static unsigned long long film_last = 0;
-                if (built->frame >= first && film_saved < count && (!film_saved || built->frame >= film_last + every)) {
-                    film_last = built->frame;
-                    CreateDirectoryA("out/film", nullptr);
-                    char path[64];
-                    snprintf(path, sizeof(path), "out/film/f_%06llu.bin", (unsigned long long)built->frame);
-                    save_snapshot(path, *built, layers_shown->vram);
-                    film_saved++;
-                }
-            }
-        }
-        int y0, y1, tex_dirty_rows = 0;
-        if (g_texture_ram.take_dirty(tex_rows, y0, y1)) {
-            renderer.upload_texture_rows(tex_rows, y0, y1);
-            tex_dirty_rows = y1 - y0;
-        }
-
-        bool shot = g_opt.shot_frame && shown != ~0ull && shown >= g_opt.shot_frame;   // --shot N: screenshot and exit
-        // A replayed scene is captured after a second on screen, once temporal
-        // anti-aliasing (DLAA) has settled
-        static uint64_t replay_presents = 0;
-        if (shot && !g_opt.replay.empty() && replay_presents++ < 60) shot = false;
-        // Debugging aid: LW_SHOTS=N[,FROM[,TO]] saves one game frame in N as out/shots/<frame>.bmp
-        static int shots_every = 0;
-        static unsigned long long shots_from = 0, shots_to = ~0ull;
-        static bool shots_parsed = false;
-        if (!shots_parsed) {
-            shots_parsed = true;
-            if (const char* e = getenv("LW_SHOTS")) sscanf(e, "%d,%llu,%llu", &shots_every, &shots_from, &shots_to);
-        }
-        static uint64_t last_shot = 0;
-        if (shots_every > 0 && shown != ~0ull && shown >= shots_from && shown <= shots_to &&
-            shown >= last_shot + shots_every) {
-            last_shot = shown;
-            CreateDirectoryA("out/shots", nullptr);
-            char path[64];
-            snprintf(path, sizeof(path), "out/shots/%06llu.bmp", (unsigned long long)shown);
-            presenter.capture_next(path);
-        }
-        if (shot) {
-            presenter.capture_next("out/capture.bmp");
-            g_texture_ram.dump("out/texture_ram.bin");
-            dump_scene(*scene, layers_shown->back.data(), layers_shown->front.data(), "out/scene.txt");
-            if (built && g_opt.replay.empty()) {
-                CreateDirectoryA("out/snap", nullptr);
-                save_snapshot("out/snap/shot.bin", *built, layers_shown->vram);
-            }
-        }
-        // The game makes ~57 frames per second; in between, the 3D scene is
-        // drawn part way from the previous frame to the one built, at shown_time
-        // on the game's own evenly spaced timeline
-        static const char* fixed_interp = getenv("LW_INTERP");   // debugging aid: fixed position, e.g. 0.5
-        if ((interpolating || fixed_interp) && built) {
-            double now = now_seconds();
-            double t = std::clamp((shown_time - built->time) / frame_period + 1.0, 0.0, 1.0);
-            if (fixed_interp) t = std::clamp(atof(fixed_interp), 0.0, 1.0);
-            renderer.set_interpolation(float(t));
-            // The back layers move with the 3D when their 2D frames are those
-            // of the two 3D frames it goes between. The 2D layers of a vblank
-            // are what the game wrote in the frame before it: their sky
-            // scroll is that of the previous 3D frame's camera, so the sky
-            // goes on from it with the camera's turn in this frame, as far
-            // as the 3D has gone towards the frame built (set_back_shift,
-            // sky_motion.h)
-            bool paired = shift_to == built->vblank && shift_from == built_from;
-            renderer.set_back_shift(paired ? float(t * double(shift_to - shift_from)) : 0.0f, paired);
-            if (g_sky_log) {
-                std::lock_guard<std::mutex> lock(g_sky_log_mutex);
-                SkyMotion::Row mx = renderer.sky_motion().row(40, 0), my = renderer.sky_motion().row(40, 1);
-                fprintf(g_sky_log, "p %llu %llu %llu %llu %.3f %d %d %.3f %.3f %d %.3f %.3f\n",
-                        (unsigned long long)built->vblank, (unsigned long long)built_from, (unsigned long long)shift_from,
-                        (unsigned long long)shift_to, t, int(paired), int(mx.known), mx.offset, mx.velocity, int(my.known),
-                        my.offset, my.velocity);
-            }
-            if (g_pacing_log) pacing_sample(now, display, built->time - frame_period * (1 - t), *built);
-        }
-        static int film_presents = 0;
-        if (!film.empty() && ++film_presents == 3) {
-            char path[64];
-            snprintf(path, sizeof(path), "out/film_out/%04zu.bmp", film_pos);
-            presenter.capture_next(path);
-        }
-        presenter.frame([&](VkCommandBuffer cmd, VkImageView view, VkExtent2D extent) {
-            renderer.record(cmd, view, extent);
-            if (survival_shown) survival_layer.record(cmd, view, extent);
-            ui.record(cmd, view, extent);
-            if (toast_shown) toast_layer.record(cmd, view, extent);   // over the menus too: their backdrop is opaque
-        });
-        if (g_frame_log) {
-            const VkPresenter::LastFrame& f = presenter.last_frame();
-            double t = interpolating && built ? std::clamp((shown_time - built->time) / frame_period + 1.0, 0.0, 1.0) : 1;
-            frame_log("P %llu %.6f %.6f %.6f %.4f %llu %llu %.6f %d %d %.3f %d %.3f %.3f %.3f %.3f %.3f %.6f\n",
-                      (unsigned long long)f.present_id, loop_from, display, shown_time, t,
-                      (unsigned long long)(built ? built->frame : 0), (unsigned long long)(latest ? latest->frame : 0),
-                      latest ? latest->time : 0.0, int(take), int(shown != shown_before), scene_seconds * 1000,
-                      tex_dirty_rows, f.fence * 1000, f.acquire * 1000, f.record * 1000, f.present * 1000,
-                      (now_seconds() - loop_from) * 1000, lateness);
-            if (f.present_id) presented_id = f.present_id;
-        }
-        if (!film.empty() && film_presents >= 4) {   // next snapshot of the sequence
-            film_presents = 0;
-            if (++film_pos >= film.size() || !load_snapshot(film[film_pos].c_str())) break;
-        }
-        if (shot) {
-            printf("Capture saved to out/capture.bmp (frame %llu, %zu polygons, %zu of %zu vertices moving)\n",
-                   (unsigned long long)shown, scene->polygons, scene->moving, scene->vertices.size());
-            break;
-        }
-        presents++;
-        scene_total += scene_seconds;
-        ULONGLONG now = GetTickCount64();
-        if (now - last_title >= 1000) {
-            // Where the time goes, in ms per frame: the game thread (CPU, without
-            // its waits), the preparation thread (per game frame), this thread's
-            // scene work and command recording, and the time blocked on the GPU
-            // and the display (vsync)
-            VkPresenter::Timing t = presenter.take_timing();
-            uint64_t game_us = g_game_busy_us.exchange(0), game_n = g_game_frames.exchange(0);
-            double per = t.frames ? 1000.0 / t.frames : 0;   // seconds summed over the presents -> ms per present
-            double game_ms = game_n ? double(game_us) / 1000.0 / double(game_n) : 0;
-            double scene_ms = presents ? scene_total * 1000.0 / double(presents) : 0;
-            uint64_t prep_total = prep_us.exchange(0), prep_n = prep_frames.exchange(0);
-            double prep_ms = prep_n ? double(prep_total) / 1000.0 / double(prep_n) : 0;
-            char title[256];
-            snprintf(title, sizeof(title),
-                     "Lost World Native - %llu Hz display - frame %llu - %zu polygons | ms/frame: game %.1f, "
-                     "prep %.1f, scene %.1f, render %.1f, GPU %.1f",
-                     (unsigned long long)(presents * 1000 / (now - last_title)), (unsigned long long)shown,
-                     scene->polygons, game_ms, prep_ms, scene_ms, t.record * per, (t.gpu_wait + t.present) * per);
-            SetWindowTextA(presenter.hwnd(), title);
-            static ULONGLONG last_log = now;
-            if (now - last_log >= 5000) {   // the same, in the log, every 5 s
-                last_log = now;
-                printf("[timing] frame %llu  %zu polygons  ms/frame: game %.2f  prep %.2f  scene %.2f  render %.2f  "
-                       "GPU wait %.2f  present %.2f  (%llu Hz display)\n",
-                       (unsigned long long)shown, scene->polygons, game_ms, prep_ms, scene_ms, t.record * per,
-                       t.gpu_wait * per, t.present * per, (unsigned long long)(presents * 1000 / (now - last_title)));
-                fflush(stdout);
-            }
-            presents = 0;
-            scene_total = 0;
-            last_title = now;
-        }
-    }
-    // Orderly exit: park the game thread, stop the audio, then the video
-    stop_threads();
-    g_quit = true;
-    if (g_opt.replay.empty())
-        for (int i = 0; i < 100 && !g_parked; i++) Sleep(10);   // a frame takes ~17 ms; 1 s is plenty
-    music.close();
-    g_audio.stop();
-    outputs::stop();   // mame_stop: Hook of the Reaper lets go of the guns
-    stats_save();
-    fflush(stdout);
-    ui.shutdown();
-    if (survival_shown) survival_layer.shutdown();
-    if (toast_shown) toast_layer.shutdown();
-    toast.shutdown();
-    frontend.shutdown();
-    survival_ui.shutdown();
-    renderer.shutdown();
-    presenter.shutdown();
-    g_pads.shutdown();
-    ExitProcess(0);
+    // Window (App): the game on its own thread, this one draws
+    App app;
+    app.ini = ini;
+    app.survival_cli = survival_cli;
+    app.cli_stage = cli_stage, app.cli_zone = cli_zone;
+    if (!app.init(argc, argv, first_start)) return 1;
+    app.run();
+    app.shutdown();
 }

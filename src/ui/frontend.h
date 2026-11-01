@@ -20,75 +20,12 @@
 #include <vector>
 
 #include "../runtime/stats.h"
+#include "frontend_settings.h"
 #include "ui_canvas.h"
-
-struct FrontendSettings {
-    bool fullscreen = true;   // light gun edition: fullscreen unless set otherwise
-    int volume = 5;    // 0..10 (output gain)
-    int speakers = 0;  // 0 stereo, 1 surround 4.0, 2 headphones (AudioStream::Speakers)
-    int rear_boost = 0;  // dB on the rear pair: -6, -3, 0, 3, 6, 9, 12
-    bool cubic_samples = true;   // smooth (cubic) sample interpolation instead of the original linear one
-    int aa = 0;        // 0 MSAA, 1 DLAA, 2 off (takes effect on the next launch)
-    int scale = 100;   // 3D resolution in % of the window's (SCALES)
-    bool half_rate = false;   // above 100 Hz the 3D is drawn every other refresh
-    int frame_cap = 0;        // pictures a second at most: 0 off (the monitor's refresh rate), 30, 60, 120
-    static constexpr int FRAME_CAPS[4] = {0, 30, 60, 120};
-    bool vsync = true;        // off: images go out without waiting for the monitor's refresh
-    int aspect = 1;    // widest 3D view: 0 4:3 (original), 1 16:9, 2 21:9 (ultrawide, up to 2.4:1)
-    bool haze = true;  // distance haze
-    int bloom = 2;     // glow around bright things: 0 off, 1 low, 2 medium, 3 high
-    bool ao = true;    // ambient occlusion
-    bool sky = true;   // procedural sky instead of the original picture
-    bool sun = true;   // a sun in the procedural sky
-    bool shadows = true;   // sun shadows
-    int ray_tracing = 2;   // traced through the world (GPUs with ray tracing): 0 off, 1 sun shadows, 2 also ambient occlusion
-    bool shafts = true;    // light shafts from the sun
-    bool soft = true;      // soft particles
-    bool hdr = true;       // HDR lighting
-    bool rim = true;       // rim light on dinosaurs and people
-    bool relief = true;    // surface detail from the textures
-    bool sharpen = true;   // contrast adaptive sharpening
-    bool torch = true;     // modern flashlight at night (false: the original spotlight)
-    bool lightning = true; // lightning in dark grey fog
-    int rain = 2;          // rain where the game has its own: 0 off, 1 light, 2 heavy
-    bool random_weather = true;   // random weather in RANDOM SPAWNS and survival (runtime/weather.h)
-    bool hd_text = true;
-    bool menu_effects = true;   // the menu backdrop animated (ui.frag)
-    bool crosshair = true;
-    int crosshair_style = 1; // 0 the drawn rings, 1 the crosshair.png pictures when there are any (ui/crosshair_file.h)
-    int crosshair_hide = 0; // seconds without use before a crosshair hides: 0 never, 3, 5 or 10
-    bool free_play = true;  // 1 / 2 (or a gun's start button) insert the credit themselves
-    bool all_arenas = true;    // every SURVIVAL arena open from the start
-    int ammo = 0;              // cheat: 0 off, 1 auto reload, 2 unlimited
-    bool trigger_start = true; // a gun's trigger starts / continues a player who is not playing
-    bool smooth = true;     // the 3D drawn between game frames at the monitor's refresh rate
-    bool second_mouse = true;   // a second mouse is player 2's gun
-    int subtitles = 0;      // voice-line subtitles: 0 off, 1 English, 2 Japanese
-    int saturation = 80;    // colour saturation in % (100 = original; 80 by default)
-    int gamma = 100;        // gamma x 100 (100 = original, higher = brighter)
-    int pad_speed = 5;      // gamepad sight speed with the sticks, 1..10
-    bool gyro = true;       // the gamepad's gyroscope moves the sight
-    int gyro_speed = 5;     // 1..10
-    int vibration = 2;      // gamepad vibration: 0 off, 1 low, 2 medium, 3 high
-    int aim_assist = 2;     // gamepad aim assist: 0 off, 1 low, 2 medium, 3 high
-    bool menu_music = true; // ui/menu_music.h, when there is a music file
-    std::string gun_p1, gun_p2; // the guns picked in GUN TEST: device paths ("" = the first and second to fire)
-
-    // save/settings.ini; missing keys keep their current value
-    void load(const char* path);
-    void save(const char* path) const;
-
-    // QUALITY: the graphics options that cost the most, set together. quality()
-    // is the level they match, CUSTOM if none
-    enum Quality { LOW, MEDIUM, HIGH, ULTRA, CUSTOM };
-    static constexpr int SCALES[5] = {50, 67, 75, 85, 100};
-    void set_quality(int q);
-    int quality() const;
-};
 
 class Frontend : UiCanvas {
 public:
-    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest };
+    enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest, Weather };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
                         CrosshairChanged,     // a new crosshair picture (crosshair_pick)
@@ -129,6 +66,9 @@ public:
     int boss_choice = 0;
     int survival_choice = 0;   // StartSurvival: index in SURVIVAL_ZONES (runtime/survival.h)
     bool random_spawns = false;   // StartArcade: CLASSIC > RANDOM SPAWNS (runtime/random_spawns.h)
+    // RANDOM SPAWNS and survival: the weather picked on the WEATHER screen
+    // before the run (runtime/weather.h: WEATHER_RANDOM, one of them or WEATHER_NONE)
+    int run_weather() const;
     bool boss_mode = false;   // a boss fight is on: the pause menu offers retry and the list
     // The list of bosses, over the game (from the pause menu or after a fight) or on the menu backdrop
     void open_boss_list(bool over_game);
@@ -175,11 +115,13 @@ public:
 private:
     enum Id {
         PLAY, OPTIONS, QUIT, ARCADE, BOSS, BACK, RESUME, SETTINGS, QUIT_TO_MENU, TABS,
-        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY, CLASSIC, RANDOM,
+        BOSS_ENTRY, PREPARE, RETRY, BOSS_LIST, LEAVE_BOSS, RECORDS, SURVIVAL, SURVIVAL_ENTRY, CLASSIC, RANDOM, WEATHER_ENTRY,
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_AMMO, OPT_MENU_FX, OPT_ASPECT, OPT_GUN_SETUP, OPT_GUN_TEST, OPT_WEATHER,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_AMMO, OPT_MENU_FX,
+        OPT_ASPECT, OPT_GUN_SETUP, OPT_GUN_TEST, OPT_WEATHER_SOUND,
+        OPT_MSAA, OPT_ANISO, OPT_FILTER_2D,
         NO_ROW,   // a setting only kept in the file
     };
     // How an option row shows its value: a switch, a choice with a dot per
@@ -266,6 +208,7 @@ private:
 
     Screen screen_ = Screen::None;
     bool options_from_pause_ = false;
+    bool weather_for_survival_ = false;   // WEATHER: before a survival run (else RANDOM SPAWNS)
     bool boss_over_game_ = false;
     int selected_ = 0, hovered_ = -1;
     bool dirty_ = true;

@@ -16,6 +16,7 @@
 #include "r3d_rt.frag.h"
 #include "r3d.vert.h"
 #include "rays.frag.h"
+#include "sky_fields.frag.h"
 #include "../common/clock.h"
 #include "tilegen.h"
 
@@ -68,6 +69,12 @@ struct AtmosphereUniform {
 constexpr uint32_t SHADOW_SIZE = 2048;   // shadow map, square
 constexpr float SHADOW_RANGE = 220.0f;   // how far in front of the camera shadows are drawn (view units)
 
+// Seconds since the first frame: the drift of the procedural clouds
+float launch_seconds() {
+    static const double launch = now_seconds();
+    return float(now_seconds() - launch);
+}
+
 VkShaderModule make_module(VkDevice dev, const uint32_t* code, size_t bytes) {
     VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     ci.codeSize = bytes;
@@ -92,7 +99,7 @@ ScreenLayout compute_layout(float win_w, float win_h, float max_aspect) {
     return l;
 }
 
-bool R3DRenderer::create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage) {
+bool R3DRenderer::create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage, bool device_local) {
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = size;
     bi.usage = usage;
@@ -104,17 +111,28 @@ bool R3DRenderer::create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage
     vkGetBufferMemoryRequirements(dev_, b.buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
-    ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits,
-                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (ai.memoryTypeIndex == UINT32_MAX) {
-        fprintf(stderr, "[vulkan] no host-visible memory for a buffer of %zu bytes (types %x)\n", size,
-                req.memoryTypeBits);
-        return false;
+    const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    // The GPU's own memory the host can write (the BAR: 256 MB on most discrete
+    // GPUs, all of it with resizable BAR or on an integrated GPU) saves it a
+    // trip over the bus for every read of what is drawn from this buffer
+    VkResult r = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    if (device_local) {
+        ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits, host | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (ai.memoryTypeIndex != UINT32_MAX) r = vkAllocateMemory(dev_, &ai, nullptr, &b.memory);
+        b.device_local = r == VK_SUCCESS;
     }
-    if (VkResult r = vkAllocateMemory(dev_, &ai, nullptr, &b.memory); r != VK_SUCCESS) {
-        fprintf(stderr, "[vulkan] vkAllocateMemory of %llu bytes for a buffer failed (%d)\n",
-                (unsigned long long)req.size, int(r));
-        return false;
+    if (r != VK_SUCCESS) {
+        ai.memoryTypeIndex = vk_->find_memory(req.memoryTypeBits, host);
+        if (ai.memoryTypeIndex == UINT32_MAX) {
+            fprintf(stderr, "[vulkan] no host-visible memory for a buffer of %zu bytes (types %x)\n", size,
+                    req.memoryTypeBits);
+            return false;
+        }
+        if (r = vkAllocateMemory(dev_, &ai, nullptr, &b.memory); r != VK_SUCCESS) {
+            fprintf(stderr, "[vulkan] vkAllocateMemory of %llu bytes for a buffer failed (%d)\n",
+                    (unsigned long long)req.size, int(r));
+            return false;
+        }
     }
     vkBindBufferMemory(dev_, b.buffer, b.memory, 0);
     vkMapMemory(dev_, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped);
@@ -192,13 +210,22 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     aniso_ = float(std::clamp(aniso, 0, 16));
     // DLAA does the anti-aliasing itself from aliased single-sample input
     if (dlaa && dlaa_.init(vk.instance(), vk.gpu(), dev_)) msaa = 1;
-    // Highest supported MSAA level not above the requested one
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(vk.gpu(), &props);
-    VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts & props.limits.framebufferDepthSampleCounts;
-    samples_ = VK_SAMPLE_COUNT_1_BIT;
-    for (int s = 2; s <= std::min(msaa, 8); s *= 2)
-        if (counts & s) samples_ = VkSampleCountFlagBits(s);
+    msaa_wanted_ = msaa;
+    samples_ = msaa_level(msaa);
+    const VkPhysicalDeviceLimits& limits = vk.limits();
+    // The texture pack is an array of images indexed per polygon: it needs the
+    // descriptor indexing features, and as many slots as the GPU's limits
+    // leave after the other bindings of the sets that go with it (16 to spare)
+    if (!vk.descriptor_indexing()) {
+        fprintf(stderr, "[vulkan] this GPU lacks the descriptor indexing features the renderer needs (see above)\n");
+        return false;
+    }
+    uint32_t room = std::min({limits.maxPerStageDescriptorSampledImages, limits.maxPerStageDescriptorSamplers,
+                              limits.maxDescriptorSetSampledImages, limits.maxDescriptorSetSamplers, limits.maxPerStageResources});
+    replacement_slots_ = std::clamp(room - std::min(room, 32u + Pack2D::MAX_SLOTS), 1u, TexturePack::MAX_SLOTS);
+    if (replacement_slots_ < TexturePack::MAX_SLOTS)
+        printf("[vulkan] descriptor limits of this GPU: %u texture pack slots instead of %u\n", replacement_slots_,
+               TexturePack::MAX_SLOTS);
 
     const VkImageUsageFlags sampled = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (!create_image(texture_ram_, 2048, 2048, VK_FORMAT_R16_UINT, sampled, VK_IMAGE_ASPECT_COLOR_BIT)) return false;
@@ -214,9 +241,17 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     if (!create_buffer(layer_staging_, (BACK_W + SCREEN_W) * SCREEN_H * 4 + TEXT_CELLS_BYTES + SKY_COORDS_BYTES,
                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT))
         return false;
-    if (!create_buffer(vertices_, 8u << 20, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)) return false;
-    if (!create_buffer(atmosphere_uniform_, sizeof(AtmosphereUniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)) return false;
+    // What the GPU reads every image (the vertices, several times a frame)
+    // goes to its own memory when there is some the host can write
+    if (!create_buffer(vertices_, 8u << 20, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true)) return false;
+    if (!create_buffer(atmosphere_uniform_, sizeof(AtmosphereUniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true))
+        return false;
     memset(atmosphere_uniform_.mapped, 0, sizeof(AtmosphereUniform));
+    printf("[vulkan] vertices in %s memory\n", vertices_.device_local ? "the GPU's own" : "system");
+    // The procedural sky's clouds, drawn a strip per frame (record_sky_fields)
+    if (!create_image(sky_fields_, SKY_FIELDS_W, SKY_FIELDS_H, VK_FORMAT_R8G8B8A8_UNORM,
+                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT))
+        return false;
 
     // Clear the texture RAM and the 2D layers once
     if (!create_image(shadow_map_, SHADOW_SIZE, SHADOW_SIZE, VK_FORMAT_D32_SFLOAT,
@@ -252,12 +287,19 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     // Replacement textures: trilinear + anisotropic, repeating (mirroring is done in the shader)
     si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    si.anisotropyEnable = VK_TRUE;
-    si.maxAnisotropy = std::min(16.0f, props.limits.maxSamplerAnisotropy);
+    si.anisotropyEnable = vk.anisotropy() ? VK_TRUE : VK_FALSE;
+    si.maxAnisotropy = vk.anisotropy() ? std::min(16.0f, limits.maxSamplerAnisotropy) : 1.0f;
     si.maxLod = VK_LOD_CLAMP_NONE;
     vkCreateSampler(dev_, &si, nullptr, &replace_sampler_);
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     vkCreateSampler(dev_, &si, nullptr, &overlay_sampler_);
+    // The sky panorama wraps around the camera (x), from horizon to zenith (y)
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    si.anisotropyEnable = VK_FALSE;
+    si.maxAnisotropy = 1.0f;
+    si.maxLod = 0.0f;
+    si.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    vkCreateSampler(dev_, &si, nullptr, &sky_sampler_);
 
     // Ray tracing, when the GPU has it: its acceleration structure is built once
     // empty here, so the descriptors always point at a valid one
@@ -268,7 +310,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     // (3: the 2D back layer, which the distance haze fades the far scenery into)
     VkDescriptorSetLayoutBinding b0[8] = {
         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
-        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, TexturePack::MAX_SLOTS, VK_SHADER_STAGE_FRAGMENT_BIT},
+        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, replacement_slots_, VK_SHADER_STAGE_FRAGMENT_BIT},
         {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
         {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},   // sun shadow map
@@ -291,8 +333,9 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     li.pNext = nullptr;
     // 5: high-resolution text atlas (only bound when there is one), 6: text cells,
     // 7: alpha of the 3D image (in red), 8: bloom, 9: backdrop replacement coordinates,
-    // 10: light shafts, 11: exposure, 12: diffusion, 13: the players' own crosshair pictures
-    VkDescriptorSetLayoutBinding cb[14];
+    // 10: light shafts, 11: exposure, 12: diffusion, 13: the players' own crosshair pictures,
+    // 14: the procedural sky's clouds
+    VkDescriptorSetLayoutBinding cb[15];
     for (uint32_t i = 0; i < 3; i++)
         cb[i] = {i, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[3] = {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Pack2D::MAX_SLOTS, VK_SHADER_STAGE_FRAGMENT_BIT};
@@ -306,11 +349,12 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     cb[11] = {11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[12] = {12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
     cb[13] = {13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3, VK_SHADER_STAGE_FRAGMENT_BIT};   // 2 crosshairs, bezel
-    VkDescriptorBindingFlags cflags[14] = {0, 0, 0, bflags[1], 0, bflags[1], 0, 0, 0, 0, 0, 0, 0, bflags[1]};
-    bfi.bindingCount = 14;
+    cb[14] = {14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkDescriptorBindingFlags cflags[15] = {0, 0, 0, bflags[1], 0, bflags[1], 0, 0, 0, 0, 0, 0, 0, bflags[1], 0};
+    bfi.bindingCount = 15;
     bfi.pBindingFlags = cflags;
     li.pNext = &bfi;
-    li.bindingCount = 14;
+    li.bindingCount = 15;
     li.pBindings = cb;
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &compose_set_layout_);
     li.pNext = nullptr;
@@ -323,7 +367,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     vkCreateDescriptorSetLayout(dev_, &li, nullptr, &ao_set_layout_);
 
     VkDescriptorPoolSize ps[4] = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 38 + TexturePack::MAX_SLOTS + Pack2D::MAX_SLOTS},   // +4: the bezel slot
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 39 + replacement_slots_ + Pack2D::MAX_SLOTS},   // (+4: the bezel slot)
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
         {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
@@ -343,7 +387,7 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     ai.pSetLayouts = &bloom_set_layout_;
     for (VkDescriptorSet& s : bloom_sets_) vkAllocateDescriptorSets(dev_, &ai, &s);
     vkAllocateDescriptorSets(dev_, &ai, &rays_set_);
-    for (VkDescriptorSet& s : diff_sets_) vkAllocateDescriptorSets(dev_, &ai, &s);
+    vkAllocateDescriptorSets(dev_, &ai, &diff_set_);
     ai.pSetLayouts = &ao_set_layout_;
     vkAllocateDescriptorSets(dev_, &ai, &ao_set_);
 
@@ -407,6 +451,10 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     w.dstBinding = 9;
     w.pImageInfo = &sky;
     vkUpdateDescriptorSets(dev_, 1, &w, 0, nullptr);
+    VkDescriptorImageInfo fields{sky_sampler_, sky_fields_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    w.dstBinding = 14;
+    w.pImageInfo = &fields;
+    vkUpdateDescriptorSets(dev_, 1, &w, 0, nullptr);
 
     VkPushConstantRange pr{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ViewportPush)};
     VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
@@ -423,6 +471,9 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
     pli.pSetLayouts = &bloom_set_layout_;
     pli.pPushConstantRanges = &bpr;
     vkCreatePipelineLayout(dev_, &pli, nullptr, &bloom_layout_);
+    pli.setLayoutCount = 0;   // the sky panorama: push constants only
+    vkCreatePipelineLayout(dev_, &pli, nullptr, &sky_layout_);
+    pli.setLayoutCount = 1;
     VkPushConstantRange apr{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 80};
     // Traced, the ambient occlusion also sees the 3D pass's set (the world's rays)
     VkDescriptorSetLayout ao_sets[2] = {ao_set_layout_, r3d_set_layout_};
@@ -437,7 +488,8 @@ bool R3DRenderer::init(VkPresenter& vk, float supersample, int msaa, int aniso, 
 VkPipeline R3DRenderer::make_pipeline(const PipelineDesc& d) {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, d.vs, "main"};
-    stages[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, d.fs, "main"};
+    stages[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, d.fs, "main",
+                 d.fs_spec};
 
     VkVertexInputBindingDescription binding{0, sizeof(R3DVertex), VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription attrs[9] = {
@@ -544,7 +596,7 @@ VkPipeline R3DRenderer::make_pipeline(const PipelineDesc& d) {
     gp.pDynamicState = &dy;
     gp.layout = d.layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (VkResult r = vkCreateGraphicsPipelines(dev_, VK_NULL_HANDLE, 1, &gp, nullptr, &p); r != VK_SUCCESS)
+    if (VkResult r = vkCreateGraphicsPipelines(dev_, vk_->pipeline_cache(), 1, &gp, nullptr, &p); r != VK_SUCCESS)
         fprintf(stderr, "[vulkan] vkCreateGraphicsPipelines failed (%d)\n", int(r));
     return p;
 }
@@ -561,11 +613,16 @@ bool R3DRenderer::create_pipelines() {
     VkShaderModule ao_fs = rt_.ready() ? make_module(dev_, spv_ao_rt_frag, sizeof(spv_ao_rt_frag))
                                        : make_module(dev_, spv_ao_frag, sizeof(spv_ao_frag));
     VkShaderModule aoa_fs = make_module(dev_, spv_ao_apply_frag, sizeof(spv_ao_apply_frag));
+    VkShaderModule sky_fs = make_module(dev_, spv_sky_fields_frag, sizeof(spv_sky_fields_frag));
     bool motion = motion_pass_ = dlaa_.ready();
+    // r3d.frag sizes its texture pack array by this constant (constant_id 0)
+    VkSpecializationMapEntry slots_entry{0, 0, sizeof(uint32_t)};
+    VkSpecializationInfo r3d_spec{1, &slots_entry, sizeof(replacement_slots_), &replacement_slots_};
     // The world: 3D geometry into the HDR image, with the motion and glow slots
+    // (the glow only while the bloom is on: without it nothing reads it)
     PipelineDesc world{.vs = r3d_vs, .fs = r3d_fs, .layout = r3d_layout_, .color = VK_FORMAT_R16G16B16A16_SFLOAT,
                        .depth = true, .depth_write = true, .vertex_input = true, .samples = samples_,
-                       .motion = motion, .glow = true};
+                       .motion = motion, .glow = glow_pass_, .fs_spec = &r3d_spec};
     opaque_ = make_pipeline(world);
     PipelineDesc translucent = world;
     translucent.depth_write = false;
@@ -575,7 +632,7 @@ bool R3DRenderer::create_pipelines() {
     trans_depth.depth_only = true;
     trans_depth_ = make_pipeline(trans_depth);
     shadow_ = make_pipeline({.vs = r3d_vs, .fs = r3d_fs, .layout = r3d_layout_, .color = VK_FORMAT_UNDEFINED,
-                             .depth = true, .depth_write = true, .vertex_input = true});
+                             .depth = true, .depth_write = true, .vertex_input = true, .fs_spec = &r3d_spec});
     // Full-screen passes: a triangle over the target, no vertex input
     compose_format_ = vk_->swap_format();
     PipelineDesc compose{.vs = c_vs, .fs = c_fs, .layout = compose_layout_, .color = compose_format_};
@@ -596,17 +653,61 @@ bool R3DRenderer::create_pipelines() {
     ao_pass_ = make_pipeline({.vs = c_vs, .fs = ao_fs, .layout = ao_layout_, .color = VK_FORMAT_R8_UNORM});
     ao_apply_ = make_pipeline({.vs = c_vs, .fs = aoa_fs, .layout = ao_layout_, .color = VK_FORMAT_R16G16B16A16_SFLOAT,
                                .samples = samples_, .multiply = true});
-    for (auto m : {r3d_vs, r3d_fs, c_vs, c_fs, b_fs, rays_fs, ao_fs, aoa_fs}) vkDestroyShaderModule(dev_, m, nullptr);
+    sky_fields_pipe_ = make_pipeline({.vs = c_vs, .fs = sky_fs, .layout = sky_layout_, .color = VK_FORMAT_R8G8B8A8_UNORM});
+    for (auto m : {r3d_vs, r3d_fs, c_vs, c_fs, b_fs, rays_fs, ao_fs, aoa_fs, sky_fs}) vkDestroyShaderModule(dev_, m, nullptr);
     // Name the ones missing, so a report says which pass this GPU could not build
     bool ok = true;
     for (auto [p, name] : {std::pair{opaque_, "opaque"}, {translucent_, "translucent"}, {trans_depth_, "trans_depth"},
                            {shadow_, "shadow"}, {rays_, "rays"}, {compose_measure_, "compose_measure"},
-                           {compose_, "compose"}, {bloom_, "bloom"}, {ao_pass_, "ao"}, {ao_apply_, "ao_apply"}})
+                           {compose_, "compose"}, {bloom_, "bloom"}, {ao_pass_, "ao"}, {ao_apply_, "ao_apply"},
+                           {sky_fields_pipe_, "sky_fields"}})
         if (!p) {
             fprintf(stderr, "[vulkan] no %s pipeline%s\n", name, rt_.ready() ? " (ray tracing on)" : "");
             ok = false;
         }
     return ok;
+}
+
+void R3DRenderer::destroy_pipelines() {
+    for (VkPipeline* p : {&opaque_, &translucent_, &trans_depth_, &shadow_, &rays_, &compose_measure_, &compose_, &bloom_,
+                          &compose_glow_, &ao_pass_, &ao_apply_, &sky_fields_pipe_})
+        if (*p) vkDestroyPipeline(dev_, *p, nullptr), *p = VK_NULL_HANDLE;
+}
+
+VkSampleCountFlagBits R3DRenderer::msaa_level(int samples) const {
+    VkSampleCountFlags counts = vk_->limits().framebufferColorSampleCounts & vk_->limits().framebufferDepthSampleCounts;
+    VkSampleCountFlagBits level = VK_SAMPLE_COUNT_1_BIT;
+    for (int s = 2; s <= std::min(samples, 8); s *= 2)
+        if (counts & s) level = VkSampleCountFlagBits(s);
+    return level;
+}
+
+// MSAA changed in the menu, or the bloom went on or off: the world pipelines
+// and the targets depend on the sample count and on whether the glow is
+// drawn, so both are made again (between frames: nothing in flight)
+void R3DRenderer::apply_pending() {
+    VkSampleCountFlagBits level = samples_;
+    if (pending_msaa_) {
+        int wanted = pending_msaa_;
+        pending_msaa_ = 0;
+        if (!dlaa_.ready() && wanted != msaa_wanted_) {
+            msaa_wanted_ = wanted;
+            level = msaa_level(wanted);
+        }
+    }
+    bool glow = bloom_strength_ > 0;
+    if (level == samples_ && glow == glow_pass_) return;
+    vkDeviceWaitIdle(dev_);
+    bool msaa_changed = level != samples_;
+    samples_ = level;
+    glow_pass_ = glow;
+    destroy_pipelines();
+    if (!create_pipelines())
+        fprintf(stderr, "[vulkan] could not make the pipelines again (MSAA %dx, bloom %s)\n", int(samples_),
+                glow ? "on" : "off");
+    destroy_image(color_);   // ensure_targets makes every target again
+    can_repeat_ = false;
+    if (msaa_changed) printf("[video] antialiasing MSAA %dx\n", int(samples_));
 }
 
 void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
@@ -678,12 +779,15 @@ void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
         create_image(dlaa_alpha_, w, h, VK_FORMAT_R8G8B8A8_UNORM,
                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-    // Bloom: glow written by the 3D pass, then reduced to a quarter and blurred
+    // Bloom: glow written by the 3D pass (only while the bloom is on), then
+    // reduced to a quarter and blurred
     const VkImageUsageFlags target = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    create_image(glow_, w, h, VK_FORMAT_R8G8B8A8_UNORM, target, VK_IMAGE_ASPECT_COLOR_BIT);
-    if (samples_ != VK_SAMPLE_COUNT_1_BIT)
-        create_image(glow_ms_, w, h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT, samples_);
+    if (glow_pass_) {
+        create_image(glow_, w, h, VK_FORMAT_R8G8B8A8_UNORM, target, VK_IMAGE_ASPECT_COLOR_BIT);
+        if (samples_ != VK_SAMPLE_COUNT_1_BIT)
+            create_image(glow_ms_, w, h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                         VK_IMAGE_ASPECT_COLOR_BIT, samples_);
+    }
     for (Image* img : {&bloom_a_, &bloom_b_})
         create_image(*img, std::max(1u, w / 4), std::max(1u, h / 4), VK_FORMAT_R8G8B8A8_UNORM, target,
                      VK_IMAGE_ASPECT_COLOR_BIT);
@@ -701,7 +805,9 @@ void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
             bw[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             bw[i].pImageInfo = &src[i];
         }
-        vkUpdateDescriptorSets(dev_, 4, bw, 0, nullptr);
+        // Without the glow image its set keeps what it had (nothing reads it)
+        int first = glow_pass_ ? 0 : 1;
+        vkUpdateDescriptorSets(dev_, uint32_t(4 - first), bw + first, 0, nullptr);
     }
     // Light shafts: the mask and the shafts, a quarter of the size
     for (Image* img : {&rays_a_, &rays_b_})
@@ -726,19 +832,19 @@ void R3DRenderer::ensure_targets(uint32_t w, uint32_t h) {
         create_image(*img, std::max(1u, w / 4), std::max(1u, h / 4), VK_FORMAT_R8G8B8A8_UNORM, target,
                      VK_IMAGE_ASPECT_COLOR_BIT);
     {
-        VkDescriptorImageInfo src[3] = {{linear_, diff_a_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                                        {linear_, diff_b_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        // (the first blur reads the scene from rays_a_, through rays_set_)
+        VkDescriptorImageInfo src[2] = {{linear_, diff_b_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                                         {linear_, diff_a_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
-        VkWriteDescriptorSet dw[3];
-        for (int i = 0; i < 3; i++) {
+        VkWriteDescriptorSet dw[2];
+        for (int i = 0; i < 2; i++) {
             dw[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            dw[i].dstSet = i < 2 ? diff_sets_[i] : compose_set_;
-            dw[i].dstBinding = i < 2 ? 0 : 12;
+            dw[i].dstSet = i == 0 ? diff_set_ : compose_set_;
+            dw[i].dstBinding = i == 0 ? 0 : 12;
             dw[i].descriptorCount = 1;
             dw[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dw[i].pImageInfo = &src[i];
         }
-        vkUpdateDescriptorSets(dev_, 3, dw, 0, nullptr);
+        vkUpdateDescriptorSets(dev_, 2, dw, 0, nullptr);
     }
     composed_view_ = VK_NULL_HANDLE;
     if (dlaa_.ready()) bind_scene_image(dlaa_out_.view, dlaa_alpha_.view);
@@ -1246,13 +1352,28 @@ void R3DRenderer::step_sky_sun(const WorldPose& pose, const float view[4], float
 // The weather (r3d_weather.h), once per game frame: the shown one moves
 // towards the one asked for over a few seconds, and it shows only outdoors
 // in daylight, with a backdrop behind the world (not in the caves, the
-// corridors or the night, where the backdrop is black)
+// corridors or the night, where the backdrop is black) and no roof over the
+// camera (r3d_shelter.h: the buildings, whose backdrop may still be the sky)
 void R3DRenderer::step_weather(const R3DScene& scene) {
     const R3DViewport* w = nullptr;
     for (const R3DViewport& v : scene.viewports)
         if (v.world) w = &v;
-    float outdoor = w && !back_black_ && w->sun_intensity > 0.15f ? 1.0f : 0.0f;
-    outdoor_ += 0.02f * (outdoor - outdoor_);
+    if (w) {
+        size_t first = std::min<size_t>(w->opaque_first, scene.vertices.size());
+        size_t count = std::min<size_t>(w->opaque_count, scene.vertices.size() - first);
+        shelter_.step(scene.vertices.data() + first, count, w->world_axes);
+    } else {
+        shelter_.clear();
+    }
+    static const bool debug = getenv("LW_SHELTERDBG") != nullptr;   // debugging aid
+    if (debug && w)
+        printf("[shelter] %d/%d rays covered%s\n", shelter_.last_hits(), R3DShelter::RAYS,
+               shelter_.sheltered() ? ", sheltered" : "");
+    bool sheltered = shelter_.sheltered();
+    float outdoor = w && !back_black_ && w->sun_intensity > 0.15f && !sheltered ? 1.0f : 0.0f;
+    // Into a building the weather goes in a few frames (often a cut), out of it as before
+    outdoor_ += (sheltered ? 0.15f : 0.02f) * (outdoor - outdoor_);
+    rain_.set_sheltered(sheltered);
     const float k = 0.01f;   // about four seconds to change
     R3DWeather& a = weather_;
     const R3DWeather& b = weather_target_;
@@ -1493,6 +1614,7 @@ void R3DRenderer::update_atmosphere(const ScreenLayout& lay, uint32_t target_w, 
             // Where it strikes: picked when it begins, a little to either side
             // of where the camera looks then, and kept for the whole strike
             if (strike.id != bolt_id_ || force_flash) {   // (LW_FLASH: kept where the camera looks)
+                if (strike.id != bolt_id_) strikes_++;   // its thunder (strikes)
                 bolt_id_ = strike.id;
                 const float* a = w->world_axes;
                 float yaw = std::atan2(-a[8], -a[2]);   // the view direction in the world frame
@@ -1652,6 +1774,39 @@ void R3DRenderer::record_ray_tracing(const Frame& f) {
     rt_.record(f.cmd);
 }
 
+// The procedural sky's clouds into their panorama (sky_fields.frag): a strip
+// of SKY_FIELDS_ROWS rows per frame, the whole of it the first time. The
+// clouds drift about a layer pixel every three seconds, so the strips drawn
+// in turn over the panorama's 32 frames differ by far less than a pixel
+void R3DRenderer::record_sky_fields(const Frame& f) {
+    VkCommandBuffer cmd = f.cmd;
+    uint32_t y0 = sky_fields_all_ ? 0 : sky_fields_row_;
+    uint32_t rows = sky_fields_all_ ? sky_fields_.h : SKY_FIELDS_ROWS;
+    sky_fields_all_ = false;
+    sky_fields_row_ = (y0 + rows) % sky_fields_.h;
+    transition(cmd, sky_fields_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo a{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    a.imageView = sky_fields_.view;
+    a.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    a.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;   // the other strips stay
+    a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, int32_t(y0)}, {sky_fields_.w, rows}};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &a;
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, sky_fields_pipe_);
+    VkViewport whole{0, 0, float(sky_fields_.w), float(sky_fields_.h), 0, 1};   // uv over the whole panorama
+    vkCmdSetViewport(cmd, 0, 1, &whole);
+    vkCmdSetScissor(cmd, 0, 1, &ri.renderArea);
+    float sp[4] = {launch_seconds() * 0.005f, 0, 0, 0};   // the drift, as compose.frag had it
+    vkCmdPushConstants(cmd, sky_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(sp), sp);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    transition(cmd, sky_fields_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
 void R3DRenderer::record_shadows(const Frame& f) {
     VkCommandBuffer cmd = f.cmd;
     const size_t vcount = f.vcount;
@@ -1719,9 +1874,11 @@ void R3DRenderer::record_world(const Frame& f) {
     transition(cmd, color_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     if (msaa) transition(cmd, color_ms_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     if (motion_pass_) transition(cmd, motion_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    glow_.layout = glow_ms_.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    transition(cmd, glow_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    if (msaa) transition(cmd, glow_ms_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    if (glow_pass_) {
+        glow_.layout = glow_ms_.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        transition(cmd, glow_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        if (msaa) transition(cmd, glow_ms_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    }
     transition(cmd, depth_, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     VkRenderingAttachmentInfo cas[3] = {{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO},
                                         {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO},
@@ -1745,7 +1902,7 @@ void R3DRenderer::record_world(const Frame& f) {
         ca.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
     ca.clearValue.color = {{0, 0, 0, 0}};
-    cas[2] = ca;   // bloom source, cleared to no glow
+    cas[2] = ca;   // bloom source, cleared to no glow (an attachment only with the bloom on)
     cas[2].imageView = msaa ? glow_ms_.view : glow_.view;
     if (msaa) cas[2].resolveImageView = glow_.view;
     VkRenderingAttachmentInfo da{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -1763,7 +1920,7 @@ void R3DRenderer::record_world(const Frame& f) {
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, {out_w, out_h}};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 3;
+    ri.colorAttachmentCount = glow_pass_ ? 3 : motion_pass_ ? 2 : 1;   // as the pipelines (make_pipeline)
     ri.pColorAttachments = cas;
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
@@ -1797,9 +1954,9 @@ void R3DRenderer::record_world(const Frame& f) {
                     for (size_t k = i; k < j; k++)
                         if (vps[k].world) w = &vps[k];
                     vkCmdEndRendering(cmd);
-                    gpu_time_mark(cmd, 3);
-                    record_world_depth(f, *w, msaa, ao_on);
                     gpu_time_mark(cmd, 4);
+                    record_world_depth(f, *w, msaa, ao_on);
+                    gpu_time_mark(cmd, 5);
                     // The 3D pass goes on where it was; the world depth stays
                     // readable (no resolve into it any more this frame)
                     VkRenderingAttachmentInfo again[3] = {cas[0], cas[1], cas[2]};
@@ -1882,7 +2039,7 @@ void R3DRenderer::record_world(const Frame& f) {
     }
     vkCmdEndRendering(cmd);
     transition(cmd, color_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    transition(cmd, glow_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (glow_pass_) transition(cmd, glow_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 // Between the opaque and the translucent surfaces of the world: its depth
@@ -1994,9 +2151,7 @@ R3DRenderer::ComposePush R3DRenderer::compose_push(const Frame& f) const {
     const ScreenLayout& lay = f.lay;
     float W = float(extent.width), H = float(extent.height);
     bool extend_back = back_layer_extended();
-    // Drift of the procedural clouds
-    static const double launch = now_seconds();
-    float seconds = float(now_seconds() - launch);
+    float seconds = launch_seconds();
     ComposePush pc{.scale = {lay.view_w * lay.scale / W, SCREEN_H * lay.scale / H},
                    .offset = {lay.ox / W, lay.oy / H},
                    .crosshair = {-1, -1},
@@ -2061,18 +2216,29 @@ void R3DRenderer::begin_quarter(VkCommandBuffer cmd, Image& to, VkAttachmentLoad
 void R3DRenderer::record_bloom(const Frame& f, const ComposePush& pc) {
     VkCommandBuffer cmd = f.cmd;
     // Bloom: the glow reduced to a quarter of the size, then blurred across and down
-    if (bloom_strength_ > 0) {
+    // The composition's own results (bloom_a_, rays_b_, diff_a_) are in its
+    // descriptor set, and the composition draws the sky glow, the shaft mask
+    // and the diffusion's scene: those images must be in the layout the set
+    // says even where this frame does not read them (Vulkan checks each
+    // draw), whether their pass is on or not and after they are recreated
+    for (Image* img : {&bloom_a_, &rays_b_, &diff_a_})
+        if (img->layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+            transition(cmd, *img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (glow_pass_) {
+        // The first step draws the composition (sky glow) too, so it cannot
+        // write bloom_a_, which the composition's set holds: it writes
+        // rays_a_ (same size, free outside the shafts' own passes)
         struct Step {
-            int source;   // bloom_sets_ index
+            VkDescriptorSet source;
             Image* from;
             Image* to;
             float mode, spread;
-        } steps[5] = {{0, &glow_, &bloom_a_, 0, 0},
-                      {1, &bloom_a_, &bloom_b_, 1, 2.0f},
-                      {2, &bloom_b_, &bloom_a_, 2, 2.0f},
+        } steps[5] = {{bloom_sets_[0], &glow_, &rays_a_, 0, 0},
+                      {rays_set_, &rays_a_, &bloom_b_, 1, 2.0f},
+                      {bloom_sets_[2], &bloom_b_, &bloom_a_, 2, 2.0f},
                       // A second, wider round: the glow spreads across the screen
-                      {1, &bloom_a_, &bloom_b_, 1, 5.0f},
-                      {2, &bloom_b_, &bloom_a_, 2, 5.0f}};
+                      {bloom_sets_[1], &bloom_a_, &bloom_b_, 1, 5.0f},
+                      {bloom_sets_[2], &bloom_b_, &bloom_a_, 2, 5.0f}};
         // The sky glows less than fire: it is large and only its brightest part
         // counts. Only behind the game world: title and menu screens are 2D pictures
         float sky_glow = has_world_ ? 0.6f : 0.0f;
@@ -2091,7 +2257,7 @@ void R3DRenderer::record_bloom(const Frame& f, const ComposePush& pc) {
             bi.colorAttachmentCount = 1;
             bi.pColorAttachments = &ba;
             vkCmdBeginRendering(cmd, &bi);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_layout_, 0, 1, &bloom_sets_[st.source], 0,
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_layout_, 0, 1, &st.source, 0,
                                     nullptr);
             VkViewport bv{0, 0, float(st.to->w), float(st.to->h), 0, 1};
             vkCmdSetViewport(cmd, 0, 1, &bv);
@@ -2115,8 +2281,6 @@ void R3DRenderer::record_bloom(const Frame& f, const ComposePush& pc) {
             vkCmdEndRendering(cmd);
             transition(cmd, *st.to, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
-    } else if (bloom_a_.layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        transition(cmd, bloom_a_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);   // bound, though not read
     }
 }
 
@@ -2140,8 +2304,6 @@ void R3DRenderer::record_light_shafts(const Frame& f, const ComposePush& pc, boo
         vkCmdDraw(cmd, 3, 1, 0, 0);
         vkCmdEndRendering(cmd);
         transition(cmd, rays_b_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    } else if (rays_b_.layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        transition(cmd, rays_b_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);   // bound, though not read
     }
 }
 
@@ -2149,30 +2311,31 @@ void R3DRenderer::record_diffusion(const Frame& f, const ComposePush& pc) {
     VkCommandBuffer cmd = f.cmd;
     // Diffusion (BLOOM): the picture behind the HUD, then blurred across and down
     if (bloom_strength_ > 0) {
-        begin_quarter(cmd, diff_a_, VK_ATTACHMENT_LOAD_OP_CLEAR);   // cleared: the scene pass adds onto it
+        // The scene is drawn by the composition, whose set holds diff_a_: it
+        // goes to rays_a_ (same size, the shafts are done with it) and is
+        // blurred from there into diff_b_ and back into diff_a_
+        begin_quarter(cmd, rays_a_, VK_ATTACHMENT_LOAD_OP_CLEAR);   // cleared: the scene pass adds onto it
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compose_glow_);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compose_layout_, 0, 1, &compose_set_, 0, nullptr);
-        ComposePush dp = reduced(pc, diff_a_);
+        ComposePush dp = reduced(pc, rays_a_);
         dp.sky[3] = 3;       // scene mode
         dp.effects[0] = 0;   // (no diffusion of the diffusion)
         vkCmdPushConstants(cmd, compose_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(dp), &dp);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         vkCmdEndRendering(cmd);
-        transition(cmd, diff_a_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        transition(cmd, rays_a_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_);
         for (int pass = 0; pass < 2; pass++) {
             Image& to = pass == 0 ? diff_b_ : diff_a_;
             begin_quarter(cmd, to, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_layout_, 0, 1, &diff_sets_[pass], 0,
-                                    nullptr);
+            VkDescriptorSet source = pass == 0 ? rays_set_ : diff_set_;
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloom_layout_, 0, 1, &source, 0, nullptr);
             float bp[4] = {1.0f / float(to.w), 1.0f / float(to.h), pass == 0 ? 1.0f : 2.0f, 3.0f};
             vkCmdPushConstants(cmd, bloom_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(bp), bp);
             vkCmdDraw(cmd, 3, 1, 0, 0);
             vkCmdEndRendering(cmd);
             transition(cmd, to, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
-    } else if (diff_a_.layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        transition(cmd, diff_a_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);   // bound, though not read
     }
 }
 
@@ -2235,6 +2398,7 @@ void R3DRenderer::record_compose(const Frame& f, const ComposePush& pc, VkImageV
 
 // A frame, pass by pass (each one in its own function above)
 void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent) {
+    apply_pending();
     flush_uploads(cmd);
     // Placement in the window (widescreen or 4:3) and internal 3D resolution
     Frame f{};
@@ -2312,9 +2476,9 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
                 }
             gpu_sum_[0] += double(t[GPU_MARKS - 1][0] - t[0][0]) * timestamp_period_ * 1e-6;
             if (++gpu_frames_ == 300) {
-                static const char* const names[GPU_MARKS] = {"whole frame", "ray tracing build", "shadow map",
-                                                             "3D opaque", "ambient occlusion", "3D rest", "DLAA",
-                                                             "bloom", "light shafts", "diffusion", "exposure",
+                static const char* const names[GPU_MARKS] = {"whole frame", "sky panorama", "ray tracing build",
+                                                             "shadow map", "3D opaque", "ambient occlusion", "3D rest",
+                                                             "DLAA", "bloom", "light shafts", "diffusion", "exposure",
                                                              "composition"};
                 printf("[gpu] ms/image at %ux%u (msaa %d, %zu traced triangles):", f.out_w, f.out_h, int(samples_),
                        rt_frame_ ? rt_.triangles() : size_t(0));
@@ -2330,26 +2494,28 @@ void R3DRenderer::record(VkCommandBuffer cmd, VkImageView target, VkExtent2D ext
         vkCmdResetQueryPool(cmd, gpu_times_, 0, GPU_MARKS);
         gpu_time_mark(cmd, 0);
     }
-    record_ray_tracing(f);
+    record_sky_fields(f);
     gpu_time_mark(cmd, 1);
-    record_shadows(f);
+    record_ray_tracing(f);
     gpu_time_mark(cmd, 2);
+    record_shadows(f);
+    gpu_time_mark(cmd, 3);
     record_world(f);
-    gpu_time_mark(cmd, 5);
-    record_dlaa(f);
     gpu_time_mark(cmd, 6);
+    record_dlaa(f);
+    gpu_time_mark(cmd, 7);
     ComposePush pc = compose_push(f);
     record_bloom(f, pc);
-    gpu_time_mark(cmd, 7);
+    gpu_time_mark(cmd, 8);
     // Light shafts: the visible sky around the sun, then smeared towards it
     bool shafts = rays_strength_ > 0 && sun_light_ > 0;
     pc.effects[3] = shafts ? 1.0f : 0.0f;
     record_light_shafts(f, pc, shafts);
-    gpu_time_mark(cmd, 8);
-    record_diffusion(f, pc);
     gpu_time_mark(cmd, 9);
-    record_exposure(f, pc);
+    record_diffusion(f, pc);
     gpu_time_mark(cmd, 10);
+    record_exposure(f, pc);
+    gpu_time_mark(cmd, 11);
     record_compose(f, pc, target);
     gpu_time_mark(cmd, GPU_MARKS - 1);
     if (gpu_times_) gpu_pending_ = true;
@@ -2380,13 +2546,13 @@ void R3DRenderer::gpu_time_mark(VkCommandBuffer cmd, uint32_t index) {
 void R3DRenderer::shutdown() {
     if (!dev_) return;
     vkDeviceWaitIdle(dev_);
-    for (auto p : {opaque_, translucent_, trans_depth_, shadow_, rays_, compose_measure_, compose_, bloom_, compose_glow_, ao_pass_, ao_apply_})
-        if (p) vkDestroyPipeline(dev_, p, nullptr);
+    destroy_pipelines();
     dlaa_.shutdown();
     rt_.shutdown();
     if (gpu_times_) vkDestroyQueryPool(dev_, gpu_times_, nullptr);
     for (Image* img : {&texture_ram_, &back_, &front_, &text_cells_, &sky_coords_, &color_, &color_ms_, &depth_, &motion_, &dlaa_out_, &dlaa_alpha_,
-                        &glow_, &glow_ms_, &bloom_a_, &bloom_b_, &depth_resolved_, &ao_, &shadow_map_, &rays_a_, &rays_b_, &exposure_, &diff_a_, &diff_b_})
+                        &glow_, &glow_ms_, &bloom_a_, &bloom_b_, &depth_resolved_, &ao_, &shadow_map_, &rays_a_, &rays_b_, &exposure_, &diff_a_, &diff_b_,
+                        &sky_fields_})
         destroy_image(*img);
     for (Image& img : replacements_) destroy_image(img);
     for (auto& [slot, img] : overlay_images_) destroy_image(img);
@@ -2395,9 +2561,9 @@ void R3DRenderer::shutdown() {
     uploads_.clear();
     free_spent();
     for (Buffer* b : {&texture_staging_, &layer_staging_, &vertices_, &atmosphere_uniform_}) destroy_buffer(*b);
-    for (VkSampler sm : {nearest_, linear_, replace_sampler_, overlay_sampler_})
+    for (VkSampler sm : {nearest_, linear_, replace_sampler_, overlay_sampler_, sky_sampler_})
         if (sm) vkDestroySampler(dev_, sm, nullptr);
-    for (VkPipelineLayout l : {r3d_layout_, compose_layout_, bloom_layout_, ao_layout_})
+    for (VkPipelineLayout l : {r3d_layout_, compose_layout_, bloom_layout_, ao_layout_, sky_layout_})
         if (l) vkDestroyPipelineLayout(dev_, l, nullptr);
     if (pool_) vkDestroyDescriptorPool(dev_, pool_, nullptr);   // (and the sets from it)
     for (VkDescriptorSetLayout l : {r3d_set_layout_, compose_set_layout_, bloom_set_layout_, ao_set_layout_})

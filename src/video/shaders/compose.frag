@@ -23,6 +23,7 @@ layout(set = 0, binding = 10) uniform sampler2D light_shafts;   // rays.frag
 layout(set = 0, binding = 12) uniform sampler2D diffusion;   // the picture behind the HUD, blurred (bloom.frag)
 layout(set = 0, binding = 11) uniform sampler2D exposure_log;   // 1x1: average log brightness of the 3D image, eased
 layout(set = 0, binding = 13) uniform sampler2D crosshair_pictures[3];   // crosshair.png, crosshair_p2.png, bezel
+layout(set = 0, binding = 14) uniform sampler2D sky_fields_panorama;   // the procedural sky's clouds (sky_fields.frag)
 
 layout(push_constant) uniform Compose {
     vec2 scale;       // image size relative to the window
@@ -34,7 +35,7 @@ layout(push_constant) uniform Compose {
     vec4 hud;         // x: shift of the top HUD band to the screen edges (2D pixels); y: 1 = HDR lighting;
                       // z: brightness offset of the foreground layers (fades), applied to the overlays;
                       // w: 1 = background layers continue beside the 4:3 area
-    vec4 sky;         // x: seconds since launch (drift of the procedural clouds);
+    vec4 sky;         // x: seconds since launch (unused here: the clouds' drift is in their panorama);
                       // y > 0: glow mode, for the bloom: only the bright part of the sky, times y;
                       // z: 1 = a sun in the procedural sky; w: 1 = mask mode, for the light shafts:
                       // the visible sky around the sun; 2 = measure mode: average log brightness of the 3D image;
@@ -204,66 +205,14 @@ vec4 layer(sampler2D tex, vec2 q, ivec2 size) {
 
 const uint SKY_FIRST_SLOT = 56u;        // SkyPack::FIRST_SLOT
 
-// Procedural sky (SKY: PROCEDURAL): a gradient with soft clouds, on the
-// layers as a panorama that wraps around the camera (the lower one with the
-// horizon, the upper one above it).
-// sky_pack.cpp has the same sky without the drift (keep both in step).
-float sky_hash(ivec2 p) {
-    uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u;
-    h = (h ^ (h >> 13)) * 1274126177u;
-    return float((h ^ (h >> 16)) & 0xFFFFFFu) / 16777216.0;
-}
+#include "sky_procedural.glsl"
 
-// Value noise that repeats every `period` cells along x (the layer wraps around)
-float sky_noise(vec2 p, int period) {
-    ivec2 i = ivec2(floor(p));
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    int x0 = ((i.x % period) + period) % period, x1 = (x0 + 1) % period;
-    return mix(mix(sky_hash(ivec2(x0, i.y)), sky_hash(ivec2(x1, i.y)), f.x),
-               mix(sky_hash(ivec2(x0, i.y + 1)), sky_hash(ivec2(x1, i.y + 1)), f.x), f.y);
-}
-
-float sky_fbm(vec2 p, int period, int octaves) {
-    float s = 0.0, a = 0.5;
-    for (int i = 0; i < octaves; i++) {
-        s += a * sky_noise(p, period);
-        p = p * 2.0 + vec2(5.3, 9.7);
-        period *= 2;
-        a *= 0.5;
-    }
-    return s;
-}
-
-float sky_density(vec2 p) { return max(sky_fbm(p, 8, 6) - 0.45, 0.0) * 10.0; }
-
-// at: x and y in the 512x512 lower layer (the upper one has y from -512 to 0)
-// sky, lit: colours of the clear sky and of the lit clouds there
-vec3 sky_procedural(vec2 at, float drift, vec3 sky, vec3 lit) {
-    const float HORIZON = 500.0, HEIGHT = 1012.0;
-    float t = clamp((HORIZON - at.y) / HEIGHT, 0.0, 1.0);   // 0 at the horizon, 1 at the top
-    // More depth than the original: richer colour, darker towards the top,
-    // a pale glow at the horizon, and whiter cloud tops
-    float l = dot(sky, vec3(0.2126, 0.7152, 0.0722));
-    sky = max(vec3(l) + (sky - vec3(l)) * 1.3, 0.0) * (1.0 - 0.3 * smoothstep(0.1, 0.8, t))
-          + 0.06 * (1.0 - smoothstep(0.0, 0.15, t));
-    lit = mix(lit, vec3(1.0), 0.3);
-    // The layer is a cylinder around the camera: u around it (8 cells), v up
-    // it, squeezed towards the horizon by perspective
-    float el = 0.03 + 1.5 * t;   // elevation (radians)
-    vec2 p = vec2(at.x * (8.0 / 512.0) + drift, 6.0 * tanh(2.5 / tan(el) / 6.0) - 6.0 * t);
-    p += 0.5 * vec2(sky_fbm(p * 0.5 + vec2(3.1, 0.0), 4, 5), sky_fbm(p * 0.5 + vec2(0.0, 7.7), 4, 5));
-    // Cloud density, then the light that reaches each point from above
-    // through the cloud: lit tops, shaded bases, bright thin edges
-    float density = sky_density(p);
-    float above = 0.0;
-    for (int i = 1; i <= 4; i++) above += sky_density(p - vec2(0.0, 0.06 * float(i)));
-    float light = exp(-above * 0.9);
-    float cover = (1.0 - exp(-density * 3.0)) * smoothstep(0.0, 0.12, t);
-    vec3 cloud = mix((sky * 0.6 + lit * 0.3) * 0.75, min(lit * 1.05, vec3(1.0)), light) + (1.0 - cover) * 0.15;
-    cloud *= 0.8 + 0.4 * sky_fbm(p * 4.0 + vec2(1.7, 2.9), 32, 3);   // finer billows
-    cloud = mix(cloud, sky, smoothstep(0.17, 0.0, t) * 0.6);
-    return mix(sky, cloud, cover);
+// The procedural sky at a point of the layers (sky_procedural), with the
+// clouds read from the panorama sky_fields.frag keeps drawn (x wraps around)
+vec3 sky_panorama(vec2 at, vec3 sky, vec3 lit) {
+    float t = sky_t(at.y);
+    vec3 f = texture(sky_fields_panorama, vec2(at.x / 512.0, t)).xyz;
+    return sky_shade(f, t, sky, lit);
 }
 
 // Sun in the procedural sky (SUN), where the game's own light comes from:
@@ -297,7 +246,7 @@ vec3 sky_night(vec2 p) {
     const float DIM = 0.33;
     vec3 sky = mix(vec3(0.050, 0.070, 0.130), vec3(0.012, 0.020, 0.050), smoothstep(0.0, 0.6, t)) / DIM;
     vec3 lit = vec3(0.17, 0.19, 0.25) / DIM;
-    return min(sky_procedural(at, pc.sky.x * 0.002, sky, lit) * DIM, vec3(1.0));
+    return min(sky_panorama(at, sky, lit) * DIM, vec3(1.0));
 }
 
 // Which picture and point each back layer pixel shows: sampled in between.
@@ -327,12 +276,12 @@ bool sky_layer(vec2 qb, vec2 dx, vec2 dy, inout vec4 back) {
         vec3 lit = mix(texelFetch(sky_coords, ivec2(table + band * 2 + 1, SIZE_BACK.y), 0).rgb,
                        texelFetch(sky_coords, ivec2(table + next * 2 + 1, SIZE_BACK.y), 0).rgb, fy - float(band));
         if ((b.b & 64u) != 0u) {   // the sky above
-            s = vec4(sky_procedural(vec2(at.x, y - 512.0), pc.sky.x * 0.005, sky, lit), 1.0);
+            s = vec4(sky_panorama(vec2(at.x, y - 512.0), sky, lit), 1.0);
         } else {
             // Trees on the horizon: the dark parts of the original's bottom rows
             vec4 o = textureGrad(overlays[nonuniformEXT(slot)], fract(at / 512.0), dx, dy);
             float tree = y > 455.0 ? 1.0 - smoothstep(0.10, 0.20, dot(o.rgb, vec3(0.2126, 0.7152, 0.0722))) : 0.0;
-            s = vec4(mix(sky_procedural(vec2(at.x, y), pc.sky.x * 0.005, sky, lit), o.rgb * 0.9, tree), 1.0);
+            s = vec4(mix(sky_panorama(vec2(at.x, y), sky, lit), o.rgb * 0.9, tree), 1.0);
         }
     }
     // Fade offset of the layer pair, in the last row
@@ -465,7 +414,12 @@ void main() {
         bool inside_43 = p.x >= pc.layer2d.x && p.x <= pc.layer2d.x + pc.layer2d.y;
         vec2 sky_dx = dFdx(qb * vec2(SIZE_BACK)) / 512.0, sky_dy = dFdy(qb * vec2(SIZE_BACK)) / 512.0;
         vec4 back = vec4(0.0);
-        if (pc.hud.w > 0.5 || inside_43) {
+        // Everything behind the 3D image (the back layers, the sky, the fogs
+        // over them, the pictures below the 3D) only counts where the 3D
+        // leaves it visible, which in the game is a minority of the pixels:
+        // every mode below weighs it by 1 - s.a
+        bool behind = s.a < 1.0;
+        if (behind && (pc.hud.w > 0.5 || inside_43)) {
             back = layer(layer2d_back, qb, SIZE_BACK);
             if (sky_layer(qb, sky_dx, sky_dy, back) && pc.sky.z > 0.5) back.rgb = sky_sun(back.rgb, p);
             else if (atm.night.x > 0.01 && atm.view.x != 0.0 && max(back.r, max(back.g, back.b)) < 0.002)
@@ -487,7 +441,7 @@ void main() {
         }
         // 2D replacement pictures of the layers below the 3D image (title and
         // tutorial screens), inside the 4:3 area
-        if (inside_43) back = replacement_pictures(back, q * vec2(SIZE_2D), true);
+        if (behind && inside_43) back = replacement_pictures(back, q * vec2(SIZE_2D), true);
         vec4 front;
         float shift = pc.hud.x;
         float front_x = (p.x - pc.layer2d.x) / pc.layer2d.y * 496.0;   // where the foreground pictures are read
@@ -517,16 +471,18 @@ void main() {
         } else {
             front = front_layer(q);
         }
-        // The original's scroll fog veils the 2D layers behind the 3D image
-        vec2 ndc_view = p * 2.0 - 1.0;
-        vec3 dir_view = vec3((ndc_view.x + atm.view.z) / atm.view.x, (ndc_view.y + atm.view.w) / atm.view.y, -1.0);
-        back.rgb = scroll_fog(back.rgb, p, atm.view.x != 0.0 && atm.view.y != 0.0 ? mist_light(dir_view) + lightning_glow(dir_view)
-                                                                               : vec3(1.0));
-        // The sky behind a game world gets the same exposure as the 3D image
-        // in front of it, or fully fogged scenery (the same fog colour as the
-        // fogged sky) would stand out as a slightly darker silhouette
-        if (pc.hud.y > 0.5 && atm.view.x != 0.0 && back.a > 0.0)
-            back.rgb = tone_curve(back.rgb / back.a * exposure()) * back.a;
+        if (behind) {
+            // The original's scroll fog veils the 2D layers behind the 3D image
+            vec2 ndc_view = p * 2.0 - 1.0;
+            vec3 dir_view = vec3((ndc_view.x + atm.view.z) / atm.view.x, (ndc_view.y + atm.view.w) / atm.view.y, -1.0);
+            back.rgb = scroll_fog(back.rgb, p, atm.view.x != 0.0 && atm.view.y != 0.0 ? mist_light(dir_view) + lightning_glow(dir_view)
+                                                                                   : vec3(1.0));
+            // The sky behind a game world gets the same exposure as the 3D image
+            // in front of it, or fully fogged scenery (the same fog colour as the
+            // fogged sky) would stand out as a slightly darker silhouette
+            if (pc.hud.y > 0.5 && atm.view.x != 0.0 && back.a > 0.0)
+                back.rgb = tone_curve(back.rgb / back.a * exposure()) * back.a;
+        }
         // Glow mode (r3d_renderer.cpp, bloom): the sky's bright part where the 3D leaves it visible
         if (pc.sky.w > 0.5 && pc.sky.w < 1.5) {   // light shaft mask: visible sky, more of it near the sun
             vec3 b = back.rgb * (1.0 - s.a);

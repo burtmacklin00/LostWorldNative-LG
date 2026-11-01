@@ -6,6 +6,7 @@
 // depth and per-pixel motion vectors instead), then a full-screen pass composes back 2D layers, the 3D image and front 2D layers
 // into the swapchain image with letterboxing.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "r3d_rain.h"
 #include "r3d_raytrace.h"
 #include "r3d_scene.h"
+#include "r3d_shelter.h"
 #include "r3d_weather.h"
 #include "pack2d.h"
 #include "sky_motion.h"
@@ -42,6 +44,13 @@ public:
     bool init(VkPresenter& vk, float supersample, int msaa, int aniso, bool dlaa = false);
     int msaa_samples() const { return int(samples_); }
     bool dlaa_active() const { return dlaa_.ready(); }
+    // Texture pack slots this GPU's descriptor limits allow (TexturePack::set_max_slots)
+    uint32_t replacement_slots() const { return replacement_slots_; }
+    // MSAA samples per pixel from the next frame on (1 = off; nothing while
+    // DLAA is on): the pipelines and the targets are made again
+    void set_msaa(int samples) { pending_msaa_ = std::clamp(samples, 1, 8); }
+    // Anisotropic taps of the texture filtering (0 = no mipmaps, original look)
+    void set_aniso(int taps) { aniso_ = float(std::clamp(taps, 0, 16)); }
 
     // How much light the scene is given: a multiplier on the sun and on the ambient.
     void set_light_gain(float gain) {
@@ -175,6 +184,12 @@ public:
     void set_rain(int level) { rain_.set_level(level); }
     // Weather over the game's light (r3d_weather.h); it changes over a few seconds
     void set_weather(const R3DWeather& w) { weather_target_ = w; }
+    // For the weather's sound (audio/weather_sound.h): how much of our own rain
+    // falls now, 0..1 (0 with RAIN off, and where only the game's rain falls),
+    // and the lightning strikes begun so far, with the id of the last one
+    float own_rain() const { return std::min(rain_.amount(), weather_.rain * outdoor_); }
+    int strikes() const { return strikes_; }
+    int last_strike() const { return bolt_id_; }
 
 private:
     struct Buffer {
@@ -182,6 +197,7 @@ private:
         VkDeviceMemory memory = VK_NULL_HANDLE;
         void* mapped = nullptr;
         size_t size = 0;
+        bool device_local = false;   // in the GPU's own memory (written through the BAR)
     };
     struct Image {
         VkImage image = VK_NULL_HANDLE;
@@ -192,7 +208,10 @@ private:
         uint32_t w = 0, h = 0;
     };
 
-    bool create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage);
+    // Host-visible, mapped. device_local: in memory the GPU reads at full speed
+    // when there is some the host can also write (the BAR; all of it on an
+    // integrated GPU), else as without
+    bool create_buffer(Buffer& b, size_t size, VkBufferUsageFlags usage, bool device_local = false);
     void destroy_buffer(Buffer& b);
     bool create_image(Image& img, uint32_t w, uint32_t h, VkFormat format, VkImageUsageFlags usage,
                       VkImageAspectFlags aspect, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
@@ -200,6 +219,8 @@ private:
     void transition(VkCommandBuffer cmd, Image& img, VkImageLayout to,
                     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
     bool create_pipelines();
+    void destroy_pipelines();
+    void apply_pending();   // set_msaa, set_bloom on or off: pipelines (and targets) again, at the start of a frame
     // What a pipeline differs in; the rest (triangle list, no culling, reverse
     // Z, dynamic viewport and scissor) is the same for all
     struct PipelineDesc {
@@ -216,6 +237,7 @@ private:
         bool additive = false;                 // colour += output (sky glow)
         float ease = 0;                        // > 0: colour moves this fraction towards the output
         bool depth_only = false;               // no colour writes
+        const VkSpecializationInfo* fs_spec = nullptr;   // specialization constants of the fragment shader
     };
     VkPipeline make_pipeline(const PipelineDesc& d);
     void bind_scene_image(VkImageView view, VkImageView alpha);
@@ -258,10 +280,12 @@ private:
         float hud[4], sky[4], effects[4], motion[4], crosshair2[4];
     };
     Frame repeat_frame_{};        // the last record(), for record_repeat()
+    static_assert(sizeof(ComposePush) <= 128, "push constant budget (AMD and Intel offer 128 bytes)");
     ComposePush repeat_push_{};
     bool can_repeat_ = false;
     void place_crosshairs(const ScreenLayout& lay, ComposePush& pc) const;
     void record_uploads(const Frame& f);
+    void record_sky_fields(const Frame& f);
     void record_shadows(const Frame& f);
     void record_world(const Frame& f);
     void record_world_depth(const Frame& f, const R3DViewport& w, bool msaa, bool ao_on);
@@ -279,7 +303,10 @@ private:
     VkDevice dev_ = VK_NULL_HANDLE;
     float supersample_ = 1.0f;
     VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
+    int msaa_wanted_ = 1, pending_msaa_ = 0;   // --msaa / the menu; pending_msaa_: set_msaa not applied yet
+    VkSampleCountFlagBits msaa_level(int samples) const;   // the highest the GPU has, not above `samples`
     float aniso_ = 0.0f;
+    uint32_t replacement_slots_ = TexturePack::MAX_SLOTS;
     const R3DScene* scene_ = nullptr;
     bool has_world_ = false;   // a viewport of scene_ shows the game world
 
@@ -291,6 +318,7 @@ private:
     Image glow_, glow_ms_;      // bloom source written by the 3D pass (glow_ms_: MSAA, resolved into glow_)
     Image bloom_a_, bloom_b_;   // bloom at a quarter of the size: reduced and blurred (ends in bloom_a_)
     float bloom_strength_ = 0;
+    bool glow_pass_ = true;     // the world pipelines and targets have the glow attachment (bloom on)
     float saturation_ = 1, gamma_ = 1;
     Image depth_resolved_;   // MSAA: sample 0 of the world's depth, for the ambient occlusion
     Image ao_;               // raw ambient occlusion (R8)
@@ -318,17 +346,20 @@ private:
     void record_ray_tracing(const Frame& f);
     // Debugging aid (LW_GPUTIME): GPU time of each pass and of the whole
     // frame, averaged over 300 images and printed (names in record())
-    static constexpr int GPU_MARKS = 12;
+    static constexpr int GPU_MARKS = 13;
     VkQueryPool gpu_times_ = VK_NULL_HANDLE;
     float timestamp_period_ = 1;
     double gpu_sum_[GPU_MARKS] = {};
     int gpu_frames_ = 0;
     bool gpu_pending_ = false;
     void gpu_time_mark(VkCommandBuffer cmd, uint32_t index);
-    Image rays_a_, rays_b_;            // light shafts: mask, then smeared towards the sun (quarter size)
+    // Light shafts: mask, then smeared towards the sun (quarter size). rays_a_
+    // is also where bloom's first step and the diffusion's scene are drawn
+    // (by the composition, which cannot draw into an image its own set holds)
+    Image rays_a_, rays_b_;
     VkDescriptorSet rays_set_ = VK_NULL_HANDLE;   // source: rays_a_
     Image diff_a_, diff_b_;            // diffusion (BLOOM): the picture behind the HUD, blurred, quarter size
-    VkDescriptorSet diff_sets_[2] = {};   // sources: diff_a_, diff_b_
+    VkDescriptorSet diff_set_ = VK_NULL_HANDLE;   // source: diff_b_ (the first blur reads rays_a_)
     VkPipeline rays_ = VK_NULL_HANDLE;
     float rays_strength_ = 0;
     float sun_uv_[2] = {}, sun_light_ = 0;   // the sun in the 3D image this frame, 0 = behind the camera
@@ -336,11 +367,13 @@ private:
     bool hdr_ = false;
     bool lightning_ = false;
     int bolt_id_ = -1, bolt_count_ = 0, bolt_main_ = 0;   // the lightning channel of the current strike
+    int strikes_ = 0;   // strikes begun (strikes)
     float bolt_azimuth_ = 0;
     float bolt_seg_[BOLT_SEGMENTS * 4] = {};
     R3DRain rain_;
     R3DWeather weather_target_, weather_;   // asked for, and shown (eased towards it)
-    float outdoor_ = 0;   // 0..1: how much the weather shows (daylight, a backdrop behind the world)
+    float outdoor_ = 0;   // 0..1: how much the weather shows (daylight, a backdrop behind the world, no roof)
+    R3DShelter shelter_;  // a roof over the camera
     void step_weather(const R3DScene& scene);
     // The weather's light and fog on a viewport of the world
     void weather_light(const R3DViewport& v, float& sun, float& ambient, float& fog_density, float fog_color[4]) const;
@@ -412,6 +445,17 @@ private:
     uint64_t sky_motion_serial_ = 0;
     void solve_sky_motion();    // the frame fed last, if not solved yet
     void update_sky_motion();   // solve_sky_motion and its texels to the staging buffer
+    // The procedural sky's clouds (sky_fields.frag) as a panorama of the pair
+    // of sky layers, a strip of rows of it redrawn every frame (all of it the
+    // first time): compose.frag shades it with the sky's colours
+    static constexpr uint32_t SKY_FIELDS_W = 1024, SKY_FIELDS_H = 2048;   // 2 texels per layer pixel each way
+    static constexpr uint32_t SKY_FIELDS_ROWS = 64;                       // per frame: the whole in 32 frames
+    Image sky_fields_;
+    VkSampler sky_sampler_ = VK_NULL_HANDLE;   // linear, wrapping around
+    VkPipelineLayout sky_layout_ = VK_NULL_HANDLE;
+    VkPipeline sky_fields_pipe_ = VK_NULL_HANDLE;
+    uint32_t sky_fields_row_ = 0;   // the next strip starts here
+    bool sky_fields_all_ = true;    // the next frame draws the whole panorama
     // The sun drawn in the sky, carried along with the sky picture's scroll
     uint64_t sky_sun_serial_ = 0;
     bool sky_sun_carried_ = false;
