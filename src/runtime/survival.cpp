@@ -122,6 +122,7 @@ constexpr int MAX_LIVES = 9;                // the hearts count shows one digit:
 constexpr int GOLD_POINTS = 5000;
 constexpr uint64_t DYING_FRAMES = 80;       // the killing attack and its flash play out (1.4 s), controls locked
 constexpr uint32_t COURSE_SELECT = 0x1C2AD8;   // 0 attract, 1-2 choosing a course, 0xC playing
+constexpr uint64_t SHOOT_AFTER = 4000;          // game frames of the trip without shooting (~70 s of play, a few s at full speed)
 constexpr uint64_t LOADING_GIVE_UP = 40000;    // game frames (at full speed, ~50 s; the slowest arena takes ~9000)
 constexpr const char* RECORDS = "save/survival.ini";
 
@@ -1019,8 +1020,10 @@ struct Survival : Run {
         g_inputs.p[0].trigger = !boot && (select == 1 || select == 2) && f % 90 < 6;
         g_inputs.p[0].offscreen = false;
         g_inputs.p[0].gun_x = 128, g_inputs.p[0].gun_y = 128;
-        if (select == 0xC && shoot_in) {   // in the stage: shoots its way to the arena, lives kept
-            auto_sweep_fire(g_inputs.p[0], f);
+        if (select == 0xC) {   // in the stage: lives kept, so the game is never over on the way
+            // Shoots its way to the arena (an arena whose way waits for shots,
+            // or a trip that is taking long: the dinosaurs on the way are cleared)
+            if (shoot_in || travel_frames > SHOOT_AFTER) auto_sweep_fire(g_inputs.p[0], f);
             if (!loading_lives) loading_lives = rd32(PLAYER_LIFE);
             if (loading_lives) wr32(PLAYER_LIFE, loading_lives);
         }
