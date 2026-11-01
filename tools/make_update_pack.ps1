@@ -34,12 +34,13 @@ if (-not (Test-Path 'LostWorld.exe')) { Write-Host 'LostWorld.exe is missing: ru
 # ---- What a release has --------------------------------------------------------
 $topFiles = @('LostWorld.exe', 'nvngx_dlss.dll', 'Launch Lost World.ahk', 'Launch Lost World MLGB.ahk', 'LICENSE', 'game poster.webp',
               '1 - Light Gun Setup.exe', '1 - Getting Started Readme.txt')
-$topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat',
-                 'Cleanup - *.bat')
+$topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat')
 $folders = @('16x9', '4x3', 'res', 'textures', 'third_party\fonts', 'third_party\menu', 'Hook Of The Reaper')
 # Inside those folders: build-only files and what belongs to the player
 $skip = @('res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png')
-$skipDirs = @('textures\text\')
+$skipDirs = @('textures\text\', 'res\pad\')   # (res\pad: gamepad button pictures, no gamepads here)
+# third_party\menu: only the pictures and music the menu uses (not backups kept there)
+$menuFiles = @('logo.png', 'background.jpg', 'background.png', 'music.mp3', 'sega.png')
 
 $files = New-Object System.Collections.Generic.List[string]
 foreach ($f in $topFiles) { if (Test-Path -LiteralPath $f -PathType Leaf) { $files.Add($f) } }
@@ -56,6 +57,8 @@ foreach ($d in $folders) {
         $rel = $_.FullName.Substring($root.Length + 1)
         $bad = $skip -contains $rel
         foreach ($s in $skipDirs) { if ($rel.StartsWith($s, [StringComparison]::OrdinalIgnoreCase)) { $bad = $true } }
+        if ($rel.StartsWith('third_party\menu\', [StringComparison]::OrdinalIgnoreCase) -and
+            $menuFiles -notcontains $_.Name) { $bad = $true }
         if (-not $bad) { $files.Add($rel) }
     }
 }
@@ -97,11 +100,18 @@ function Make-Pack($name, $title, $list, $removed) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
         Copy-Item -LiteralPath (Source $f) -Destination $dst -Force
     }
+    $how = if ($name -like '*(full)') { @(
+        'A NEW COPY',
+        '  1. Copy everything in this folder (except this file) into a new folder.',
+        '  2. Add the game data: the data folder from a copy that has it, or your',
+        '     own lostwsga.zip next to LostWorld.exe.',
+        '  3. Read 1 - Getting Started Readme.txt (light guns first).',
+        '',
+        'OR, TO UPDATE A COPY YOU HAVE') } else { @('HOW TO UPDATE') }
     $readme = @(
         "Lost World Native LG - $title",
         "Made $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
-        '',
-        'HOW TO UPDATE',
+        '') + $how + @(
         '  1. Close the game.',
         '  2. Open this folder, select everything in it (Ctrl+A) except this file,',
         '     and drag it into your game folder (the one with LostWorld.exe).',
