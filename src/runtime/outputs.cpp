@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "cheats.h"
 #include "inputs.h"
 #include "ppc_rt.h"
 
@@ -126,19 +127,21 @@ struct Player {
     int recoil_off = 0;      // frames at 0 before the next one (so each is a new 0 -> 1)
     int damaged = 0;         // frames left with P_Damaged at 1
     int since_pull = 1000;   // frames since the player's own trigger was last held
-    int weapon = 0;          // last frame's (for the log)
+    int weapon = 0;          // last frame's
+    int since_reload = 1000; // frames since the player's own reload (a shot off the screen) was last held
+    int since_weapon = 1000; // frames since their gun changed (a pickup, or back to the standard gun)
 };
-// Hook of the Reaper also kicks the gun when P_Ammo drops (Ammo_Value in the
-// profile), so the bullets sent only go down with a shot the player fired:
-// a slot that blinks out of play (after a saved state loads, between waves)
-// or a count that jumps with a loaded state keeps the value sent. Kept over
-// quiet(), as Hook of the Reaper keeps the last value it had
-int g_ammo_sent[2] = {-1, -1};
-// Going into play, the game fills the bullets a moment before it shows them
-// (and before a survival wave or a boss fight starts): Hook of the Reaper
-// would take that for a reload (its kick and lights). So after a player goes
-// into play, the bullets are only sent from their first shot the game counts
-bool g_armed[2] = {false, false};
+// Hook of the Reaper kicks the gun when P_Ammo drops (Ammo_Value in the
+// profile) and plays its reload effect (kick and lights) when it goes up. So
+// the bullets sent only go down with a shot the player fired, and only go up
+// with something the player did: their reload (a shot off the screen), a gun
+// picked up, or AMMO > AUTO RELOAD refilling after their shot. The fills the
+// game does by itself (a stage, a continue, a survival wave, a boss fight, a
+// saved state loading) leave the value sent as it was: the bullets the player
+// sees again from their first shot or reload. Kept over quiet(), as Hook of the
+// Reaper keeps the last value it had; 0 at the start, as start() sends
+int g_ammo_sent[2] = {0, 0};
+constexpr int RELOAD_GRACE = 45;   // frames from the reload press to the bullets (the reload's animation)
 // The same for P_Life, which Hook of the Reaper turns into the death effect
 // when it reaches 0 (Death_Value): the lives sent only reach 0 when the player
 // loses the last one in play, not when the slot blinks out of play (before a
@@ -239,7 +242,6 @@ void frame(unsigned long long game_frame) {
             if (pl.recoil_on > 0) set(P + "_CtmRecoil", 0);
             if (pl.damaged > 0) set(P + "_Damaged", 0);
             pl = Player{};
-            g_armed[p] = false;   // a loaded state, a load: the bullets wait for the player again
             set(P + "_LmpStart", 0);
         }
         return;
@@ -286,13 +288,6 @@ void frame(unsigned long long game_frame) {
         // that takes the last life is only the death (P_Life = 0), so the two
         // light effects never collide
         if (playing != g_was_playing[p]) note(p, "in play", g_was_playing[p], playing);
-        // Only a shot the game counted, with lives (not the arcade game's course
-        // select): pulls it ignores, while a stage loads, release nothing
-        if (!playing) g_armed[p] = false;
-        else if (!g_armed[p] && shot && lives > 0) {
-            g_armed[p] = true;
-            note(p, "first shot", 0, 1);
-        }
         int& life = g_life_sent[p];
         g_out_frames[p] = playing ? 0 : std::min(g_out_frames[p] + 1, 1000);
         int shown = playing ? std::max(lives, 0)
@@ -308,19 +303,23 @@ void frame(unsigned long long game_frame) {
             if (--pl.damaged == 0) set(P + "_Damaged", 0);
         }
 
-        // The bullets: up at once (a reload, a join), down only with a shot of
-        // the player's own trigger (see g_ammo_sent); out of play the last value stays
+        // The bullets (see g_ammo_sent)
+        pl.since_reload = g_inputs.p[p].own_reload ? 0 : std::min(pl.since_reload + 1, 1000);
+        pl.since_weapon = weapon != pl.weapon ? 0 : std::min(pl.since_weapon + 1, 1000);
         int ammo = int(rd32(AMMO + 4 * p));
         int& sent = g_ammo_sent[p];
-        if (playing && g_armed[p] && (sent < 0 || ammo > sent || (ammo < sent && pulled))) {
-            if (ammo > sent) note(p, "ammo up", sent, ammo);   // (a reload, a join; shots are not logged)
+        bool theirs = pl.since_reload <= RELOAD_GRACE || pl.since_weapon <= PULL_GRACE || (pulled && cheats_active());
+        if (playing && ammo > sent && theirs) {
+            note(p, "ammo up", sent, ammo);   // (shots are not logged)
+            sent = ammo;
+        } else if (playing && ammo < sent && pulled) {
             sent = ammo;
         }
-        if (sent >= 0) set(P + "_Ammo", sent);
+        set(P + "_Ammo", sent);
         set(P + "_Weapon", weapon);
         if ((weapon != 0) != (pl.weapon != 0)) note(p, "special gun", pl.weapon != 0, weapon != 0);
-        pl.weapon = weapon;
         set(P + "_Special", weapon != 0 ? 1 : 0);
+        pl.weapon = weapon;
         set(P + "_Unlimited", playing && rd32(UNLIMITED + 4 * p) != 0 ? 1 : 0);
         bool can_join = !(p == 1 && g_inputs.block_p2);   // survival: player 2 can't join
         set(P + "_LmpStart", can_join && !playing && (game_frame / 30) % 2 == 0 ? 1 : 0);   // ~1 blink a second
