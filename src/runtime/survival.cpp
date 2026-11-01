@@ -125,6 +125,10 @@ constexpr uint32_t FN_DEAD_TRICERATOPS = 0x0005B758;
 // in the air, so they come from the next group of that stop, on the ground
 constexpr int TRICERATOPS_ENCOUNTER = 3, TRICERATOPS_GROUP = 1, GROUND_GROUP = 2;
 constexpr float NEAR_LOOK = 120;            // another stop's section joins a wave if it looks this near one of this stop's
+// ...and if its camera turn, seen from this stop, is not steep: a point almost
+// above (or below) the camera here would turn the view to the sky
+constexpr float STEEP_LOOK = 0.7f;          // height over distance (about 35 degrees)
+constexpr float NEAR_CAMERA = 60;           // a turn to a point closer than this (flat) is left out too
 constexpr int AMBUSH_CHANCE = 35;           // % of the walks with an ambush on the way
 constexpr int BONUS_CHANCE = 50;            // % of the walks with a golden BONUS target
 constexpr uint64_t BONUS_FRAMES = 200;      // how long it stays up (3.5 s)
@@ -580,6 +584,11 @@ struct Survival : Run {
         std::vector<std::vector<int32_t>> own;
         for (const Section& sc : pool)
             if (!sc.look.empty()) own.push_back(sc.look);
+        float cx = rdf(CAMERA_POS), cy = rdf(CAMERA_POS + 4), cz = rdf(CAMERA_POS + 8);
+        auto steep = [&](const std::vector<int32_t>& l) {
+            float flat = std::hypot(float(l[1]) - cx, float(l[3]) - cz);
+            return flat < NEAR_CAMERA || std::fabs(float(l[2]) - cy) > STEEP_LOOK * flat;
+        };
         for (int id : zone_encounters) {
             if (id == encounter) continue;
             for (const Section& sc : encounter_of(id).sections) {
@@ -587,7 +596,8 @@ struct Survival : Run {
                 bool close = false;
                 for (auto& l : own)
                     close |= std::hypot(float(l[1] - sc.look[1]), float(l[3] - sc.look[3])) < NEAR_LOOK;
-                if (close) pool.push_back(sc);
+                if (close && !steep(sc.look)) pool.push_back(sc);
+                else if (close) log("  section of encounter %d left out: its camera turn is steep from here\n", id);
             }
         }
         if (pool.empty() && !enemies.empty()) {   // (no sections found: everything as one)
