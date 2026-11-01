@@ -415,6 +415,7 @@ struct Run {
     // with this LIFE and difficulty setting: the way there only once
     std::string cache;            // its file: being loaded or saved this run
     bool cache_loading = false, cache_saving = false, cache_tried = false;
+    bool going_home = false;      // a kept arena that could not be used: back to the attract for the way there
     uint8_t keep_life = 0, keep_diff = 0;   // the settings, kept over the state loaded
 };
 
@@ -1365,12 +1366,32 @@ bool survival_frame(Ctx&) {
                 printf("[survival] %s did not load: the way there instead\n", s.cache.c_str());
                 if (r > 0) DeleteFileA(s.cache.c_str());   // (not when the game was just not ready for it)
                 s.cache.clear();
-                if (r > 0) {   // loaded but not understood: from the attract again
+                if (r > 0 && game_state_has_home() && game_state_load_home()) {   // loaded but not used: the way there, from the attract
+                    s.going_home = true;
+                    break;
+                }
+                if (r > 0) {   // (no attract kept to go back to: from the menu again)
                     s.on = false;
                     s.mode = SurvivalMode::Off;
                     s.publish();
                     break;
                 }
+            }
+            if (s.going_home) {   // the attract coming back
+                int r = game_state_result();
+                if (r == 0) break;
+                s.going_home = false;
+                if (r < 0) {
+                    printf("[survival] could not go back to the attract\n");
+                    s.on = false;
+                    s.mode = SurvivalMode::Off;
+                    s.publish();
+                    break;
+                }
+                printf("[survival] back at the attract: the way there\n");
+                s.loading_frames = 1, s.travel_frames = 0;
+                s.step = SurvivalStep::Preparing;
+                s.state = Survival::WAITING;
             }
             s.loading_frames++;
             if (s.step == SurvivalStep::Travelling) s.travel_frames++;
