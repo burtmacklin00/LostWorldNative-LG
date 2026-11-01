@@ -2536,7 +2536,23 @@ int main(int argc, char** argv) {
     g_opt.menu = !options_disable_menu(argc, argv);
     FrontendSettings ini;
     // The first start (no settings saved yet) picks the QUALITY for the graphics card
-    bool first_start = g_opt.menu && !file_exists("save/settings.ini");
+    // First start: no graphics saved yet (no save\settings.ini, or one with only
+    // a few settings in it, as a release's Release Settings.ini or the
+    // 2 - Display / 2 - Crosshairs programs write: the game saves them all)
+    auto graphics_saved = [] {
+        FILE* f = fopen("save/settings.ini", "rb");
+        if (!f) return false;
+        char line[512];
+        bool found = false;
+        while (!found && fgets(line, sizeof(line), f)) {
+            const char* c = line;
+            while (*c == ' ' || *c == '\t') c++;
+            found = strncmp(c, "resolution_3d", 13) == 0;
+        }
+        fclose(f);
+        return found;
+    };
+    bool first_start = g_opt.menu && !graphics_saved();
     if (g_opt.menu) {   // save/settings.ini, written by the options menu; command-line options win
         ini.load("save/settings.ini");
         options_from_settings(ini, g_opt);

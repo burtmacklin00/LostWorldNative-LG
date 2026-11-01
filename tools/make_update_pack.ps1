@@ -41,7 +41,7 @@ $buildDirs = @('.git', '.github', '.vs', 'build', 'docs', 'src', 'tests', 'tools
 $buildFiles = @('.gitattributes', '.gitignore', 'build.bat', 'CMakeLists.txt', 'README.md', 'setup-and-build.bat',
                 'setup-and-build.ps1', 'update.bat', 'update.bat.new', 'Make Update Pack.bat', 'Make Release.bat',
                 'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png',
-                '1 - Light Gun Setup.exe')   # (the game has its own LIGHT GUN SETUP now)
+                '1 - Light Gun Setup.exe', 'Release Settings.ini')   # (the game has its own LIGHT GUN SETUP now)
 $buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp',
                    'Display - *.bat', 'Crosshairs - *.bat', 'Graphics - *.bat', 'Text - *.bat')   # (now .exe)
 # - what is the player's own (kept by every update): their guns, the display
@@ -122,12 +122,33 @@ function Make-Pack($name, $title, $list, $removed) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
         Copy-Item -LiteralPath (Source $f) -Destination $dst -Force
     }
-    $how = if ($name -like '*(full)') { @(
-        'A NEW COPY',
-        '  1. Copy everything in this folder (except this file) into a new folder.',
-        '  2. Read 1 - Getting Started Readme.txt (light guns first), then play.',
-        '',
-        'OR, TO UPDATE A COPY YOU HAVE') } else { @('HOW TO UPDATE') }
+    if ($name -like '*(full)') {
+        # A new copy: its settings, empty guns and display.ini would replace a
+        # player's own, so a copy they have is updated with the update pack
+        $readme = @(
+            "Lost World Native LG - $title",
+            "Made $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
+            '',
+            'A NEW COPY',
+            '  1. Copy everything in this folder (except this file) into a new folder.',
+            '  2. Start the game: the first start finds your light guns (LIGHT GUN SETUP)',
+            '     and picks the graphics for your PC. 1 - Getting Started Readme.txt',
+            '     has the rest.',
+            '',
+            'TO UPDATE A COPY YOU ALREADY HAVE, use the update pack ("... to ...")',
+            'instead: this one would replace your settings, guns and display.ini.',
+            'This READ ME can be deleted afterwards.',
+            '',
+            "FILES ($($list.Count))"
+        ) + ($list | ForEach-Object { '  ' + $_ })
+        Set-Content -LiteralPath (Join-Path $dir '_UPDATE - READ ME.txt') -Value $readme -Encoding UTF8
+        $zip = "$dir.zip"
+        if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
+        Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $zip
+        Write-Host "  $name  ($($list.Count) files)"
+        return $dir
+    }
+    $how = @('HOW TO UPDATE')
     $readme = @(
         "Lost World Native LG - $title",
         "Made $(Get-Date -Format 'yyyy-MM-dd HH:mm')",
@@ -192,6 +213,25 @@ if ($Release) {
         }
     }
     $all.Add('LightgunHID.ini')
+    # Release Settings.ini beside this build (optional): the settings a new copy
+    # starts with, as save\settings.ini (the lines it has, such as aspect = 4:3 and
+    # crosshair = 0; the game fills in the rest, and with no graphics in it still
+    # picks them for the PC at its first start). Its aspect also picks the
+    # display.ini, as the 2 - Display programs do
+    $relSettings = Join-Path $root 'Release Settings.ini'
+    if (Test-Path -LiteralPath $relSettings -PathType Leaf) {
+        $from['save\settings.ini'] = $relSettings
+        $all.Add('save\settings.ini')
+        $m = Select-String -LiteralPath $relSettings -Pattern '^\s*aspect\s*=\s*(\S+)' | Select-Object -First 1
+        if ($m) {
+            $d = switch ($m.Matches[0].Groups[1].Value) { '4:3' { '4x3\display.ini' } '16:9' { '16x9\display.ini' } default { $null } }
+            if ($d -and (Test-Path -LiteralPath (Join-Path $root $d))) {
+                $from['display.ini'] = Join-Path $root $d
+                if (-not $all.Contains('display.ini')) { $all.Add('display.ini') }
+            }
+        }
+        Write-Host "  (new copies start with the settings in Release Settings.ini)"
+    }
     Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete and ready to play (with the game data)" $all @() | Out-Null
     Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini, and an empty LightgunHID.ini)"
     if ($prev) {
