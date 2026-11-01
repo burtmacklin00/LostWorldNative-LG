@@ -46,6 +46,13 @@ void reset();                      // back to one mouse for player 1 (the option
 // lists it, also after it is plugged in again, without a click to join
 void set_saved(const std::string& p1, const std::string& p2);
 
+// LightgunHID.ini (beside LostWorld.exe): the players' guns by their USB ids.
+// LIGHT GUN SETUP (Options > CONTROLS, and by itself at the first start) writes it
+std::wstring usb_id(const std::string& path);   // "VID_1209&PID_0001" from a device path ("": none)
+bool gun_file_needs_setup();       // no file, or one with no gun in it and no NoGuns = 1
+bool write_gun_file(const std::wstring& p1, const std::wstring& p2, bool no_guns);
+void reload_gun_file();            // the guns as the file has them now
+
 struct Gun {
     POINT pos;          // client pixels
     bool trigger, reload;

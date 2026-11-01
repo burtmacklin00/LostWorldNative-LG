@@ -91,7 +91,8 @@ public:
     enum class Screen { None, Main, Play, Options, Pause, Boss, Records, Survival, Classic, GunTest };
     enum class Action { None, StartArcade, Resume, Quit, ToggleFullscreen, SettingsChanged,
                         StartBoss, PrepareBosses, LeaveBossMode, StartSurvival, QuitToMenu,
-                        CrosshairChanged };   // a new crosshair picture (crosshair_pick)
+                        CrosshairChanged,     // a new crosshair picture (crosshair_pick)
+                        GunsPicked };         // LIGHT GUN SETUP is done: picked_gun[] (or none: no light guns)
 
     bool init(const std::string& font_dir);
     void shutdown();
@@ -150,6 +151,12 @@ public:
     bool gun_test_open() const { return screen_ == Screen::GunTest; }
     bool picking_guns() const { return screen_ == Screen::GunTest && gun_step_ > 0; }
     void gun_fired(int index);   // a left button press from guns[index]
+    // LIGHT GUN SETUP: GUN TEST picking the players' guns by firing them; the
+    // window writes them to LightgunHID.ini (GunsPicked). `first`: at the first
+    // start, on its own, back to the main menu after
+    void start_gun_setup(bool first);
+    std::string picked_gun[2];   // the devices picked (paths; "" none), when GunsPicked comes
+    bool picked_none = false;    // the first start's setup was left: no light guns (mouse play)
 
     // RECORDS screen (runtime/stats.h): the window keeps this copy up to date while it is open
     StatsView records;
@@ -172,7 +179,7 @@ private:
         OPT_DISPLAY, OPT_VOLUME, OPT_SPEAKERS, OPT_REAR, OPT_SAMPLES, OPT_AA, OPT_HAZE, OPT_BLOOM, OPT_AO, OPT_SKY, OPT_SUN, OPT_SHADOWS, OPT_SHAFTS, OPT_SOFT, OPT_HDR, OPT_RIM, OPT_RELIEF, OPT_SHARPEN, OPT_LIGHTNING, OPT_RAIN, OPT_TEXT, OPT_CROSS, OPT_MICE, OPT_SUBS,
         OPT_SAT, OPT_GAMMA, OPT_MOTION, OPT_PAD_SPEED, OPT_GYRO, OPT_GYRO_SPEED, OPT_VIBRATION, OPT_ASSIST, OPT_TORCH, OPT_RT, OPT_CROSS_HIDE, OPT_FREE_PLAY,
         OPT_QUALITY, OPT_SCALE, OPT_HALF_RATE, OPT_FRAME_CAP, OPT_VSYNC,
-        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_AMMO, OPT_MENU_FX, OPT_ASPECT, OPT_GUN_TEST, OPT_WEATHER,
+        OPT_CROSS_STYLE, OPT_CROSS_P1, OPT_CROSS_P2, OPT_MUSIC, OPT_TRIGGER_START, OPT_ALL_ARENAS, OPT_AMMO, OPT_MENU_FX, OPT_ASPECT, OPT_GUN_SETUP, OPT_GUN_TEST, OPT_WEATHER,
         NO_ROW,   // a setting only kept in the file
     };
     // How an option row shows its value: a switch, a choice with a dot per
@@ -236,6 +243,8 @@ private:
     void draw_value(const Item& it, bool sel, int vx0, int vx1, int y, int row_h);
     void draw_gun_test(bool over_game);
     int gun_step_ = 0;   // GUN TEST: 0 watching, 1 waiting for player 1's gun to fire, 2 for player 2's
+    bool setup_first_ = false;   // the first start's LIGHT GUN SETUP (to the main menu once done)
+    void guns_done(bool none);   // the setup is over: GunsPicked
     int gun_player(const GunView& g, bool& picked) const;   // whose gun it is, and whether GUN TEST picked it
     // The marks move every refresh: the page without them is kept, and only
     // where they were and are is drawn again

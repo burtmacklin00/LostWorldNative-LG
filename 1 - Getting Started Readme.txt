@@ -31,9 +31,11 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  2. LIGHT GUN SETUP
 ---------------------------------------------------------------------
 
- Double-click  1 - Light Gun Setup.exe  and pull the trigger on the
- PLAYER 1 gun, then on the PLAYER 2 gun when it asks. It saves
- LightgunHID.ini in this folder with each gun's ID (VID&PID).
+ The first time the game starts, it asks you to pull the trigger on
+ the PLAYER 1 gun, then on the PLAYER 2 gun (RELOAD or Esc at that
+ point: only one gun; Esc at the first one: no light guns, mouse
+ play). It saves LightgunHID.ini in this folder with each gun's ID
+ (VID&PID). To set them up again: Options > CONTROLS > LIGHT GUN SETUP.
 
  With LightgunHID.ini:
    - Each gun always belongs to its player, whichever fires first.
@@ -206,7 +208,8 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  10. TROUBLESHOOTING
 ---------------------------------------------------------------------
 
- - Guns swapped or not responding: run  1 - Light Gun Setup.exe
+ - Guns swapped or not responding: Options > CONTROLS > LIGHT GUN
+   SETUP
    again, and check the guns are plugged in before starting the game.
  - A setting .bat did nothing: the game was open; close it and run
    the .bat again.

@@ -1276,6 +1276,8 @@ int main(int argc, char** argv) {
         if (!survival_cli) {   // survival mode goes straight into the game
             frontend.open(Frontend::Screen::Main);
             g_menu_open = true;
+            // No LightgunHID.ini (or an empty one): LIGHT GUN SETUP first
+            if (raw_mice::gun_file_needs_setup()) frontend.start_gun_setup(true);
         }
         presenter.input_hook = [&](UINT msg, WPARAM wp, LPARAM lp) -> bool {
             int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
@@ -1874,6 +1876,16 @@ int main(int argc, char** argv) {
                 case Frontend::Action::Quit: presenter.close(); break;
                 case Frontend::Action::ToggleFullscreen: presenter.toggle_fullscreen(); break;
                 case Frontend::Action::CrosshairChanged: load_crosshairs(renderer); break;
+                case Frontend::Action::GunsPicked: {   // LIGHT GUN SETUP: LightgunHID.ini
+                    std::wstring id[2] = {raw_mice::usb_id(frontend.picked_gun[0]), raw_mice::usb_id(frontend.picked_gun[1])};
+                    if (frontend.picked_none) raw_mice::write_gun_file(L"", L"", true);
+                    else if (!id[0].empty() && id[0] != id[1]) raw_mice::write_gun_file(id[0], id[1], false);
+                    else   // (two guns with the same ids, or none: GUN TEST's choice by device, in settings.ini)
+                        printf("[mouse] the guns picked have no USB ids of their own: kept by device in settings.ini\n");
+                    raw_mice::reload_gun_file();
+                    frontend.guns_pinned = raw_mice::guns_pinned();
+                    break;
+                }
                 case Frontend::Action::SettingsChanged: {
                     const Options was = g_opt;
                     options_from_settings(s, g_opt);

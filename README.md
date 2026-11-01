@@ -40,8 +40,9 @@
 **Lost World Native LG** adds light gun cabinet features on top of the original port:
 
 - **Free play** on by default, and **the trigger starts and continues** each player's game.
-- **Fixed guns per player**: put `LightgunHID.ini` (made by `1 - Light Gun Setup.exe`) next to
-  `LostWorld.exe` and each gun always belongs to its player.
+- **Fixed guns per player**: LIGHT GUN SETUP (by itself at the first start, then Options > CONTROLS)
+  asks each player to pull their trigger and writes `LightgunHID.ini` next to `LostWorld.exe`:
+  each gun always belongs to its player.
 - **Drag-and-drop updates for a release copy**: `Make Update Pack.bat` (in the build folder, after
   `build.bat`) puts the files that changed since the last update in `Update Packs\` (a folder and a
   .zip, with a READ ME). Drag its contents into the release folder and replace the files; settings,

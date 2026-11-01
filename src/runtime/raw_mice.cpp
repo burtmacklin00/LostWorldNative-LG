@@ -28,7 +28,7 @@ struct Mouse {
     ULONGLONG last_input = 0;
 };
 
-// LightgunHID.ini beside LostWorld.exe (written by "1 - Light Gun Setup.exe"):
+// LightgunHID.ini beside LostWorld.exe (written by LIGHT GUN SETUP, or a launcher):
 //   [Lightguns]
 //   P1_Lightgun_HID = VID_1209&PID_0001
 //   P2_Lightgun_HID = VID_1209&PID_0002
@@ -43,22 +43,31 @@ std::wstring upper(std::wstring s) {
     return s;
 }
 
-void load_gun_ids() {
+std::wstring gun_file() {
     wchar_t path[MAX_PATH];
     DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
     std::wstring ini(path, n);
-    ini = ini.substr(0, ini.find_last_of(L"\\/") + 1) + L"LightgunHID.ini";
+    return ini.substr(0, ini.find_last_of(L"\\/") + 1) + L"LightgunHID.ini";
+}
+
+std::wstring read_id(const std::wstring& ini, int p) {
+    wchar_t v[128] = {};
+    GetPrivateProfileStringW(L"Lightguns", p ? L"P2_Lightgun_HID" : L"P1_Lightgun_HID", L"", v, 128, ini.c_str());
+    std::wstring id = upper(v);
+    while (!id.empty() && iswspace(id.back())) id.pop_back();
+    while (!id.empty() && iswspace(id.front())) id.erase(id.begin());
+    return id;
+}
+
+void load_gun_ids() {
+    std::wstring ini = gun_file();
     if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES) return;
     if (GetPrivateProfileIntW(L"Lightguns", L"NoGuns", 0, ini.c_str())) {
         printf("[mouse] LightgunHID.ini: no light guns (mouse play)\n");
         return;
     }
     for (int p = 0; p < 2; p++) {
-        wchar_t v[128] = {};
-        GetPrivateProfileStringW(L"Lightguns", p ? L"P2_Lightgun_HID" : L"P1_Lightgun_HID", L"", v, 128, ini.c_str());
-        std::wstring id = upper(v);
-        while (!id.empty() && iswspace(id.back())) id.pop_back();
-        while (!id.empty() && iswspace(id.front())) id.erase(id.begin());
+        std::wstring id = read_id(ini, p);
         g_gun_id[p] = id;
         if (!id.empty()) {
             g_fixed = true;
@@ -181,6 +190,45 @@ void init(HWND hwnd) {
     rid.hwndTarget = hwnd;
     if (!RegisterRawInputDevices(&rid, 1, sizeof(rid))) printf("[mouse] no raw input: a single mouse\n");
     list_all();
+}
+
+std::wstring usb_id(const std::string& path) {
+    size_t v = path.find("vid_"), p = path.find("pid_");
+    if (v == std::string::npos || p == std::string::npos || v + 8 > path.size() || p + 8 > path.size()) return L"";
+    std::string id = "VID_" + path.substr(v + 4, 4) + "&PID_" + path.substr(p + 4, 4);
+    for (char& c : id) c = char(toupper(c));
+    return std::wstring(id.begin(), id.end());
+}
+
+bool gun_file_needs_setup() {
+    std::wstring ini = gun_file();
+    if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES) return true;
+    if (GetPrivateProfileIntW(L"Lightguns", L"NoGuns", 0, ini.c_str())) return false;
+    return read_id(ini, 0).empty() && read_id(ini, 1).empty();   // (an empty one: shipped for a launcher to fill)
+}
+
+bool write_gun_file(const std::wstring& p1, const std::wstring& p2, bool no_guns) {
+    std::wstring ini = gun_file();
+    // " VID_..." as the launchers write it (the value is read without the spaces)
+    bool ok = WritePrivateProfileStringW(L"Lightguns", L"P1_Lightgun_HID", (L" " + p1).c_str(), ini.c_str()) &&
+              WritePrivateProfileStringW(L"Lightguns", L"P2_Lightgun_HID", (L" " + p2).c_str(), ini.c_str()) &&
+              WritePrivateProfileStringW(L"Lightguns", L"NoGuns", no_guns ? L"1" : nullptr, ini.c_str());
+    printf("[mouse] LightgunHID.ini %s: player 1 %ls, player 2 %ls%s\n", ok ? "written" : "could not be written",
+           p1.empty() ? L"-" : p1.c_str(), p2.empty() ? L"-" : p2.c_str(), no_guns ? " (no light guns)" : "");
+    return ok;
+}
+
+void reload_gun_file() {
+    g_gun_id[0].clear(), g_gun_id[1].clear();
+    g_fixed = false;
+    for (Mouse& m : g_mice) m.fixed_player = -2;
+    g_owner[0] = g_owner[1] = -1;
+    g_last_clicked = -1;
+    load_gun_ids();
+    check_guns_present();
+    for (int p = 0; p < 2 && !g_fixed; p++)   // (no pins: GUN TEST's choice, if any)
+        for (size_t i = 0; i < g_mice.size(); i++)
+            if (!g_saved[p].empty() && g_mice[i].path == g_saved[p]) g_owner[p] = int(i);
 }
 
 void set_saved(const std::string& p1, const std::string& p2) {

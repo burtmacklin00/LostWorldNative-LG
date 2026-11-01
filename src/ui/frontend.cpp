@@ -282,6 +282,9 @@ const std::vector<Frontend::Setting>& Frontend::setting_table() {
         {.id = OPT_MICE, .tab = CONTROLS_TAB, .label = L"SECOND MOUSE", .key = "second_mouse", .flag = &FS::second_mouse,
          .kind = CHOICE, .shown = {L"OFF", L"PLAYER 2"},
          .hint = L"A second mouse joins as player 2 with a click while player 1 plays"},
+        {.id = OPT_GUN_SETUP, .tab = CONTROLS_TAB, .label = L"LIGHT GUN SETUP", .kind = BUTTON, .shown = {L"START..."},
+         .hint = L"Pick each player's light gun by pulling its trigger: player 1's first, then player 2's.  "
+                 L"Saved in LightgunHID.ini: each gun stays its player's"},
         {.id = OPT_GUN_TEST, .tab = CONTROLS_TAB, .label = L"GUN TEST", .kind = BUTTON, .shown = {L"OPEN..."},
          .hint = L"Every mouse and light gun Windows sees, what each one is doing and which player it is.  "
                  L"Fire each gun to make it player 1's or player 2's for good"},
@@ -731,6 +734,7 @@ void Frontend::activate(const Item& it, int dir) {
         }
         break;
     case OPT_GUN_TEST: open(Screen::GunTest); gun_step_ = 0; break;
+    case OPT_GUN_SETUP: start_gun_setup(false); break;
     default:   // the other options: as the table says
         if (const Setting* d = setting_of(it.id)) {
             d->change(settings, dir, wrap_);
@@ -784,7 +788,7 @@ bool Frontend::key(int vk) {
     if (screen_ == Screen::GunTest) {
         switch (vk) {
         case VK_RETURN: case VK_SPACE:   // pick the guns again, player 1's first
-            if (!gun_step_ && !guns_pinned) gun_step_ = 1;
+            if (!gun_step_) gun_step_ = 1;
             break;
         case 'R': case VK_DELETE:   // back to the first and second gun to fire
             if (guns_pinned || gun_step_ || (settings.gun_p1.empty() && settings.gun_p2.empty())) break;
@@ -792,8 +796,9 @@ bool Frontend::key(int vk) {
             push(Action::SettingsChanged);
             break;
         case VK_ESCAPE: case VK_BACK:
-            if (gun_step_ == 2) push(Action::SettingsChanged);   // only player 1's gun
-            if (gun_step_) gun_step_ = 0;
+            if (gun_step_ == 2) guns_done(false);                   // only player 1's gun
+            else if (gun_step_ == 1 && setup_first_) guns_done(true);   // no light guns: mouse play
+            else if (gun_step_) gun_step_ = 0;
             else back();
             break;
         default: return false;
@@ -2093,7 +2098,7 @@ int Frontend::gun_player(const GunView& g, bool& picked) const {
 }
 
 std::string Frontend::gun_key() const {
-    std::string k = std::to_string(gun_step_) + (guns_pinned ? "F|" : "|") + settings.gun_p1 + "|" + settings.gun_p2 + "|" +
+    std::string k = std::to_string(gun_step_) + (setup_first_ ? "S" : "") + (guns_pinned ? "F|" : "|") + settings.gun_p1 + "|" + settings.gun_p2 + "|" +
                     std::to_string(quiet_mice) + (settings.second_mouse ? "M" : "m") + (pad_prompts ? "P" : "p") +
                     (over_game() ? "G" : "g");
     for (const GunView& g : guns)
@@ -2138,8 +2143,28 @@ void Frontend::gun_fired(int index) {
         gun_step_ = 2;
     } else if (gun_step_ == 2 && path != settings.gun_p1) {
         settings.gun_p2 = path;
-        gun_step_ = 0;
-        push(Action::SettingsChanged);
+        guns_done(false);
+    }
+    dirty_ = true;
+}
+
+void Frontend::start_gun_setup(bool first) {
+    open(Screen::GunTest);
+    gun_step_ = 1;
+    setup_first_ = first;
+    dirty_ = true;
+}
+
+void Frontend::guns_done(bool none) {
+    picked_gun[0] = none ? "" : settings.gun_p1;
+    picked_gun[1] = none ? "" : settings.gun_p2;
+    picked_none = none;
+    gun_step_ = 0;
+    push(Action::GunsPicked);
+    push(Action::SettingsChanged);
+    if (setup_first_) {
+        setup_first_ = false;
+        open(Screen::Main);
     }
     dirty_ = true;
 }
@@ -2152,7 +2177,8 @@ void Frontend::draw_gun_test(bool over_game) {
     fill(0, 0, w, h, 0x000000, over_game ? 0.72f : 0.35f);
     bool wide = w / u_ >= 1800;
     int margin = U(wide ? 70.0f : 50.0f);
-    text(display(), U(72), L"GUN TEST", margin + U(10), U(36), 0, {GOLD_TOP, GOLD_BOTTOM, EDGE, U(4), 1, U(4)});
+    text(display(), U(72), gun_step_ ? L"LIGHT GUN SETUP" : L"GUN TEST", margin + U(10), U(36), 0,
+         {GOLD_TOP, GOLD_BOTTOM, EDGE, U(4), 1, U(4)});
 
     // What to do now
     int y = U(150);
@@ -2160,8 +2186,9 @@ void Frontend::draw_gun_test(bool over_game) {
         text(TITLE, U(48), gun_step_ == 1 ? L"FIRE PLAYER 1'S GUN" : L"FIRE PLAYER 2'S GUN", margin + U(10), y, 0,
              {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820u : 0x20B8D8u, INK, U(3)});
         y += U(64);
-        text(BODY, U(23), gun_step_ == 1 ? L"Pull its trigger, wherever it points.  RELOAD (or ESC): leave the guns as they were"
-                                         : L"Now the other gun.  RELOAD (or ESC): only one gun, player 2 joins with the next mouse to fire",
+        text(BODY, U(23), gun_step_ == 1 ? (setup_first_ ? L"Pull its trigger, wherever it points.  ESC: no light guns (play with the mouse; set them up later in Options > CONTROLS)"
+                                                         : L"Pull its trigger, wherever it points.  RELOAD (or ESC): leave the guns as they were")
+                                         : L"Now the other gun.  RELOAD (or ESC): only one gun",
              margin + U(10), y, 0, {0xD8D1BD, 0xD8D1BD});
     } else {
         text(BODY, U(23), L"Move and fire each gun: its mark follows it, and its row lights up.  "
@@ -2214,8 +2241,8 @@ void Frontend::draw_gun_test(bool over_game) {
     // What it means: a single mouse, the option off, and how player 2 joins otherwise
     std::vector<std::wstring> notes;
     if (guns_pinned)
-        notes.push_back(L"The players' guns are set by LightgunHID.ini (1 - Light Gun Setup.exe): each gun belongs to its player.  "
-                        L"Run the setup again to change them.");
+        notes.push_back(L"The players' guns are set by LightgunHID.ini: each gun belongs to its player.  "
+                        L"ENTER sets them up again.");
     else if (!settings.second_mouse) notes.push_back(L"SECOND MOUSE is OFF: every mouse and gun moves player 1's sight.");
     int count = int(guns.size());
     if (count == 0)
@@ -2241,12 +2268,11 @@ void Frontend::draw_gun_test(bool over_game) {
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
     int x = U(80), py = h - U(64);
     if (!gun_step_) {
-        if (!guns_pinned) {
-            prompt(x, py, L"A", L"ENTER", L"PICK THE GUNS");
-            if (!settings.gun_p1.empty() || !settings.gun_p2.empty()) prompt(x, py, L"Y", L"R", L"AUTOMATIC");
-        }
+        prompt(x, py, L"A", L"ENTER", L"SET UP THE GUNS");
+        if (!guns_pinned && (!settings.gun_p1.empty() || !settings.gun_p2.empty())) prompt(x, py, L"Y", L"R", L"AUTOMATIC");
         back_rect_ = prompt(x, py, L"B", L"RELOAD", L"BACK");
     } else {
-        prompt(x, py, L"B", L"RELOAD", gun_step_ == 1 ? L"CANCEL" : L"ONLY ONE GUN");
+        prompt(x, py, L"B", gun_step_ == 1 && setup_first_ ? L"ESC" : L"RELOAD",
+               gun_step_ == 1 ? (setup_first_ ? L"NO LIGHT GUNS" : L"CANCEL") : L"ONLY ONE GUN");
     }
 }

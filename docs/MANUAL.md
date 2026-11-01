@@ -41,7 +41,8 @@ who is not playing start or continue by pulling their gun's trigger (ignored for
 after they stop playing, so firing as the last life goes does not continue by accident).
 A `LightgunHID.ini` beside LostWorld.exe pins each light gun to its player by its VID&PID
 (`[Lightguns]`, `P1_Lightgun_HID = VID_1209&PID_0001`, `P2_Lightgun_HID = VID_1209&PID_0002`;
-`1 - Light Gun Setup.exe` in the same folder writes it): each gun is its player's from the
+LIGHT GUN SETUP writes it, on its own at the first start when there is no file or one with no
+gun in it, and from Options > CONTROLS; Esc at its first step writes `NoGuns = 1`): each gun is its player's from the
 first shot, whichever fires first, and other mice only move the menu pointer. `NoGuns = 1`, no
 file, or none of its guns plugged in when the game starts keeps the usual first-mouse /
 second-mouse behaviour. Settings > Controls > HIDE IDLE CROSSHAIR (`--crosshair-hide N`) hides a player's

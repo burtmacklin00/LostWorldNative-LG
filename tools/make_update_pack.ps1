@@ -40,7 +40,8 @@ $buildDirs = @('.git', '.github', '.vs', 'build', 'docs', 'src', 'tests', 'tools
                'third_party\vulkan-headers', 'res\pad')   # (res\pad: gamepad button pictures, no gamepads here)
 $buildFiles = @('.gitattributes', '.gitignore', 'build.bat', 'CMakeLists.txt', 'README.md', 'setup-and-build.bat',
                 'setup-and-build.ps1', 'update.bat', 'update.bat.new', 'Make Update Pack.bat', 'Make Release.bat',
-                'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png')
+                'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png',
+                '1 - Light Gun Setup.exe')   # (the game has its own LIGHT GUN SETUP now)
 $buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp')
 # - what is the player's own (kept by every update): their guns, the display
 #   picked with the Display bats, the settings and records, the lettering
@@ -176,16 +177,22 @@ if ($Release) {
     $all = New-Object System.Collections.Generic.List[string]
     foreach ($f in ($files | Sort-Object)) { $all.Add($f) }
     # The kept arenas and boss fights (made by this build: start each once first)
+    # LightgunHID.ini: an empty one (a new copy runs LIGHT GUN SETUP at its
+    # first start; a launcher that fills it in finds it there)
+    $emptyGuns = Join-Path $packs 'LightgunHID (empty).ini'
+    Set-Content -LiteralPath $emptyGuns -Value @('[Lightguns]', 'P1_Lightgun_HID =', 'P2_Lightgun_HID =') -Encoding ASCII
+    $from['LightgunHID.ini'] = $emptyGuns
     $kept = 0
     # (and the in-game lettering in use, textures\text, which updates leave alone: a new copy needs one)
-    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*', 'display.ini', 'LightgunHID.ini')) {
+    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*', 'display.ini')) {
         Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
             $all.Add($_.FullName.Substring($root.Length + 1))
             $kept++
         }
     }
+    $all.Add('LightgunHID.ini')
     Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete and ready to play (with the game data)" $all @() | Out-Null
-    Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini, LightgunHID.ini)"
+    Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini, and an empty LightgunHID.ini)"
     if ($prev) {
         $old = Read-Manifest $prev.Path
         $diff = Changed-Since $old
