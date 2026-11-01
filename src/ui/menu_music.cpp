@@ -11,7 +11,21 @@
 
 namespace {
 
-bool mci(const std::wstring& command) { return mciSendStringW(command.c_str(), nullptr, 0, nullptr) == 0; }
+MCIERROR g_last_error = 0;
+bool mci(const std::wstring& command) {
+    g_last_error = mciSendStringW(command.c_str(), nullptr, 0, nullptr);
+    return g_last_error == 0;
+}
+
+// The file's full path with backslashes: MCI does not take every relative or
+// forward-slash path
+std::wstring full_path(const wchar_t* path) {
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetFullPathNameW(path, MAX_PATH, buf, nullptr);
+    std::wstring p = n > 0 && n < MAX_PATH ? std::wstring(buf, n) : std::wstring(path);
+    std::replace(p.begin(), p.end(), L'/', L'\\');
+    return p;
+}
 
 }  // namespace
 
@@ -19,12 +33,15 @@ bool MenuMusic::open() {
     for (const wchar_t* path : {L"third_party/menu/music.mp3", L"third_party/menu/music.wav"}) {
         if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) continue;
         // mpegvideo plays MP3 and WAV alike and can loop ("repeat")
-        if (mci(L"open \"" + std::wstring(path) + L"\" type mpegvideo alias lw_menu_music")) {
+        std::wstring full = full_path(path);
+        if (mci(L"open \"" + full + L"\" type mpegvideo alias lw_menu_music")) {
             printf("[menu] music %ls\n", path);
             open_ = true;
             return true;
         }
-        fprintf(stderr, "[menu] could not open the music %ls\n", path);
+        wchar_t why[256] = L"";
+        mciGetErrorStringW(g_last_error, why, 256);
+        fprintf(stderr, "[menu] could not open the music %ls: %ls\n", full.c_str(), why);
     }
     return false;
 }
