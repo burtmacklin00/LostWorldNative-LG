@@ -8,8 +8,8 @@
 //   2 - Display - ... copies 16x9\ or 4x3\display.ini to display.ini and sets
 //                    Settings > WIDESCREEN (save\settings.ini: aspect)
 //   2 - Crosshairs - ... sets crosshair
-//   Graphics - ...   sets the graphics settings of that level
-//   Text - ...       copies textures\text_jurassic or text_original into textures\text
+//   3 - Graphics - ... sets the graphics settings of that level
+//   4 - Text - ...   copies textures\text_jurassic or text_original into textures\text
 // save\settings.ini keeps every other line as it was; a key that is not there is added.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -50,26 +50,26 @@ const std::vector<Preset>& presets() {
         {L"2 - Display - 16x9", {{"aspect", "16:9"}}, {{L"16x9\\display.ini", L"display.ini"}}},
         {L"2 - Crosshairs - On", {{"crosshair", "1"}}, {}},
         {L"2 - Crosshairs - Off", {{"crosshair", "0"}}, {}},
-        {L"Graphics - Low",
+        {L"3 - Graphics - Low",
          graphics("50", "1", "0", "original", "none", "off", "0", "0", "0", "0", "0", "original", "0", "off", "0", "0",
                   "0", "0", "0", "off", "original", "0"),
          {}},
-        {L"Graphics - Medium",
+        {L"3 - Graphics - Medium",
          graphics("75", "1", "1", "smooth", "msaa", "off", "0", "0", "1", "0", "1", "original", "1", "low", "1", "1", "1",
                   "1", "1", "light", "modern", "1"),
          {}},
-        {L"Graphics - High",
+        {L"3 - Graphics - High",
          graphics("100", "0", "1", "smooth", "msaa", "off", "1", "1", "1", "1", "1", "procedural", "1", "medium", "1", "1",
                   "1", "1", "1", "heavy", "modern", "1"),
          {}},
-        {L"Graphics - Ultra",
+        {L"3 - Graphics - Ultra",
          graphics("100", "0", "1", "smooth", "msaa", "ao", "1", "1", "1", "1", "1", "procedural", "1", "high", "1", "1",
                   "1", "1", "1", "heavy", "modern", "1"),
          {}},
-        {L"Text - Jurassic Park", {},
+        {L"4 - Text - Jurassic Park", {},
          {{L"textures\\text_jurassic\\atlas.png", L"textures\\text\\atlas.png"},
           {L"textures\\text_jurassic\\glyphs.txt", L"textures\\text\\glyphs.txt"}}},
-        {L"Text - Original", {},
+        {L"4 - Text - Original", {},
          {{L"textures\\text_original\\atlas.png", L"textures\\text\\atlas.png"},
           {L"textures\\text_original\\glyphs.txt", L"textures\\text\\glyphs.txt"}}},
     };
@@ -144,7 +144,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     for (const Preset& p : presets())
         if (_wcsicmp(p.name, name.c_str()) == 0) preset = &p;
     if (!preset) {
-        fail(L"\"" + name + L".exe\" is not one of the quick settings (2 - Display, 2 - Crosshairs, Graphics, Text): "
+        fail(L"\"" + name + L".exe\" is not one of the quick settings (2 - Display, 2 - Crosshairs, 3 - Graphics, 4 - Text): "
              L"keep these programs' names as they came.");
         return 1;
     }

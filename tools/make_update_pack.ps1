@@ -140,7 +140,7 @@ function Make-Pack($name, $title, $list, $removed) {
         'Your settings, records, guns (LightgunHID.ini), display.ini, the ROM data',
         'and your choice of in-game lettering are never in an update: they are kept.',
         'If this update lists files in textures\text_jurassic or textures\text_original,',
-        'run your Text setting again (Text - Jurassic Park.exe or Text - Original.exe).',
+        'run your Text setting again (4 - Text - Jurassic Park.exe or 4 - Text - Original.exe).',
         'This READ ME can be deleted afterwards.',
         '',
         "FILES IN THIS UPDATE ($($list.Count))"

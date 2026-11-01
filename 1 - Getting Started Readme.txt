@@ -112,13 +112,13 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  5. QUICK SETTINGS (close the game first)
 ---------------------------------------------------------------------
 
-   Graphics - Low.exe ...... Lightest: laptops, older or built-in graphics
-   Graphics - Medium.exe ... Entry-level cards (GTX 1060, RX 580)
-   Graphics - High.exe ..... Mid-range cards (RTX 3060, RX 6600)
-   Graphics - Ultra.exe .... Everything on, with ray tracing (the default)
+   3 - Graphics - Low.exe .. Lightest: laptops, older or built-in graphics
+   3 - Graphics - Medium.exe  Entry-level cards (GTX 1060, RX 580)
+   3 - Graphics - High.exe . Mid-range cards (RTX 3060, RX 6600)
+   3 - Graphics - Ultra.exe  Everything on, with ray tracing (the default)
    Each step up turns on more; slow on a PC? Go one step down.
    2 - Crosshairs - On.exe / 2 - Crosshairs - Off.exe
-   Text - Jurassic Park.exe / Text - Original.exe
+   4 - Text - Jurassic Park.exe / 4 - Text - Original.exe
       The game's captions (FREE PLAY, INSERT COIN, PUSH 1P / 2P START,
       CONTINUE, the boss and stage names...) in the Jurassic Park
       font, or the arcade's original lettering. Numbers keep their

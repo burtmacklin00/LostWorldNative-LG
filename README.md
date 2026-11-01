@@ -50,8 +50,8 @@
   `-Full` makes a complete one; `-Baseline` records the current files as released without a pack.
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
-  `Graphics - Low.exe`, `Graphics - Medium.exe`, `Graphics - High.exe`, `Graphics - Ultra.exe`,
-  `2 - Crosshairs - On.exe`, `2 - Crosshairs - Off.exe`, `Text - Jurassic Park.exe`, `Text - Original.exe`
+  `3 - Graphics - Low.exe`, `3 - Graphics - Medium.exe`, `3 - Graphics - High.exe`, `3 - Graphics - Ultra.exe`,
+  `2 - Crosshairs - On.exe`, `2 - Crosshairs - Off.exe`, `4 - Text - Jurassic Park.exe`, `4 - Text - Original.exe`
   (the game's captions in the Jurassic Park font, made with `tools/make_text_atlas.py --jurassic`).
 - **Widescreen aim** (from the original project): in 16:9 or 21:9 the guns aim and shoot over the
   whole picture, side areas too; pointing away from the screen still reloads. In 4:3 (with the
