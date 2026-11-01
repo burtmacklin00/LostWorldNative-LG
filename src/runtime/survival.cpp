@@ -1168,6 +1168,12 @@ struct Survival : Run {
         uint32_t h = script::find(ram_word, id);   // its header in the script
         if (h == script::NOT_FOUND) return false;
         if (rd8(STAGE) != stage || int(rd32(ZONE) & 15) != zone) return false;
+        // Kept while player 2 was playing in the arcade game: they would start
+        // in it too. Not used (made again by the way there, player 1 alone)
+        if (playing(1)) {
+            printf("[survival] the kept arena has player 2 in it: made again\n");
+            return false;
+        }
         encounter = id;
         enemies.clear(), looks.clear(), setup.clear();
         if (!take_over(h)) return false;
@@ -1374,7 +1380,8 @@ static void arcade_arena(int id) {
         int lives = std::max(g_arcade_lives, int(rd32(PLAYER_LIFE)));
         unlock(stage, zone, lives, true);
         std::string path = arena_state_path(stage, zone);
-        if (g_arcade_saving.empty() && !game_state_valid(path)) {
+        uint8_t p2 = rd8(SLOT_STATE + 0x10);   // player 2 in the game: not a state for survival (they would start in it)
+        if (g_arcade_saving.empty() && !game_state_valid(path) && p2 != 1 && p2 != 2) {
             CreateDirectoryA("save/survival", nullptr);
             game_state_save(path + ".tmp");
             g_arcade_saving = path;
