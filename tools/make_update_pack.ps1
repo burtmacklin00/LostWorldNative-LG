@@ -178,14 +178,14 @@ if ($Release) {
     # The kept arenas and boss fights (made by this build: start each once first)
     $kept = 0
     # (and the in-game lettering in use, textures\text, which updates leave alone: a new copy needs one)
-    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*', 'display.ini')) {
+    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*', 'display.ini', 'LightgunHID.ini')) {
         Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
             $all.Add($_.FullName.Substring($root.Length + 1))
             $kept++
         }
     }
     Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete and ready to play (with the game data)" $all @() | Out-Null
-    Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini)"
+    Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini, LightgunHID.ini)"
     if ($prev) {
         $old = Read-Manifest $prev.Path
         $diff = Changed-Since $old
