@@ -48,6 +48,10 @@ echo [5/5] Building
 "%CMAKE%" --build build\cmake || goto fail
 "%CTEST%" --test-dir build\cmake --output-on-failure || goto fail
 copy /y build\cmake\LostWorld.exe LostWorld.exe >nul
+rem The quick settings: one silent program under each setting's name (the .bat
+rem files they replace flashed a console window)
+for %%n in ("2 - Display - 4x3" "2 - Display - 16x9" "2 - Crosshairs - On" "2 - Crosshairs - Off" "Graphics - Low" "Graphics - Medium" "Graphics - High" "Graphics - Ultra" "Text - Jurassic Park" "Text - Original") do copy /y build\cmake\LostWorldPresets.exe "%%~n.exe" >nul
+for %%n in ("Display - 4x3" "Display - 16x9" "Crosshairs - On" "Crosshairs - Off" "Graphics - Low" "Graphics - Medium" "Graphics - High" "Graphics - Ultra" "Text - Jurassic Park" "Text - Original") do if exist "%%~n.bat" del /q "%%~n.bat"
 rem NVIDIA DLSS runtime (official signed DLL) for --aa dlaa
 if exist third_party\ngx\bin\nvngx_dlss.dll copy /y third_party\ngx\bin\nvngx_dlss.dll nvngx_dlss.dll >nul
 echo.

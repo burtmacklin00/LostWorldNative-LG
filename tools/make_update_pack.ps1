@@ -22,7 +22,7 @@
 #
 # Never included, so an update never overwrites them: the ROM data, save
 # (settings, records), out, LightgunHID.ini, display.ini and textures\text
-# (the lettering picked with the Text bats), and the Debug bats (kept in the
+# (the lettering picked with the Text settings), and the Debug bats (kept in the
 # build folder only).
 param([switch]$Full, [switch]$Baseline, [string]$Release)
 $ErrorActionPreference = 'Stop'
@@ -42,10 +42,11 @@ $buildFiles = @('.gitattributes', '.gitignore', 'build.bat', 'CMakeLists.txt', '
                 'setup-and-build.ps1', 'update.bat', 'update.bat.new', 'Make Update Pack.bat', 'Make Release.bat',
                 'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png',
                 '1 - Light Gun Setup.exe')   # (the game has its own LIGHT GUN SETUP now)
-$buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp')
+$buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp',
+                   'Display - *.bat', 'Crosshairs - *.bat', 'Graphics - *.bat', 'Text - *.bat')   # (now .exe)
 # - what is the player's own (kept by every update): their guns, the display
-#   picked with the Display bats, the settings and records, the lettering
-#   picked with the Text bats, and the ROM data (a full version adds the data,
+#   picked with the Display settings, the settings and records, the lettering
+#   picked with the Text settings, and the ROM data (a full version adds the data,
 #   the kept arenas and boss fights and the lettering; see -Release)
 $ownDirs = @('data', 'save', 'textures\text')
 $ownFiles = @('LightgunHID.ini', 'display.ini')
@@ -139,7 +140,7 @@ function Make-Pack($name, $title, $list, $removed) {
         'Your settings, records, guns (LightgunHID.ini), display.ini, the ROM data',
         'and your choice of in-game lettering are never in an update: they are kept.',
         'If this update lists files in textures\text_jurassic or textures\text_original,',
-        'run your Text bat again (Text - Jurassic Park.bat or Text - Original.bat).',
+        'run your Text setting again (Text - Jurassic Park.exe or Text - Original.exe).',
         'This READ ME can be deleted afterwards.',
         '',
         "FILES IN THIS UPDATE ($($list.Count))"

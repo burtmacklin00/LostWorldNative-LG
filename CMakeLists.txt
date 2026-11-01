@@ -187,6 +187,14 @@ endif()
 # reader (with tools/encounters.py's opcode table) and the SCSP's part of the
 # game states.
 # build.bat runs them.
+# The quick settings as silent programs (no console window): one program that
+# build.bat copies under each setting's name (src/presets/presets.cpp)
+add_executable(LostWorldPresets WIN32 src/presets/presets.cpp)
+if(MSVC)
+    target_compile_definitions(LostWorldPresets PRIVATE _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
+    target_compile_options(LostWorldPresets PRIVATE /utf-8)
+endif()
+
 option(LW_TESTS "Build the unit tests" ON)
 if(LW_TESTS)
     enable_testing()

@@ -90,10 +90,10 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  Close the game, then double-click one of these. It applies the next
  time the game starts.
 
-   Display - 4x3.bat .... The arcade's 4:3 picture with the bezel.
+   2 - Display - 4x3.exe .. The arcade's 4:3 picture with the bezel.
                           Shooting the bezel reloads, as on the
                           cabinet; the crosshair stops at the edge.
-   Display - 16x9.bat ... Native widescreen. The guns reach the whole
+   2 - Display - 16x9.exe  Native widescreen. The guns reach the whole
                           width, so enemies in the side areas can be
                           shot; only pointing away from the screen
                           reloads. Each player's RELOAD / CONTINUE
@@ -103,7 +103,7 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  transparent 4:3 opening in the middle). Without it the game uses
  4x3\bezel-default.png. Updates never replace your bezel.png.
 
- The .bat files also set WIDESCREEN (Options > DISPLAY), which can be
+ These also set WIDESCREEN (Options > DISPLAY), which can be
  changed in the game too: 4:3, 16:9 or 21:9 (ultrawide monitors). The
  bezel only shows with the 4:3 picture.
 
@@ -112,13 +112,13 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  5. QUICK SETTINGS (close the game first)
 ---------------------------------------------------------------------
 
-   Graphics - Low.bat ...... Lightest: laptops, older or built-in graphics
-   Graphics - Medium.bat ... Entry-level cards (GTX 1060, RX 580)
-   Graphics - High.bat ..... Mid-range cards (RTX 3060, RX 6600)
-   Graphics - Ultra.bat .... Everything on, with ray tracing (the default)
+   Graphics - Low.exe ...... Lightest: laptops, older or built-in graphics
+   Graphics - Medium.exe ... Entry-level cards (GTX 1060, RX 580)
+   Graphics - High.exe ..... Mid-range cards (RTX 3060, RX 6600)
+   Graphics - Ultra.exe .... Everything on, with ray tracing (the default)
    Each step up turns on more; slow on a PC? Go one step down.
-   Crosshairs - On.bat / Crosshairs - Off.bat
-   Text - Jurassic Park.bat / Text - Original.bat
+   2 - Crosshairs - On.exe / 2 - Crosshairs - Off.exe
+   Text - Jurassic Park.exe / Text - Original.exe
       The game's captions (FREE PLAY, INSERT COIN, PUSH 1P / 2P START,
       CONTINUE, the boss and stage names...) in the Jurassic Park
       font, or the arcade's original lettering. Numbers keep their
@@ -211,8 +211,8 @@ Windows 10 or 11 and a graphics card with up-to-date drivers (Vulkan).
  - Guns swapped or not responding: Options > CONTROLS > LIGHT GUN
    SETUP
    again, and check the guns are plugged in before starting the game.
- - A setting .bat did nothing: the game was open; close it and run
-   the .bat again.
+ - A quick setting did nothing: the game was open; close it and run
+   it again.
  - Aim is off: check your guns' own calibration first (the game uses
    their position as Windows reports it).
  - No recoil: Hook of the Reaper must be running before the game,

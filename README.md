@@ -50,15 +50,15 @@
   `-Full` makes a complete one; `-Baseline` records the current files as released without a pack.
 - **Fullscreen** by default (F11 or Alt+Enter still toggles it).
 - **Quick setting files** (close the game first; they take effect on the next start):
-  `Graphics - Low.bat`, `Graphics - Medium.bat`, `Graphics - High.bat`, `Graphics - Ultra.bat`,
-  `Crosshairs - On.bat`, `Crosshairs - Off.bat`, `Text - Jurassic Park.bat`, `Text - Original.bat`
+  `Graphics - Low.exe`, `Graphics - Medium.exe`, `Graphics - High.exe`, `Graphics - Ultra.exe`,
+  `2 - Crosshairs - On.exe`, `2 - Crosshairs - Off.exe`, `Text - Jurassic Park.exe`, `Text - Original.exe`
   (the game's captions in the Jurassic Park font, made with `tools/make_text_atlas.py --jurassic`).
 - **Widescreen aim** (from the original project): in 16:9 or 21:9 the guns aim and shoot over the
   whole picture, side areas too; pointing away from the screen still reloads. In 4:3 (with the
   bezel) the crosshair stops at the picture's edge, and a shot there reloads as on the cabinet.
 - **Gun-friendly menus**: the menu pointer is player 1's crosshair, and player 2's gun is ignored
   in the menus so the two guns never fight over the pointer.
-- **4:3 with bezel or 16:9**: `Display - 4x3.bat` and `Display - 16x9.bat` set Settings >
+- **4:3 with bezel or 16:9**: `2 - Display - 4x3.exe` and `2 - Display - 16x9.exe` set Settings >
   WIDESCREEN and copy the `display.ini` from the `4x3` or `16x9` folder into the game folder
   (the bezel shows only with the 4:3 picture). The bezel is read straight from `4x3`:
   your own `4x3\bezel.png` if you add one, otherwise `bezel-default.png` (which comes with it);
