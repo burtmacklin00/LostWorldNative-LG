@@ -2218,7 +2218,7 @@ void Frontend::draw_gun_test(bool over_game) {
         text(TITLE, U(48), gun_step_ == 1 ? L"FIRE PLAYER 1'S GUN" : L"FIRE PLAYER 2'S GUN", margin + U(10), y, 0,
              {gun_step_ == 1 ? P1_COLOUR : P2_COLOUR, gun_step_ == 1 ? 0xE0C820u : 0x20B8D8u, INK, U(3)});
         y += U(64);
-        text(BODY, U(23), gun_step_ == 1 ? (setup_first_ ? L"Pull its trigger, wherever it points.  N (or ESC): no light guns (play with the mouse; set them up later in Options > CONTROLS)"
+        text(BODY, U(23), gun_step_ == 1 ? (setup_first_ ? L"Pull its trigger, wherever it points.  N: no light guns (play with the mouse; set them up later in Options > CONTROLS)"
                                                          : L"Pull its trigger, wherever it points.  RELOAD (or N): leave the guns as they were")
                                          : L"Now the other gun.  RELOAD (or N): only one gun",
              margin + U(10), y, 0, {0xD8D1BD, 0xD8D1BD});
