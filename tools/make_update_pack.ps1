@@ -14,7 +14,11 @@
 #                    makes "LostWorld LG v2.0 (full)", every release file, for
 #                    a new copy, and "LostWorld LG v1.0 to v2.0", only what
 #                    differs from the version before, however many test
-#                    updates came in between
+#                    updates came in between. The full one also carries
+#                    the arenas and boss fights kept so far (save\survival,
+#                    save\boss): a new copy starts them at once instead of
+#                    playing its way there first. They hold game data from
+#                    the ROM, like the data folder: for full copies only
 #
 # Never included, so an update never overwrites them: the ROM data, save
 # (settings, records), out, LightgunHID.ini, display.ini and textures\text
@@ -143,7 +147,16 @@ if ($Release) {
     Write-Host "Version $ver"
     $all = New-Object System.Collections.Generic.List[string]
     foreach ($f in ($files | Sort-Object)) { $all.Add($f) }
+    # The kept arenas and boss fights (made by this build: start each once first)
+    $kept = 0
+    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state')) {
+        Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $all.Add($_.FullName.Substring($root.Length + 1))
+            $kept++
+        }
+    }
     Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete (for a new copy: add the data folder or lostwsga.zip)" $all @() | Out-Null
+    Write-Host "  (with $kept kept arena and boss files from save\survival and save\boss)"
     if ($prev) {
         $old = Read-Manifest $prev.Path
         $diff = Changed-Since $old
