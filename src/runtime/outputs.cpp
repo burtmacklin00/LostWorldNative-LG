@@ -287,10 +287,13 @@ void frame(unsigned long long game_frame) {
         // that takes the last life is only the death (P_Life = 0), so the two
         // light effects never collide
         if (playing != g_was_playing[p]) note(p, "in play", g_was_playing[p], playing);
-        // (a new press: the trigger still held from starting the game does not count)
+        // (a new press: the trigger still held from starting the game does not
+        // count; nor a shot before the lives are given, as the arcade game's
+        // course select, which is in play: its bullets are filled when the stage
+        // starts, after it)
         bool pull = g_inputs.p[p].own_trigger || g_inputs.p[p].own_reload;
         if (!playing) g_armed[p] = false;
-        else if (!g_armed[p] && pull && !g_pull_was[p]) {
+        else if (!g_armed[p] && pull && !g_pull_was[p] && lives > 0) {
             g_armed[p] = true;
             note(p, "first shot or reload", 0, 1);
         }
