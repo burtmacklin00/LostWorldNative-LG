@@ -32,36 +32,56 @@ Set-Location $root
 if (-not (Test-Path 'LostWorld.exe')) { Write-Host 'LostWorld.exe is missing: run build.bat first.'; exit 1 }
 
 # ---- What a release has --------------------------------------------------------
-$topFiles = @('LostWorld.exe', 'nvngx_dlss.dll', 'Launch Lost World.ahk', 'Launch Lost World MLGB.ahk', 'LICENSE', 'game poster.webp',
-              '1 - Light Gun Setup.exe', '1 - Getting Started Readme.txt')
-$topPatterns = @('Crosshairs - *.bat', 'Display - *.bat', 'Graphics - *.bat', 'Text - *.bat')
-$folders = @('16x9', '4x3', 'res', 'textures', 'third_party\fonts', 'third_party\menu', 'Hook Of The Reaper')
-# Inside those folders: build-only files and what belongs to the player
-$skip = @('res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png')
-$skipDirs = @('textures\text\', 'res\pad\')   # (res\pad: gamepad button pictures, no gamepads here)
-# third_party\menu: only the pictures and music the menu uses (not backups kept there)
-$menuFiles = @('logo.png', 'background.jpg', 'background.png', 'music.mp3', 'sega.png')
+# Everything in this folder that the game uses, so whatever is added later
+# (features, fonts, music, pictures) goes with it, except:
+# - what only builds or updates it (the code, the build, the tools, the repo)
+$buildDirs = @('.git', '.github', '.vs', 'build', 'docs', 'src', 'tests', 'tools', 'out', 'Update Packs',
+               'third_party\glslang', 'third_party\musashi', 'third_party\ngx', 'third_party\volk',
+               'third_party\vulkan-headers', 'res\pad')   # (res\pad: gamepad button pictures, no gamepads here)
+$buildFiles = @('.gitattributes', '.gitignore', 'build.bat', 'CMakeLists.txt', 'README.md', 'setup-and-build.bat',
+                'setup-and-build.ps1', 'update.bat', 'update.bat.new', 'Make Update Pack.bat', 'Make Release.bat',
+                'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png')
+$buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp')
+# - what is the player's own (kept by every update): their guns, the display
+#   picked with the Display bats, the settings and records, the lettering
+#   picked with the Text bats, and the ROM data (a full version adds the data,
+#   the kept arenas and boss fights and the lettering; see -Release)
+$ownDirs = @('data', 'save', 'textures\text')
+$ownFiles = @('LightgunHID.ini', 'display.ini')
+# - at the top, only files of the game's kinds (not pictures or archives left
+#   lying here); the clear logo is the exception
+$topKinds = @('.exe', '.dll', '.ahk', '.bat', '.txt', '.webp', '.ini', '')
+# - third_party\menu: only the pictures and music the menu uses (not backups kept there)
+$menuFiles = @('logo.png', 'background.jpg', 'background.png', 'music.mp3', 'music.wav', 'sega.png')
 
+function Under($rel, $dirs) {
+    foreach ($d in $dirs) { if ($rel.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    return $false
+}
 $files = New-Object System.Collections.Generic.List[string]
-foreach ($f in $topFiles) { if (Test-Path -LiteralPath $f -PathType Leaf) { $files.Add($f) } }
+# (the folders left out at the top are not even looked into: build and .git hold many thousands)
+$items = @(Get-ChildItem -LiteralPath $root -File -Force) + @(Get-ChildItem -LiteralPath $root -Directory -Force |
+    Where-Object { $buildDirs -notcontains $_.Name -and $ownDirs -notcontains $_.Name } |
+    ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -File -Recurse -Force })
+$items | ForEach-Object {
+    $rel = $_.FullName.Substring($root.Length + 1)
+    $key = $rel -replace '/', '\'
+    if (Under $key $buildDirs) { return }
+    if (Under $key $ownDirs) { return }
+    if ($buildFiles -contains $key -or $ownFiles -contains $key) { return }
+    foreach ($p in $buildPatterns) { if ($_.Name -like $p) { return } }
+    if ($key -notmatch '\\') {   # at the top
+        if ($topKinds -notcontains $_.Extension.ToLower() -and $_.Name -notlike '*Clear Logo*') { return }
+    }
+    if ((Under $key @('third_party\menu')) -and $menuFiles -notcontains $_.Name) { return }
+    $files.Add($rel)
+}
 # A release has its own readme: 'Getting Started - Release Copy.txt' here (kept
 # out of the repo) is shipped as its '1 - Getting Started Readme.txt'
 $from = @{}
 $releaseReadme = 'Getting Started - Release Copy.txt'
 if (Test-Path -LiteralPath $releaseReadme -PathType Leaf) { $from['1 - Getting Started Readme.txt'] = $releaseReadme }
 function Source($f) { if ($from.ContainsKey($f)) { $from[$f] } else { $f } }
-foreach ($p in $topPatterns) { Get-ChildItem -File -Filter $p | ForEach-Object { $files.Add($_.Name) } }
-foreach ($d in $folders) {
-    if (-not (Test-Path -LiteralPath $d)) { continue }
-    Get-ChildItem -LiteralPath $d -File -Recurse | ForEach-Object {
-        $rel = $_.FullName.Substring($root.Length + 1)
-        $bad = $skip -contains $rel
-        foreach ($s in $skipDirs) { if ($rel.StartsWith($s, [StringComparison]::OrdinalIgnoreCase)) { $bad = $true } }
-        if ($rel.StartsWith('third_party\menu\', [StringComparison]::OrdinalIgnoreCase) -and
-            $menuFiles -notcontains $_.Name) { $bad = $true }
-        if (-not $bad) { $files.Add($rel) }
-    }
-}
 
 # ---- The files now, and what was released -------------------------------------------
 $packs = Join-Path $root 'Update Packs'
@@ -158,14 +178,14 @@ if ($Release) {
     # The kept arenas and boss fights (made by this build: start each once first)
     $kept = 0
     # (and the in-game lettering in use, textures\text, which updates leave alone: a new copy needs one)
-    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*')) {
+    foreach ($pattern in @('save\survival\*.state', 'save\survival\unlocked.ini', 'save\boss\*.state', 'data\*.bin', 'textures\text\*', 'display.ini')) {
         Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
             $all.Add($_.FullName.Substring($root.Length + 1))
             $kept++
         }
     }
     Make-Pack "LostWorld LG v$ver (full)" "version $ver, complete and ready to play (with the game data)" $all @() | Out-Null
-    Write-Host "  (with $kept files of game data, kept arenas and boss fights: data, save\survival, save\boss)"
+    Write-Host "  (with $kept of the player's files: data, kept arenas and boss fights, lettering, display.ini)"
     if ($prev) {
         $old = Read-Manifest $prev.Path
         $diff = Changed-Since $old
