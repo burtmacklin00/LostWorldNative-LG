@@ -31,19 +31,17 @@ struct Preset {
     std::vector<std::pair<const wchar_t*, const wchar_t*>> copies;   // from, to (beside the program)
 };
 
-// The graphics levels: each step up turns on more (as the .bat files had them)
-Keys graphics(const char* res, const char* half, const char* fx, const char* motion, const char* aa, const char* rt,
-              const char* ao, const char* shadows, const char* sun, const char* shafts, const char* soft, const char* sky,
-              const char* detail, const char* bloom, const char* hdr, const char* rim, const char* sharpen,
-              const char* haze, const char* lightning, const char* rain, const char* torch, const char* msaa,
-              const char* aniso, const char* filter_2d) {
-    return {{"resolution_3d", res}, {"half_rate", half},   {"vsync", "1"},          {"frame_cap", "0"},
-            {"menu_effects", fx},   {"motion", motion},    {"aa", aa},              {"ray_tracing", rt},
-            {"ao", ao},             {"shadows", shadows},  {"sun", sun},            {"light_shafts", shafts},
-            {"soft_particles", soft}, {"sky", sky},        {"surface_detail", detail}, {"bloom", bloom},
-            {"hdr", hdr},           {"rim_light", rim},    {"sharpen", sharpen},    {"haze", haze},
-            {"lightning", lightning}, {"rain", rain},      {"flashlight", torch},
-            {"msaa", msaa},         {"anisotropic", aniso}, {"filter_2d", filter_2d}};
+// The graphics levels: exactly what the game's own Options > DISPLAY > QUALITY
+// sets for LOW / MEDIUM / HIGH / ULTRA (QUALITY_LEVELS in
+// src/ui/frontend_settings.cpp), so the menu shows that level afterwards. The
+// other options (weather, haze, flashlight...) are left as they are, as QUALITY
+// leaves them
+Keys graphics(const char* scale, const char* half, const char* rt, const char* on, const char* bloom,
+              const char* aa, const char* msaa, const char* aniso, const char* smooth) {
+    return {{"resolution_3d", scale}, {"half_rate", half},  {"ray_tracing", rt},     {"ao", on},
+            {"shadows", on},          {"light_shafts", on}, {"soft_particles", "1"}, {"sky", *on == '1' ? "procedural" : "original"},
+            {"surface_detail", on},   {"bloom", bloom},     {"aa", aa},              {"msaa", msaa},
+            {"anisotropic", aniso},   {"filter_2d", smooth}};
 }
 
 const std::vector<Preset>& presets() {
@@ -53,20 +51,16 @@ const std::vector<Preset>& presets() {
         {L"2 - Crosshairs - On", {{"crosshair", "1"}}, {}},
         {L"2 - Crosshairs - Off", {{"crosshair", "0"}}, {}},
         {L"3 - Graphics - Low",
-         graphics("50", "1", "0", "original", "none", "off", "0", "0", "0", "0", "0", "original", "0", "off", "0", "0",
-                  "0", "0", "0", "off", "original", "2", "0", "pixels"),
+         graphics("75", "1", "off", "0", "low", "none", "2", "2", "pixels"),
          {}},
         {L"3 - Graphics - Medium",
-         graphics("75", "1", "1", "smooth", "msaa", "off", "0", "0", "1", "0", "1", "original", "1", "low", "1", "1", "1",
-                  "1", "1", "light", "modern", "2", "4", "smooth"),
+         graphics("100", "1", "off", "1", "low", "msaa", "2", "4", "smooth"),
          {}},
         {L"3 - Graphics - High",
-         graphics("100", "0", "1", "smooth", "msaa", "off", "1", "1", "1", "1", "1", "procedural", "1", "medium", "1", "1",
-                  "1", "1", "1", "heavy", "modern", "4", "8", "smooth"),
+         graphics("100", "0", "shadows", "1", "medium", "msaa", "4", "8", "smooth"),
          {}},
         {L"3 - Graphics - Ultra",
-         graphics("100", "0", "1", "smooth", "msaa", "ao", "1", "1", "1", "1", "1", "procedural", "1", "high", "1", "1",
-                  "1", "1", "1", "heavy", "modern", "4", "8", "smooth"),
+         graphics("100", "0", "ao", "1", "medium", "msaa", "4", "8", "smooth"),
          {}},
         {L"4 - Text - Jurassic Park", {},
          {{L"textures\\text_jurassic\\atlas.png", L"textures\\text\\atlas.png"},
