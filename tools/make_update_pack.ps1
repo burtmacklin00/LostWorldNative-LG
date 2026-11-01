@@ -134,6 +134,8 @@ function Make-Pack($name, $title, $list, $removed) {
             '  2. Start the game: the first start finds your light guns (LIGHT GUN SETUP)',
             '     and picks the graphics for your PC. 1 - Getting Started Readme.txt',
             '     has the rest.',
+            '     Start the game once BEFORE running any "3 - Graphics" program: a',
+            '     Graphics program run first picks the graphics instead of the game.',
             '',
             'TO UPDATE A COPY YOU ALREADY HAVE, use the update pack ("... to ...")',
             'instead: this one would replace your settings, guns and display.ini.',
