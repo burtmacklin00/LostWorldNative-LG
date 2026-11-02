@@ -13,7 +13,8 @@ for %%d in (include lib bin) do if not exist %DST%\%%d mkdir %DST%\%%d
 for %%h in (nvsdk_ngx.h nvsdk_ngx_defs.h nvsdk_ngx_defs_vk.h nvsdk_ngx_helpers.h nvsdk_ngx_helpers_vk.h nvsdk_ngx_loader.h nvsdk_ngx_params.h nvsdk_ngx_vk.h) do (
     curl -fsSL -o %DST%\include\%%h %URL%/include/%%h || goto :fail
 )
-curl -fsSL -o %DST%\lib\nvsdk_ngx_d.lib %URL%/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib || goto :fail
+rem (_s: for the Visual C++ runtime built into the game, /MT)
+curl -fsSL -o %DST%\lib\nvsdk_ngx_s.lib %URL%/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib || goto :fail
 echo nvngx_dlss.dll is about 60 MB:
 curl -fL --progress-bar -o %DST%\bin\nvngx_dlss.dll %URL%/lib/Windows_x86_64/rel/nvngx_dlss.dll || goto :fail
 curl -fsSL -o %DST%\LICENSE.txt %URL%/LICENSE.txt || goto :fail

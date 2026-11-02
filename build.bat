@@ -21,7 +21,10 @@ echo [2/5] Recompiling the PowerPC code
 python tools\recomp.py data\crom.bin build\gen || goto fail
 rem NVIDIA DLSS SDK (not in the repository): fetched from NVIDIA's GitHub the first
 rem time. Needed to build on any GPU; DLAA itself only runs on NVIDIA RTX
-if not exist third_party\ngx\bin\nvngx_dlss.dll (
+set "NEED_DLSS="
+if not exist third_party\ngx\bin\nvngx_dlss.dll set "NEED_DLSS=1"
+if not exist third_party\ngx\lib\nvsdk_ngx_s.lib set "NEED_DLSS=1"
+if defined NEED_DLSS (
     echo [3/5] Downloading the NVIDIA DLSS SDK ^(needed to build on any GPU; DLAA is optional^)
     call tools\get_dlss.bat || goto fail
 )

@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
+# The Visual C++ runtime built into the programs (/MT), every target and SDL3 too:
+# a PC without the "Visual C++ Redistributable" (or with an old one) runs them as is
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 project(LostWorldNative C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -174,7 +177,7 @@ if(MSVC)
 endif()
 target_compile_definitions(LostWorld PRIVATE VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR)
 target_link_libraries(LostWorld PRIVATE SDL3::SDL3-static winmm ws2_32 ole32 windowscodecs gdi32 dwmapi comdlg32 shell32 hid
-    ${CMAKE_SOURCE_DIR}/third_party/ngx/lib/nvsdk_ngx_d.lib)
+    ${CMAKE_SOURCE_DIR}/third_party/ngx/lib/nvsdk_ngx_s.lib)   # (_s: the DLSS SDK library for /MT)
 
 if(MSVC)
     # /bigobj: the generated files contain many functions. /W4 on our C++ (the
