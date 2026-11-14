@@ -1079,6 +1079,10 @@ bool game_state_has_home() {
     std::lock_guard<std::mutex> lock(g_state_mutex);
     return g_home != nullptr;
 }
+static bool game_state_pending() {   // a state still to be put back (boss mode, behind the menu)
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    return g_state_op != 0;
+}
 int game_state_result() { return g_state_result; }
 bool game_state_valid(const std::string& path) {   // a state file this build can read
     FILE* f = fopen(path.c_str(), "rb");
@@ -1260,8 +1264,10 @@ void rt_event(Ctx& c) {
             video_snapshot();
             if (!g_logo_up && ((g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000)) g_logo_up = true;
             // Survival mode: on to the chosen stage at full speed, behind its loading screen
+            // Boss mode: on to the fight's state, behind the menu (app.cpp, update_boss_mode)
             bool boot_done = survival_enabled() ? !survival_owns_inputs() || g_frame > 200000   // (survival gives up first)
-                                                : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
+                             : g_logo_up && game_state_pending() ? false
+                                                 : (g_frame % 4 == 0 && boot_logo_up()) || g_frame > 3000;
             // The arcade's own FREE PLAY setting (free_play.h), from the SEGA
             // logo on: the boot is over then, before any menu or mode can start
             static bool boot_over = false;
