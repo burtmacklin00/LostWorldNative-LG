@@ -890,6 +890,7 @@ struct App {
     double boss_over_at = 0;   // when its stage ended or the game was over
     bool boss_p2_played = false;   // player 2 joined this fight
     double boss_p2_idle_at = 0;    // since when player 2 has not been playing (CONTINUE screen)
+    int boss_lives = 0;        // the players' lives, last seen while one was in
 
     // Survival mode screens (loading, start, wave counter, results)
     SurvivalUi survival_ui;
@@ -1841,7 +1842,18 @@ void App::update_boss_mode() {
     if (boss_loading) outputs::quiet(3);   // no feedback until the fight is on
     if (boss_loading && game_state_result() != 0) {
         boss_loading = false;
-        if (game_state_result() > 0) stats_boss_begin(boss_fight);
+        if (game_state_result() > 0) {
+            // The boss states put the boss's stage first in the run, over
+            // stage 1, and left the rest of the list as it was (0,1,2,3,4):
+            // after the Deinosuchus came stage 2 again. The stages after it
+            // follow on from it instead (2,3,4,0 for stage 2), so its stage
+            // ends when the boss is down (states made before this included)
+            int stage = BOSSES[boss_fight].stage_index;
+            int index = int32_t(rd32(0x1C2B10));   // the run's stage list (0x1C2AFC) and position
+            for (int k = 1; index >= 0 && index + k < 5; k++) wr32(0x1C2AFC + 4 * (index + k), uint32_t((stage + k) % 5));
+            boss_lives = rd8(0x1A3723);
+            stats_boss_begin(boss_fight);
+        }
         if (game_state_result() < 0) {
             printf("[boss] could not start the fight\n");
             boss_fight = -1;
@@ -1852,7 +1864,11 @@ void App::update_boss_mode() {
     }
     // The fight is over once its stage ends (the boss is down) or the
     // game is (no credits left): a moment later, the main menu, with
-    // the arcade game as it was waiting behind it
+    // the arcade game as it was waiting behind it. Stage 5 is the last:
+    // the game ends after it (the ending, TOTAL SCORE) with the stage
+    // unchanged, and the player goes out with lives left, as when a whole
+    // game is finished (stats.cpp, end_game); out with none, the continue
+    // ran out
     if (boss_fight >= 0 && !boss_loading && !frontend.active()) {
         // Player states (docs/game_ram.md): 1 / 2 playing, 0 CONTINUE,
         // 3 once the continue has run out. Player 2 can join the fight;
@@ -1864,11 +1880,19 @@ void App::update_boss_mode() {
         if (p2_playing) boss_p2_played = true, boss_p2_idle_at = 0;
         else if (boss_p2_idle_at == 0) boss_p2_idle_at = t_now;
         bool p2_done = !boss_p2_played || p2 == 3 || t_now - boss_p2_idle_at > 12;
-        bool over = rd8(0x1A623C) != BOSSES[boss_fight].stage_index || (p1 == 3 && !p2_playing && p2_done);
+        // The lives left of whoever is still in (player 1's at 0x1A3723,
+        // player 2's at 0x1A377F): going out with some after stage 5 is the win
+        if (p1 != 3 || p2_playing) {
+            int lives = p1 != 3 ? rd8(0x1A3723) : 0;
+            if (p2_playing) lives = std::max(lives, int(rd8(0x1A377F)));
+            boss_lives = lives;
+        }
+        bool stage_ended = rd8(0x1A623C) != BOSSES[boss_fight].stage_index;
+        bool over = stage_ended || (p1 == 3 && !p2_playing && p2_done);
         if (!over) boss_over_at = 0;
         else if (boss_over_at == 0) {
             boss_over_at = now_seconds();
-            stats_boss_end(rd8(0x1A623C) != BOSSES[boss_fight].stage_index);   // the stage ended: the boss is down
+            stats_boss_end(stage_ended || boss_lives > 0);   // the boss is down
         }
         else if (now_seconds() - boss_over_at > 3) {
             boss_fight = -1;
