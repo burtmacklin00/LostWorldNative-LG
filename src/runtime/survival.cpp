@@ -65,7 +65,13 @@ constexpr uint32_t PLAYER_LIFE = 0x1A3720;  // player 1 object (0x1A36C8) + 0x58
 constexpr uint32_t P2_SLOT = 0x1A37A1;      // player 2's slot: 1 / 2 playing, 0 CONTINUE, 3 out
 bool p2_playing() { uint8_t st = rd8(P2_SLOT); return st == 1 || st == 2; }
 constexpr uint32_t PLAYER2_LIFE = 0x1A377C; // player 2 object + 0x58
+constexpr uint32_t PLAYER2_LIFE_COPY = 0x1C1264;
 constexpr uint32_t PLAYER2_SLOT = 0x1A37A1; // byte: 1 / 2 playing, 0 continue, 3 out (INSERT COIN)
+constexpr uint32_t PLAYER2_CONTINUE = 0x1C1234;   // its CONTINUE countdown (0x4B0 at the start)
+// Players in the game: bit 0x01000000 player 1, 0x02000000 player 2 (the
+// hit function fn_000463D4 picks its victim among them, op -14 checks both)
+constexpr uint32_t PLAYERS_IN = 0x7F4;
+constexpr uint32_t PLAYER2_IN = 0x02000000;
 constexpr uint32_t FN_PLAYER_HIT[2] = {0x000463D4, 0x00071460};   // hurt the player: lives - 1
 // Player 1's score, the score its counter shows (fn_0003E800 draws the digits
 // again when the two differ; the game writes -1 there to force it), then the score of each
@@ -1111,11 +1117,16 @@ struct Survival : Run {
         if (!take_over(h)) return false;
         if (int l = unlock_lives(stage + 1, zone, rd8(SETTING_LIFE)); l > 0) wr32(PLAYER_LIFE, uint32_t(l));
         // Survival is for player 1: a state kept while player 2 was in the game
-        // (some were) starts with player 2 out, as a new game does
-        if (rd8(PLAYER2_SLOT) != 3) {
+        // (some were) starts with player 2 out, as a new game does. It is put
+        // on its CONTINUE screen with no time left, so the game itself takes
+        // it out on the first frame (and clears its hearts); the dinosaurs
+        // attack only the players in the game
+        if (rd8(PLAYER2_SLOT) != 3 || (rd32(PLAYERS_IN) & PLAYER2_IN)) {
             printf("[survival] player 2 was in the kept game: out\n");
-            wr8(PLAYER2_SLOT, 3);
+            wr32(PLAYERS_IN, rd32(PLAYERS_IN) & ~PLAYER2_IN);
             wr32(PLAYER2_LIFE, 0);
+            wr32(PLAYER2_LIFE_COPY, 0);
+            if (rd8(PLAYER2_SLOT) != 3) wr8(PLAYER2_SLOT, 0), wr32(PLAYER2_CONTINUE, 1);
         }
         at_arena();
         return true;
