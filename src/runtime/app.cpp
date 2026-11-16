@@ -1726,7 +1726,7 @@ void App::handle_menu_actions() {
             const SurvivalZone& z = SURVIVAL_ZONES[frontend.survival_choice];
             boss_pending = -1;
             random_spawns_set(false);
-            weather_choose(frontend.run_weather());
+            weather_choose(z.indoor ? WEATHER_NONE : frontend.run_weather());   // indoors: the game's own
             if (boss_fight >= 0 || frontend.boss_mode) {   // from boss mode: back to the arcade first
                 boss_fight = -1;
                 frontend.boss_mode = false;
