@@ -1,5 +1,9 @@
 # Rotulo redibujado con tools/backdrops/resultados_stage.txt desde out/2d/captura_8652
 cover
+# Only the Stage 1 Chapter 1 band itself: the other stages' bands differ from it
+# only in their digit cells (368 of 372 the same), so with the default share it
+# covered every stage end with "STAGE 1 / Chapter 1" (as the creator's #119)
+match 100
 rect 0 3 62 6
 b9b23f3a46fd0825
 b9b23f3a46fd0825
