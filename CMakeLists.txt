@@ -4,6 +4,22 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 project(LostWorldNative C CXX)
 
+# The light gun build's version, from the VERSION file (Make Release.bat writes it
+# and rebuilds): shown on the main menu and in LostWorld.exe's properties
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" LG_VERSION LIMIT_COUNT 1)
+string(STRIP "${LG_VERSION}" LG_VERSION)
+if(LG_VERSION STREQUAL "")
+    set(LG_VERSION "dev")
+endif()
+string(REGEX MATCHALL "[0-9]+" LG_PARTS "${LG_VERSION}")
+list(APPEND LG_PARTS 0 0 0 0)
+list(GET LG_PARTS 0 LG_V1)
+list(GET LG_PARTS 1 LG_V2)
+list(GET LG_PARTS 2 LG_V3)
+list(GET LG_PARTS 3 LG_V4)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/VERSION")
+configure_file(src/runtime/lg_version.h.in "${CMAKE_BINARY_DIR}/lg_version/lg_version.h" @ONLY)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -157,6 +173,7 @@ add_executable(LostWorld
 )
 add_dependencies(LostWorld shaders)
 target_include_directories(LostWorld PRIVATE
+    ${CMAKE_BINARY_DIR}/lg_version
     ${SHADER_OUT}
     src/runtime
     src/video

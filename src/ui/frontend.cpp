@@ -1,4 +1,5 @@
 #include "frontend.h"
+#include "lg_version.h"
 
 #include "../runtime/bosses.h"
 #include "../runtime/survival.h"
@@ -1820,6 +1821,8 @@ void Frontend::draw_menu(bool over_game, const std::vector<Item>& list) {
         }
 
     vgrad(0, h - U(120), w, h, 0x000000, 0.0f, 0.85f);
+    if (screen_ == Screen::Main && !over_game)   // the light gun build's version, small in the bottom corner
+        text(BODY, U(17), L"LG v" LG_VERSION_W, w - U(24), h - U(28), 2, {DIM, DIM});
     const wchar_t* back_what = screen_ == Screen::Main ? nullptr : screen_ == Screen::Pause ? L"RESUME" : L"BACK";
     int py = h - U(64), x = U(80);
     if (!over_game) {   // the key help at the bottom right; at the left, the credit to the makers of the game

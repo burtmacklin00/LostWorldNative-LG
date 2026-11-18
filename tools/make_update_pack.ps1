@@ -41,7 +41,7 @@ $buildDirs = @('.git', '.github', '.vs', 'build', 'docs', 'src', 'tests', 'tools
 $buildFiles = @('.gitattributes', '.gitignore', 'build.bat', 'CMakeLists.txt', 'README.md', 'setup-and-build.bat',
                 'setup-and-build.ps1', 'update.bat', 'update.bat.new', 'Make Update Pack.bat', 'Make Release.bat',
                 'Getting Started - Release Copy.txt', 'res\lostworld.rc', 'res\lostworld.ico', 'res\logo.png',
-                '1 - Light Gun Setup.exe', 'Release Settings.ini')   # (the game has its own LIGHT GUN SETUP now)
+                '1 - Light Gun Setup.exe', 'Release Settings.ini', 'VERSION')   # (the game has its own LIGHT GUN SETUP now)
 $buildPatterns = @('Debug - *.bat', 'Cleanup - *.bat', '*.log', '*.tmp',
                    'Display - *.bat', 'Crosshairs - *.bat', 'Graphics - *.bat', 'Text - *.bat')   # (now .exe)
 # - what is the player's own (kept by every update): their guns, the display
